@@ -6,6 +6,10 @@ cpSync(new URL('../src/network/public-address.js', import.meta.url), new URL('..
 mkdirSync(new URL('../dist/src/harness/', import.meta.url), { recursive: true });
 cpSync(new URL('../../session-adapter/native-tool-result.js', import.meta.url), new URL('../dist/src/harness/native-tool-result.js', import.meta.url));
 
+mkdirSync(new URL('../dist/src/events/', import.meta.url), { recursive: true });
+cpSync(new URL('../src/events/native-file-search-text.js', import.meta.url), new URL('../dist/src/events/native-file-search-text.js', import.meta.url));
+cpSync(new URL('../src/events/native-file-search-text.d.ts', import.meta.url), new URL('../dist/src/events/native-file-search-text.d.ts', import.meta.url));
+
 mkdirSync(new URL('../dist/src/db/', import.meta.url), { recursive: true });
 cpSync(new URL('../src/db/schema.sql', import.meta.url), new URL('../dist/src/db/schema.sql', import.meta.url));
 mkdirSync(new URL('../dist/contracts/', import.meta.url), { recursive: true });

@@ -7,6 +7,9 @@ import type {WorkbenchService} from '../workbench/service.ts';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {readActivityHistory} from './activity-history.ts';
+import {publicNativeFileSearch} from '../harness/native-tool-result.js';
+import {nativeFileSearchRows} from './native-file-search-text.js';
+import type {NativeFileSearch} from '../../contracts/types.js';
 import type {ActivityToolResultPage,ActivityToolResultSearchPage,ActivityToolResultMatch,ActivityToolResultFile,ActivityToolFilePage,ActivityToolFileBytes} from '../../contracts/types.js';
 
 const ID=/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
@@ -267,12 +270,34 @@ function readWorkspaceText(db:DatabaseSync,owner:string,runId:string,callId:stri
 function activityCall(activity:Record<string,unknown>){
  const detail=object(activity.detail),name=detail?.tool_name,callId=activity.tool_call_id,runId=activity.run_id;
  if(typeof runId!=='string'||!ID.test(runId)||typeof callId!=='string'||!ID.test(callId)
-  ||typeof name!=='string'||(name!=='jot_workspace'&&!/^jot_mcp_[a-z0-9_]{1,50}$/.test(name)))throw Error('activity_tool_result_not_found');
+  ||typeof name!=='string'||(!['jot_workspace','glob','grep'].includes(name)&&!/^jot_mcp_[a-z0-9_]{1,50}$/.test(name)))throw Error('activity_tool_result_not_found');
  return {name,runId,callId};
 }
 function activityText(db:DatabaseSync,owner:string,activity:Record<string,unknown>,reader?:WorkspaceFileReader){
  const {name,runId,callId}=activityCall(activity);
+ if(name==='glob'||name==='grep')return {name,...nativeSearchText(activity,name,runId,callId)};
  return {name,...(name==='jot_workspace'?readWorkspaceText(db,owner,runId,callId,reader):readMcpText(db,owner,runId,name,callId))};
+}
+
+function nativeSearchText(activity:Record<string,unknown>,name:'glob'|'grep',runId:string,callId:string):TextSource {
+ if(activity.kind!=='search'||activity.status!=='succeeded'||typeof activity.ended_at!=='string')throw Error('activity_tool_result_not_found');
+ if(typeof activity.activity_id!=='string'||!ID.test(activity.activity_id)||typeof activity.started_at!=='string'
+  ||activity.attempt_id!==undefined&&typeof activity.attempt_id!=='string')throw Error('activity_tool_result_source_invalid');
+ const retained=object(object(activity.detail)?.file_search);
+ if(!retained)throw Error('activity_tool_result_not_found');
+ let result:NativeFileSearch;
+ if(retained.shape==='source_limit'&&Object.keys(retained).length===1)result={shape:'source_limit'};
+ else{
+  const selected=publicNativeFileSearch(retained);
+  if(!selected||selected.shape==='source_limit'||selected.shape!==(name==='glob'?'paths':'matches'))throw Error('activity_tool_result_source_invalid');
+  result=selected;
+ }
+ const identity={source:'native',run_id:runId,activity_id:activity.activity_id,tool_call_id:callId,
+  attempt_id:activity.attempt_id??null,started_at:activity.started_at,ended_at:activity.ended_at,tool_name:name,file_search:result};
+ const text=nativeFileSearchRows(result).map(row=>`${row.label}\n${row.value}`).join('\n');
+ if(text.length>MAX_RESULT_TEXT_CHARS)throw Error('activity_tool_result_source_invalid');
+ return {source:'native',operation:name,text,result_sha256:hash(canonicalJson(identity)),has_other_content:false,
+  source_truncated:result.shape==='source_limit'||result.truncated};
 }
 
 function textBoundary(text:string,offset:number){
@@ -308,7 +333,7 @@ export function readActivityToolResult(db:DatabaseSync,owner:string,conversation
  if(expected!==undefined&&expected!==source.result_sha256)throw Error('activity_tool_result_source_changed');
  const {text,file_links,...metadata}=source,textSha=hash(source.text);
  if(expectedText!==undefined&&expectedText!==textSha)throw Error('activity_tool_result_source_changed');
- if(['files.write','files.delete','files.list'].includes(source.operation??'')&&offset>0&&expectedText===undefined)throw Error('invalid_activity_tool_result_query');
+ if((source.source==='native'||['files.write','files.delete','files.list'].includes(source.operation??''))&&offset>0&&expectedText===undefined)throw Error('invalid_activity_tool_result_query');
  if(offset>text.length||offset>0&&/[\uD800-\uDBFF]/.test(text[offset-1]!)&&/[\uDC00-\uDFFF]/.test(text[offset]!))throw Error('invalid_activity_tool_result_query');
  let end=Math.min(offset+PAGE_SIZE,text.length);
  if(end<text.length&&/[\uD800-\uDBFF]/.test(text[end-1]!)&&/[\uDC00-\uDFFF]/.test(text[end]!))end--;
@@ -335,14 +360,14 @@ export function searchActivityToolResults(db:DatabaseSync,owner:string,conversat
   if(newer||activity.kind==='compaction')continue;
   if(!ID.test(String(activity.activity_id))){unavailable++;continue;}
   const name=object(activity.detail)?.tool_name;
-  if(typeof name!=='string'||(name!=='jot_workspace'&&!/^jot_mcp_[a-z0-9_]{1,50}$/.test(name)))continue;
+  if(typeof name!=='string'||(!['jot_workspace','glob','grep'].includes(name)&&!/^jot_mcp_[a-z0-9_]{1,50}$/.test(name)))continue;
   if(typeof activity.ended_at!=='string'||!['succeeded','failed','cancelled','unknown'].includes(String(activity.status))){unavailable++;continue;}
   let source:ReturnType<typeof activityText>;
   try{source=activityText(db,owner,activity,reader);}catch(error){
    if(!(error instanceof Error)||!['activity_tool_result_not_found','activity_tool_result_pending','activity_tool_result_source_invalid'].includes(error.message))throw error;
    unavailable++;continue;
   }
-  if(source.file_diff_state!==undefined&&source.file_diff_state!=='available'||source.operation==='files.list'&&source.source_truncated)unsearched++;
+  if(source.file_diff_state!==undefined&&source.file_diff_state!=='available'||(source.operation==='files.list'||source.source==='native')&&source.source_truncated)unsearched++;
   const match=pattern.exec(source.text);
   if(!match)continue;
   const offset=textBoundary(source.text,Math.max(0,match.index-60));

@@ -150,7 +150,7 @@ export function publicNativeFileSearch(value) {
       }
     }
   }
-  if(count>meta.total)return;
+  if(count>meta.total||!meta.truncated&&count!==meta.total)return;
   // shortcut: larger native presentation/spill sources need the owned paged result path.
   if(Buffer.byteLength(JSON.stringify(meta),'utf8')>524288)return {shape:'source_limit'};
   return paths?{shape:'paths',paths:[...meta.paths],total:meta.total,truncated:meta.truncated}

@@ -133,7 +133,8 @@ function toolActivity(data: Record<string, unknown>, context: ProjectionContext,
   const failed = result?.failed === true
   if(completed&&!failed&&tool.kind==='search'&&['glob','grep'].includes(String(tool.publicDetail?.tool_name))){
     const fileSearch=publicNativeFileSearch(data.meta);
-    if(fileSearch)tool.publicDetail={...(tool.publicDetail??detailFor(tool,context.runId)),file_search:fileSearch};
+    if(fileSearch&&(fileSearch.shape==='source_limit'||fileSearch.shape===(tool.publicDetail?.tool_name==='glob'?'paths':'matches')))
+      tool.publicDetail={...(tool.publicDetail??detailFor(tool,context.runId)),file_search:fileSearch};
   }
   if (completed && tool.kind === 'browse') {
     if (failed) {

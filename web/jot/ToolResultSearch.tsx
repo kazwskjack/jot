@@ -52,9 +52,10 @@ export default function ToolResultSearch({conversationId,runId,asOfSeq:latestSeq
     const pattern=new RegExp(`^(?:${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})$`,'iu');
     for(const hit of page.items){
      if(!hit||typeof hit.run_id!=='string'||!id.test(hit.run_id)||typeof hit.activity_id!=='string'||!id.test(hit.activity_id)||runId!==undefined&&hit.run_id!==runId
-      ||typeof hit.tool_name!=='string'||!(hit.tool_name==='jot_workspace'||/^jot_mcp_[a-z0-9_]{1,50}$/.test(hit.tool_name))
+      ||typeof hit.tool_name!=='string'||!(['jot_workspace','glob','grep'].includes(hit.tool_name)||/^jot_mcp_[a-z0-9_]{1,50}$/.test(hit.tool_name))
       ||typeof hit.title!=='string'||hit.title.length>256||typeof hit.result_sha256!=='string'||!sha.test(hit.result_sha256)
       ||hit.text_sha256!==undefined&&(typeof hit.text_sha256!=='string'||!sha.test(hit.text_sha256))
+      ||['glob','grep'].includes(hit.tool_name)&&hit.text_sha256===undefined
       ||!Number.isSafeInteger(hit.offset_chars)||hit.offset_chars<0||hit.offset_chars>6*1048576
       ||!Number.isSafeInteger(hit.match_offset_chars)||hit.match_offset_chars>6*1048576||hit.match_offset_chars<hit.offset_chars||hit.match_offset_chars-hit.offset_chars>61
       ||typeof hit.match_text!=='string'||!hit.match_text.length||hit.match_text.length>200||!pattern.test(hit.match_text)

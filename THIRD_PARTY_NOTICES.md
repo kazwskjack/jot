@@ -216,3 +216,11 @@ Jot's existing activity expansion/search uses only paths, line numbers, match
 text and native total/truncation fields. This connects the pinned PilotDeck
 `FileListContent.tsx` / Grep/Glob presentation scope to Jot's owned event chain.
 The retained PilotDeck AGPL license and prior tool-renderer attribution apply.
+
+
+Native search result pages reuse the retained public activity projection under
+Jot's original owned conversation read transaction and immutable history cursor.
+The source hash binds that canonical public projection and original step identity.
+A shared portable text formatter keeps activity display, result pagination and
+historical search aligned. It adds no native filesystem invocation or provider
+execution path. Existing native MIT and PilotDeck file-list notices apply.

@@ -26,7 +26,9 @@ export default function ActivityToolResult({conversationId,target}:{conversation
     ||page.tool_name!==target.toolName||page.execution_authorized!==false
     ||(target.toolName==='jot_workspace'
      ?page.source!=='workspace'||!['files.read','web.read','files.write','files.delete','files.list'].includes(page.operation??'')||typeof page.source_truncated!=='boolean'
-     :page.source!=='mcp'||page.operation!==undefined||page.source_truncated!==undefined)
+     :target.toolName==='glob'||target.toolName==='grep'
+      ?page.source!=='native'||page.operation!==target.toolName||typeof page.source_truncated!=='boolean'||page.has_other_content!==false
+      :page.source!=='mcp'||page.operation!==undefined||page.source_truncated!==undefined)
     ||((page.operation==='files.write'||page.operation==='files.delete')? !['available','base_unrecorded','preview_limit','content_unavailable','non_text'].includes(page.file_diff_state??''):page.file_diff_state!==undefined)
     ||typeof page.result_sha256!=='string'||!sha.test(page.result_sha256)||expected!==undefined&&page.result_sha256!==expected
     ||typeof page.text_sha256!=='string'||!sha.test(page.text_sha256)||expectedText!==undefined&&page.text_sha256!==expectedText||page.offset_chars!==offset
@@ -68,7 +70,7 @@ export default function ActivityToolResult({conversationId,target}:{conversation
     {page.file_links.map(file=><button type="button" key={JSON.stringify([file.path,file.version,file.sha256])} title={file.path} aria-label={`${file.path}，版本 ${file.version}`}
      onClick={()=>setSelected({identity,resultSha:page.result_sha256,file})}>{file.path.split('/').at(-1)} · 版本 {file.version}</button>)}
    </div>}
-   {page.source_truncated&&<p role="status">{page.operation==='files.list'?'原文件列表含后续页面或超出显示范围，当前展示已确认的留存部分。':'原工具回执中的正文已截断，当前显示回执保存的全部文本。'}</p>}
+   {page.source_truncated&&<p role="status">{page.source==='native'?'原生公开结果未覆盖全部来源，当前显示已保留内容。':page.operation==='files.list'?'原文件列表含后续页面或超出显示范围，当前展示已确认的留存部分。':'原工具回执中的正文已截断，当前显示回执保存的全部文本。'}</p>}
    {page.total_chars===0&&<p role="status">原结果未包含文本内容。</p>}
    {page.has_other_content&&<p role="status">原结果还包含图片或其他非文本内容。</p>}
    {offset>0&&<button type="button" data-chat-search-ignore onClick={()=>setCursor({identity,offset:0,previous:[],sha:page.result_sha256,textSha:page.text_sha256})}>从正文开头阅读</button>}

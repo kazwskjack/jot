@@ -1,4 +1,5 @@
 import type {Activity,Run} from './types';
+import {nativeFileSearchRows} from '../../packages/gateway/src/events/native-file-search-text.js';
 
 export type ToolActivity=Exclude<Activity,{kind:'compaction'}>;
 export type ActivityRun={status:Run['status'];created_at?:string};
@@ -31,15 +32,7 @@ export function activityDetailRows(activity:ToolActivity):Array<{label:string;va
   case 'search':
    add('搜索词',activity.detail.queries);add('搜索数量',activity.detail.query_count);
    add('提供方',activity.detail.provider);add('来源',activity.detail.source_ids);
-   if(activity.detail.file_search){
-    const result=activity.detail.file_search;
-    if(result.shape==='source_limit')add('原生搜索结果','原公开元数据超过 512 KiB 活动内联范围，当前未展示其路径或命中正文。');
-    else{
-     add('原生结果总数',result.total);add('原生保留范围',result.truncated?'原工具已截断，当前仅展示已保留结果。':'原工具已保留全部结果。');
-     if(result.shape==='paths')add('匹配文件',result.paths);
-     else for(const file of result.files)add(`文件 ${file.path}`,file.matches.map(match=>`${match.lineNumber}: ${match.line}`).join('\n'));
-    }
-   }
+   if(activity.detail.file_search)rows.push(...nativeFileSearchRows(activity.detail.file_search));
    break;
   case 'browse':
    add('网页操作',activity.detail.operation);add('操作编号',activity.detail.operation_id);
