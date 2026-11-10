@@ -1,3 +1,4 @@
+import {readMessageReferenceAttachmentInput} from '../messages/reference-attachment-input.ts';
 import {validateOrdinaryCompletion,type OrdinaryCompletionProof} from './ordinary-completion.ts';
 import {runtimeSessionRefForRun} from './run-session-identity.ts';
 import {pinRunNativeSession} from './run-native-session.ts';
@@ -22,7 +23,15 @@ import type {AttachmentManifest,PinnedAttachmentSnapshot} from '../artifacts/pin
 import {readAcceptedChannelAttachmentInputV2} from '../channels/attachment-input-v2.ts';
 import type {RuntimeReadinessBoundSample,RuntimeReadinessRunScope} from '../events/runtime-readiness-composition.ts';
 
-type WorkerMessageInput={text:string;attachmentIds:string[];ownerId:string;receivedAt:number;attachmentManifest?:AttachmentManifest;attachmentSourceSha256?:string};
+type WorkerMessageInput={
+  text:string;
+  attachmentIds:string[];
+  ownerId:string;
+  receivedAt:number;
+  attachmentManifest?:AttachmentManifest;
+  attachmentSourceSha256?:string;
+  referenceAttachmentInputSha256?:string;
+};
 
 /** Host-only result from the admitted work journal; never a browser/model field. */
 export type TrustedWorkRunWorkspace=Readonly<{kind:'isolated_work';runId:string;originalRunId:string;ownerId:string;conversationId:string;taskId:string;occurrenceId:string;sessionRef:string;cwd:string;objective:string}>;
@@ -238,7 +247,7 @@ export class HarnessWorker {
     this.coordinator.bindSession(lease, runtimeSessionRef);
     let input:WorkerMessageInput,attachments:ResolvedAttachment[]=[],pinnedSnapshot:PinnedAttachmentSnapshot|undefined;
     try{
-      input=goalControl?{text:'',attachmentIds:[],ownerId:goalControl.owner_id,receivedAt:0}:this.messageInput(lease.run_id);
+      input=goalControl?{text:'',attachmentIds:[],ownerId:goalControl.owner_id,receivedAt:0}:this.messageInput(lease.run_id,!originalRecovery);
       if(input.attachmentManifest){
         if(!this.ordinaryInputRecoveryEnabled||!this.runner.recoverInput||this.runner.pinnedInputProtocol!==1||lease.generation>1&&!originalRecovery)throw Error('channel_attachment_input_consumer_unavailable');
         if(!originalRecovery){
@@ -254,15 +263,20 @@ export class HarnessWorker {
       this.coordinator.interruptWithoutRuntime(lease,'CHANNEL_ATTACHMENT_INPUT_UNAVAILABLE');return{run_id:lease.run_id,runtime_status:'attachment_input_unavailable'};
     }
     let message = originalRecovery?'':input.text;
-    if (this.contextStager&&!goalControl&&!originalRecovery) {
-      if(!lease.input_message_id)throw Error('run_input_missing');
-      try {
-        await this.contextStager.stageContext({ taskRequestId: lease.run_id, conversationId: lease.conversation_id,
-          messageId: lease.input_message_id, message, sessionRef: runtimeSessionRef, controllerSessionRef,
-          receivedAt: input.receivedAt });
-      } catch { /* Runtime is an execution ledger, never a conversation admission gate. */ }
+    try{
+      if (this.contextStager&&!goalControl&&!originalRecovery) {
+        if(!lease.input_message_id)throw Error('run_input_missing');
+        try {
+          await this.contextStager.stageContext({ taskRequestId: lease.run_id, conversationId: lease.conversation_id,
+            messageId: lease.input_message_id, message, sessionRef: runtimeSessionRef, controllerSessionRef,
+            receivedAt: input.receivedAt });
+        } catch { /* Runtime is an execution ledger, never a conversation admission gate. */ }
+      }
+      this.coordinator.start(lease);
+    }catch(error){
+      try{await pinnedSnapshot?.dispose();}finally{this.attachmentResolver?.releaseLease(lease.run_id);}
+      throw error;
     }
-    this.coordinator.start(lease);
     const renewal = setInterval(() => this.coordinator.renew(lease, this.leaseMs), Math.max(100, Math.floor(this.leaseMs / 3)));
     renewal.unref();
     let originalAuthority:ReturnType<typeof inspectOrdinaryInputBinding>|undefined;
@@ -427,7 +441,13 @@ export class HarnessWorker {
           if(this.db.prepare('SELECT status FROM ga_runs WHERE id=?').get(lease.run_id)?.status!=='running')throw Error('channel_attachment_input_not_running');
           this.executionGuard?.assertRunActive(lease.run_id);
           assertExecutionLease(this.db,lease.run_id,{owner:lease.owner,generation:lease.generation});
-          if(readAcceptedChannelAttachmentInputV2(this.db,lease.run_id)?.manifest_sha256!==input.attachmentSourceSha256)throw Error('channel_attachment_input_unproven');
+          if(input.referenceAttachmentInputSha256!==undefined){
+            if(readMessageReferenceAttachmentInput(this.db,lease.run_id)?.sourceSha256!==input.referenceAttachmentInputSha256){
+              throw Error('reference_attachment_input_unproven');
+            }
+          }else if(readAcceptedChannelAttachmentInputV2(this.db,lease.run_id)?.manifest_sha256!==input.attachmentSourceSha256){
+            throw Error('channel_attachment_input_unproven');
+          }
         }}:{}),
         ...(conversationPolicy?{conversationPolicy}:{}),
         ...(trustedWorkWorkspace?{requiresWorkWorkspace:true as const,trustedWorkWorkspace}:{}),
@@ -522,7 +542,7 @@ export class HarnessWorker {
 
   private cancelling(runId:string){const row=this.db.prepare('SELECT status FROM ga_runs WHERE id=?').get(runId) as {status:string}|undefined;return row?.status==='cancelling'||row?.status==='cancelled';}
 
-  private messageInput(runId: string): WorkerMessageInput {
+  private messageInput(runId: string,pinReferenceAttachments:boolean): WorkerMessageInput {
     const row = this.db.prepare(`SELECT m.content_json,m.created_at,c.owner_id,r.conversation_id,r.input_message_id,r.continuation_of,r.checkpoint_id FROM ga_runs r
       JOIN ga_messages m ON m.id=r.input_message_id JOIN ga_conversations c ON c.id=r.conversation_id WHERE r.id=?`)
       .get(runId) as { content_json: string; created_at: string; owner_id: string;conversation_id:string;input_message_id:string;continuation_of:string|null;checkpoint_id:string|null } | undefined;
@@ -550,6 +570,9 @@ export class HarnessWorker {
     const receivedAt = Math.floor(Date.parse(row.created_at) / 1000);
     if (!Number.isInteger(receivedAt) || receivedAt <= 0) throw new Error('run_input_created_at_invalid');
     if(checkpointContinuation)return {text:'继续当前已授权任务，从持久 Session 和任务账本的最后确认点恢复。先核对已有回执、文件版本、依赖与剩余预算，再完成未确认的步骤。不要重新发送或重复执行原始请求；结果未知的点击、提交、发送先核对，无法核对则等待人工处理。保持原目标与权限范围。'+taskWaitSupplement(this.db,runId),attachmentIds:[],ownerId:row.owner_id,receivedAt};
-    return { text, attachmentIds, ownerId: row.owner_id, receivedAt,...(pinned?{attachmentManifest:pinned.pinned,attachmentSourceSha256:pinned.manifest_sha256}:{}) };
+    const referenceInput=!pinned&&pinReferenceAttachments?readMessageReferenceAttachmentInput(this.db,runId):undefined;
+    return { text, attachmentIds, ownerId: row.owner_id, receivedAt,
+      ...(pinned?{attachmentManifest:pinned.pinned,attachmentSourceSha256:pinned.manifest_sha256}
+        :referenceInput?{attachmentManifest:referenceInput.manifest,referenceAttachmentInputSha256:referenceInput.sourceSha256}:{}) };
   }
 }
