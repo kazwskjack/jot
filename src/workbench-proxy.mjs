@@ -190,6 +190,7 @@ export function registerWorkbenchProxy(app,config,localCsrf){
    }catch{return reply.code(502).send({error:{code:`${prefix}_UNAVAILABLE`}});}
    finally{clearTimeout(timer);}
   }
+  const officePreviewRead=req.method==='GET'&&['/v1/office-preview/status','/v1/office-preview/candidates'].includes(suffix);
   const allowed=/^\/v1\/(capabilities|plugin-profile|agents|persistent-tasks|teams|workspaces|runs|conversations|interactions|channel-bindings|push|projects|artifacts|uploads)(?:\/|$)/;
   const pushAllowed=(req.method==='GET'&&suffix==='/v1/push/vapid-public-key')
    ||(req.method==='POST'&&suffix==='/v1/push/subscriptions')
@@ -199,23 +200,30 @@ export function registerWorkbenchProxy(app,config,localCsrf){
   if(pluginBundle){
    try{const name=decodeURIComponent(pluginBundle[1]);scopedBundle=name.length<=192&&/^@[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(name)&&encodeURIComponent(name)===pluginBundle[1];}catch{}
   }
-  if(!allowed.test(suffix)||((suffix==='/v1/push'||suffix.startsWith('/v1/push/'))&&!pushAllowed)||/%(?:2e|5c)/i.test(suffix)||/%2f/i.test(suffix)&&!scopedBundle||suffix.includes('\\'))return reply.code(400).send({error:{code:'INVALID_WORKBENCH_PATH'}});
+  if(!(allowed.test(suffix)||officePreviewRead)||((suffix==='/v1/push'||suffix.startsWith('/v1/push/'))&&!pushAllowed)||/%(?:2e|5c)/i.test(suffix)||/%2f/i.test(suffix)&&!scopedBundle||suffix.includes('\\'))return reply.code(400).send({error:{code:'INVALID_WORKBENCH_PATH'}});
   const headers={'x-user-id':config.owner,'x-csrf-token':config.csrf,'origin':`http://${req.headers.host??'localhost'}`,'accept':req.headers.accept??'application/json'};
   if(req.headers['idempotency-key'])headers['idempotency-key']=req.headers['idempotency-key'];
   if(req.headers['last-event-id'])headers['last-event-id']=req.headers['last-event-id'];
    const binary=req.method==='PUT'&&(/^\/v1\/uploads\/[^/]+\/content$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/files\/binary$/.test(suffix));
-   const binaryDownload=req.method==='GET'&&(/^\/v1\/workspaces\/[^/]+\/files\/binary$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/checkpoints\/[^/]+\/restore-reviews\/[^/]+\/target$/.test(suffix));
+   const listedFileDownload=req.method==='GET'&&/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result\/file\/(?:download|print)$/.test(suffix);
+   const binaryDownload=listedFileDownload||req.method==='GET'&&(/^\/v1\/workspaces\/[^/]+\/files\/binary$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/checkpoints\/[^/]+\/restore-reviews\/[^/]+\/target$/.test(suffix));
   if(binary&&!Buffer.isBuffer(req.body))return reply.code(415).send({error:{code:'BINARY_UPLOAD_REQUIRED'}});
   if(req.body!==undefined)headers['content-type']=binary?'application/octet-stream':'application/json';
-   if(binary||binaryDownload||/^\/v1\/artifacts\/[^/]+\/text$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result(?:\/file(?:\/(?:bytes|document))?)?$/.test(suffix)||/^\/v1\/runs\/[^/]+\/native-member-executions$/.test(suffix)||/^\/v1\/runs\/[^/]+\/native-members\/[^/]+\/execution$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/(?:activities|native-member-runs|artifact-search|interaction-history(?:\/[^/]+)?|interaction-search|tool-result-search)$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/memory\/import(?:\/|$)/.test(suffix)||/^\/v1\/projects\/[^/]+\/git(?:\/|$)/.test(suffix))reply.header('cache-control','private, no-store');
+   if(officePreviewRead||binary||binaryDownload||/^\/v1\/artifacts\/[^/]+\/text$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result(?:\/file(?:\/(?:bytes|document))?)?$/.test(suffix)||/^\/v1\/runs\/[^/]+\/native-member-executions$/.test(suffix)||/^\/v1\/runs\/[^/]+\/native-members\/[^/]+\/execution$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/(?:activities|native-member-runs|artifact-search|interaction-history(?:\/[^/]+)?|interaction-search|tool-result-search)$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/memory\/import(?:\/|$)/.test(suffix)||/^\/v1\/projects\/[^/]+\/git(?:\/|$)/.test(suffix))reply.header('cache-control','private, no-store');
    const artifactTextRead=/^\/v1\/artifacts\/[^/]+\/text$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/artifact-search$/.test(suffix);
-   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),binary||binaryDownload||artifactTextRead?120000:/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result\/file\/document$/.test(suffix)?60000:30000);
+   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),binary||binaryDownload||artifactTextRead?120000:suffix==='/v1/office-preview/candidates'?75000:/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result\/file\/document$/.test(suffix)?60000:30000);
   req.raw.once('aborted',()=>controller.abort());reply.raw.once('close',()=>controller.abort());
   try{
    const response=await config.fetch(config.url+suffix+path.search,{method:req.method,headers,body:req.body===undefined?undefined:binary?req.body:JSON.stringify(req.body),signal:controller.signal,redirect:'error'});
    reply.code(response.status);const type=response.headers.get('content-type')??'application/json';reply.type(type);
    if(suffix==='/v1/capabilities'&&response.ok){reply.header('x-csrf-token',localCsrf);const scope=response.headers.get('x-workbench-draft-scope');if(/^[a-f0-9]{64}$/.test(scope??''))reply.header('x-workbench-draft-scope',scope);}
     for(const name of ['content-disposition','etag','x-workspace-file-sha256','x-workspace-file-size']){const value=response.headers.get(name);if(value)reply.header(name,value);}
+   if(listedFileDownload){
+    for(const name of ['content-length','x-content-type-options','x-activity-file-sha256','x-activity-file-size','x-activity-file-version','x-activity-tool-result-sha256',
+     'x-jot-preview-proof','x-jot-preview-protocol','x-jot-preview-renderer','x-jot-preview-media-type','x-jot-preview-sha256','x-jot-preview-size','x-jot-preview-pages','x-jot-execution-authorized']){
+     const value=response.headers.get(name);if(value)reply.header(name,value);
+    }
+   }
    const reviewDownload=req.method==='GET'&&/^\/v1\/interactions\/[^/]+\/outputs\/(?:0|[1-9][0-9]{0,3})$/.test(suffix)&&type.startsWith('application/octet-stream');
     if((type.startsWith('text/event-stream')||reviewDownload||binaryDownload&&type.startsWith('application/octet-stream'))&&response.body){clearTimeout(timer);return reply.send(Readable.fromWeb(response.body));}
    if(response.status===204)return reply.send();

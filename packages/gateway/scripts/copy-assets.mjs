@@ -15,6 +15,8 @@ cpSync(new URL('../file-engine/worker.py', import.meta.url), new URL('../dist/fi
 cpSync(new URL('../file-engine/templates/', import.meta.url), new URL('../dist/file-engine/templates/', import.meta.url), { recursive: true });
 
 mkdirSync(new URL('../dist/src/artifacts/', import.meta.url), { recursive: true });
+cpSync(new URL('../src/artifacts/office-preview-format.js', import.meta.url), new URL('../dist/src/artifacts/office-preview-format.js', import.meta.url));
+cpSync(new URL('../src/artifacts/office-preview-format.d.ts', import.meta.url), new URL('../dist/src/artifacts/office-preview-format.d.ts', import.meta.url));
 cpSync(new URL('../src/artifacts/archive-windows-job.ps1', import.meta.url), new URL('../dist/src/artifacts/archive-windows-job.ps1', import.meta.url));
 
 mkdirSync(new URL('../dist/src/messages/', import.meta.url), { recursive: true });

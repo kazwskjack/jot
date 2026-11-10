@@ -1,3 +1,4 @@
+import OfficePreviewCandidateScan from './OfficePreviewCandidateScan';
 import React,{useEffect,useRef,useState} from 'react';
 import type {OfficePreviewStatus} from '../../packages/gateway/contracts/types';
 import {request,taskDraftScope} from './client';
@@ -39,5 +40,6 @@ export default function OfficePreviewServiceStatus({owner,onRendererChange}:{own
    <p>文档引擎路径 <code>{state.value.libreOffice.binaryPath}</code></p>
    <p>检查时间 <time dateTime={state.value.checkedAt}>{state.value.checkedAt}</time></p>
   </>}
+  <OfficePreviewCandidateScan owner={owner}/>
  </details>;
 }

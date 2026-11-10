@@ -1,3 +1,4 @@
+import {createOfficePreviewCandidateReader} from './file-engine/office-preview-candidates.ts';
 import {signOfficePrintProof} from './messages/office-print-proof.ts';
 import {createOfficePreviewStatusReader} from './file-engine/office-preview-status.ts';
 import {readActivityFileDocument,readActivityFileOfficePdf,parseOfficePrintQuery} from './events/activity-file-document.ts';
@@ -801,9 +802,9 @@ export async function buildServer(config: {
   });
 
   app.get('/healthz', async () => ({ ok: true, service: 'jot-general-agent-bff' }));
-  const officePreviewStatus=createOfficePreviewStatusReader();
+  const officePreviewStatus=createOfficePreviewStatusReader(),officePreviewCandidates=createOfficePreviewCandidateReader();
   const officePrintReferencesReady=typeof config.internalChannelToken==='string'&&config.internalChannelToken.length>=16;
-  app.addHook('onClose',async()=>officePreviewStatus.close());
+  app.addHook('onClose',async()=>{officePreviewStatus.close();officePreviewCandidates.close();});
   app.get('/v1/office-preview/status',async(request,reply)=>{
     actor(request as any);
     const query=request.query as Record<string,unknown>;
@@ -813,6 +814,16 @@ export async function buildServer(config: {
     }
     reply.header('cache-control','no-store');
     return officePreviewStatus.read(query.refresh==='1'||query.refresh==='true');
+  });
+  app.get('/v1/office-preview/candidates',async(request,reply)=>{
+    actor(request as any);
+    const query=request.query as Record<string,unknown>;
+    if(Object.keys(query).some(key=>key!=='refresh')
+      ||query.refresh!==undefined&&(typeof query.refresh!=='string'||!['1','true','0','false'].includes(query.refresh))){
+      return reply.code(422).send({error:{code:'OFFICE_PREVIEW_QUERY_INVALID'}});
+    }
+    reply.header('cache-control','no-store');
+    return officePreviewCandidates.read(query.refresh==='1'||query.refresh==='true');
   });
   app.get('/v1/push/vapid-public-key',async(_request,reply)=>{
     if(!pushSubscriptions)throw new Error('push_channel_unavailable');
