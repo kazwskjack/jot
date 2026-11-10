@@ -44,6 +44,10 @@
     {
       "path": "web/public/pptx-preview/1.2.4/frame.js",
       "changes": "Original published buildTextIndex/searchText literal gi matching and native highlight/source node-path remapping remain. Removes total2Mi text and2000-hit truncation. Single-slide index/4096-unit source windows and1000-result batches use numeric slide/entry/offset bookmarks, bounded window overlap and one continuation probe. Prior batch results/highlight are released, previous/next batches rescan bookmarks. Cooperative timers and stale-generation/close guards retain existing serial work timeout/cancel and capture ordering. Source/render limits remain."
+    },
+    {
+      "path": "web/public/pptx-preview/1.2.4/frame.js",
+      "changes": "Retains native1.2.4 node-bound highlight API and upstream active/normal colors. Current displayed slide scans all admitted text independently of1000-result navigation batches using4096-unit literal windows and cooperative yields. Identical native bounds share one overlay, active area stays above normal areas. Owned handles are disposed on query/render/slide/close and stale async completion. Serialized render-observer repaint covers search/manual navigation/zoom/resize. Region capture still uses independent native source rendering."
     }
   ]
 }

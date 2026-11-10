@@ -79,6 +79,11 @@
       "upstream_path": "ui/src/components/code-editor/hooks/useDomFileSearch.ts",
       "upstream_sha256": "6ab33a59851912060d4834b96ee996e7dd65f970da0616103b944df4a4ac02ae",
       "changes": "Retains original per-text-node exclusion/ranges, case-fold source mapping and highlights. Replaces total/node search truncation with cooperative16Ki source windows, surrogate-safe overlap and1000-result batches. Previous/next batches rescan saved source cursors, releasing old ranges. Query changes/pagehide cancel stale generations. Search and region capture exclude one another. Covers admitted rendered text; source/render limits remain."
+    },
+    {
+      "path": "web/public/docx-preview/0.4.0/frame.js",
+      "upstream_path": "ui/src/components/code-editor/view/subcomponents/DocxBuiltinPreview.tsx",
+      "changes": "Restores the original full heading title in outline button text and title tooltip, with a two-line clamped span instead of256-unit content truncation. Existing100-item directory pages/heading targets/focus/level and original headingPath source remain."
     }
   ]
 }

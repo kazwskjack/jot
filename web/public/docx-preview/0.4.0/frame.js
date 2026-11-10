@@ -323,8 +323,8 @@ function findTextSearchMatches(text, query, limit) {
   list.start=outlinePage*100+1;
   for(const item of outlineItems.slice(outlinePage*100,(outlinePage+1)*100)){
    const row=document.createElement('li'),button=document.createElement('button');button.type='button';
-   // Short directory labels retain their full original heading target.
-   button.textContent=item.title.length>256?item.title.slice(0,256)+'…':item.title;row.style.marginInlineStart=(item.level-1)+'rem';
+   const label=document.createElement('span');label.className='jot-docx-outline-label';label.textContent=item.title;
+   button.title=item.title;button.append(label);row.style.marginInlineStart=(item.level-1)+'rem';
    button.addEventListener('click',()=>{if(item.element.isConnected){item.element.focus({preventScroll:true});item.element.scrollIntoView({block:'start'});}});
    row.append(button);list.append(row);
   }

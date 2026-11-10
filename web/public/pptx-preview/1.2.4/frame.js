@@ -9,7 +9,7 @@ const query=document.getElementById('query'),slide=document.getElementById('slid
 const batchPrevious=document.getElementById('search-batch-previous'),batchNext=document.getElementById('search-batch-next');
 const thumbnails=document.getElementById('thumbnails'),thumbnailList=document.getElementById('thumbnail-list'),thumbnailToggle=document.getElementById('thumbnail-toggle');
 let thumbnailOpen=false,thumbnailPage=0,thumbnailGeneration=0,thumbnailHandles=[],region,slideObserver;
-let viewer,token,started=false,closed=false,busy=false,rendering=false,partial=false,chain=Promise.resolve(),matches=[],matchIndex=0,highlight,searchGeneration=0,searchTimer;
+let viewer,token,started=false,closed=false,busy=false,rendering=false,partial=false,chain=Promise.resolve(),matches=[],matchIndex=0,highlights=[],highlightGeneration=0,needsHighlights=false,searchGeneration=0,searchTimer;
 let searchBatch=0,searchStarts=[{slideIndex:0,entryIndex:0,offset:0}],hasNextSearchBatch=false;
 const report=(message,transfer=[])=>{if(!closed)parent.postMessage({protocol:1,token,...message},parentOrigin,transfer);};
 const reportWork=()=>{if(!closed)report({type:'jot-pptx-work',busy:busy||rendering});};
@@ -21,7 +21,12 @@ const clearThumbnails=()=>{
  thumbnailHandles=[];
  thumbnailList.replaceChildren();
 };
-const dispose=()=>{closed=true;searchGeneration++;searchStarts=[];controller.abort();clearTimeout(searchTimer);slideObserver?.disconnect();region?.dispose();clearThumbnails();highlight?.dispose();viewer?.destroy();viewer=undefined;matches=[];content.replaceChildren();};
+const clearHighlights=()=>{
+ highlightGeneration++;needsHighlights=false;
+ for(const handle of highlights)handle.dispose();
+ highlights=[];viewer?.clearSearchHighlights();
+};
+const dispose=()=>{closed=true;searchGeneration++;searchStarts=[];controller.abort();clearTimeout(searchTimer);slideObserver?.disconnect();region?.dispose();clearThumbnails();clearHighlights();viewer?.destroy();viewer=undefined;matches=[];content.replaceChildren();};
 const fail=()=>{if(closed)return;report({type:'jot-pptx-error',code:'PPTX_RENDER_FAILED'});dispose();status.textContent='幻灯片视觉读取失败';};
 const controls=()=>{
  const ready=!!viewer&&!closed,working=busy||rendering;slide.disabled=!ready||working;query.disabled=!ready;
@@ -46,10 +51,11 @@ const controls=()=>{
 const run=action=>{
  chain=chain.then(async()=>{
   if(closed||!viewer)return;busy=true;controls();reportWork();
-  try{await action();}finally{busy=false;controls();reportWork();}
+  try{await action();if(needsHighlights)await paintCurrentSlide();}
+  finally{busy=false;controls();reportWork();if(needsHighlights&&!closed)run(()=>paintCurrentSlide());}
  }).catch(fail);
 };
-const navigate=delta=>run(async()=>{highlight?.dispose();highlight=undefined;await viewer.goToSlide(viewer.currentSlideIndex+delta);});
+const navigate=delta=>run(async()=>{clearHighlights();await viewer.goToSlide(viewer.currentSlideIndex+delta);});
 const renderThumbnailPage=page=>{
  if(closed||!viewer||!thumbnailOpen)return;
  thumbnailPage=Math.max(0,Math.min(Math.ceil(viewer.slideCount/4)-1,page));
@@ -71,8 +77,7 @@ const renderThumbnailPage=page=>{
    button.append(image,label);
    thumbnailList.append(button);
    button.addEventListener('click',()=>run(async()=>{
-    highlight?.dispose();
-    highlight=undefined;
+    clearHighlights();
     await viewer.goToSlide(index);
    }));
    const handle=viewer.renderThumbnailToContainer(index,image,{width:144});
@@ -95,17 +100,60 @@ document.getElementById('previous').addEventListener('click',()=>navigate(-1));d
 slide.addEventListener('change',()=>{const value=Number(slide.value);if(Number.isSafeInteger(value)&&value>=1)run(()=>viewer.goToSlide(value-1));});
 document.getElementById('out').addEventListener('click',()=>run(()=>viewer.setZoom(Math.max(25,viewer.zoomPercent-10))));
 document.getElementById('in').addEventListener('click',()=>run(()=>viewer.setZoom(Math.min(300,viewer.zoomPercent+10))));
+const normalHighlight={scrollIntoView:false,borderColor:'var(--file-search-highlight-border)',
+ backgroundColor:'var(--file-search-highlight-bg)',borderWidth:1,padding:1};
+const activeHighlight={...normalHighlight,borderColor:'var(--file-search-highlight-active-border)',
+ backgroundColor:'var(--file-search-highlight-active-bg)',borderWidth:2,padding:2,zIndex:10001,
+ boxShadow:'0 0 0 2px var(--file-search-highlight-active-ring)'};
+const boundsKey=result=>JSON.stringify([result.bounds.x,result.bounds.y,result.bounds.w,result.bounds.h]);
+const paintCurrentSlide=async(generation=searchGeneration,selected=matches[matchIndex])=>{
+ clearHighlights();
+ const value=query.value,current=viewer,surface=content.firstElementChild;
+ if(closed||!current||!surface||!value.trim()||value.length>200)return;
+ const slideIndex=current.currentSlideIndex,paint=highlightGeneration;
+ const valid=()=>!closed&&current===viewer&&generation===searchGeneration&&paint===highlightGeneration
+  &&current.currentSlideIndex===slideIndex&&content.firstElementChild===surface;
+ const data=current.presentationData,entries=buildTextIndex({...data,slides:[data.slides[slideIndex]]});
+ const active=selected?.slideIndex===slideIndex?boundsKey(selected):undefined,seen=new Set();
+ let steps=0;
+ for(const entry of entries){
+  if(!valid())return;
+  const text=entry.text;let hit;
+  for(let offset=0;offset<=text.length-value.length;){
+   if(!valid())return;
+   const chunk=text.slice(offset,offset+4096),found=searchText([{...entry,text:chunk}],value,{useRegex:false});
+   if(found.length){
+    const first=found[0];hit={...first,slideIndex,nodePath:entry.nodePath.replace(/^slides\/0\//,`slides/${slideIndex}/`),text,
+     matchStart:offset+first.matchStart,matchEnd:offset+first.matchEnd};break;
+   }
+   offset+=Math.max(1,chunk.length-value.length+1);
+   if(++steps%16===0)await new Promise(resolve=>setTimeout(resolve,0));
+  }
+  if(hit){
+   const key=boundsKey(hit);
+   // Native search marks node bounds; repeated hits with identical bounds share an overlay.
+   if(!seen.has(key)){
+    seen.add(key);
+    const handle=await current.highlightSearchResult(key===active?selected:hit,key===active?activeHighlight:normalHighlight);
+    if(!valid()){handle?.dispose();return;}
+    if(handle){handle.element.setAttribute('aria-hidden','true');highlights.push(handle);}
+   }
+  }
+  if(++steps%16===0)await new Promise(resolve=>setTimeout(resolve,0));
+ }
+};
 const showMatch=async(delta,generation=searchGeneration)=>{
  if(generation!==searchGeneration||!matches.length)return;
- matchIndex=(matchIndex+delta+matches.length)%matches.length;highlight?.dispose();
- const handle=await viewer.highlightSearchResult(matches[matchIndex]);
- if(generation!==searchGeneration||closed){handle?.dispose();return;}
- highlight=handle;counter.textContent=`第 ${searchBatch+1} 批 · ${matchIndex+1} / ${matches.length}`;
+ matchIndex=(matchIndex+delta+matches.length)%matches.length;
+ const selected=matches[matchIndex];clearHighlights();await viewer.goToSlide(selected.slideIndex);
+ if(generation!==searchGeneration||closed)return;
+ await paintCurrentSlide(generation,selected);
+ if(generation===searchGeneration&&!closed)counter.textContent=`第 ${searchBatch+1} 批 · ${matchIndex+1} / ${matches.length}`;
 };
 const search=async(generation,value,page=0)=>{
  if(generation!==searchGeneration||closed)return;
  if(value.length>200){counter.textContent='查找文字最多200字符';return;}
- highlight?.dispose();highlight=undefined;viewer.clearSearchHighlights();matches=[];matchIndex=0;hasNextSearchBatch=false;
+ clearHighlights();matches=[];matchIndex=0;hasNextSearchBatch=false;
  const found=[],cursor=searchStarts[page];
  let more=false,nextCursor,steps=0;
  counter.textContent=`正在搜索第 ${page+1} 批…`;
@@ -148,7 +196,7 @@ const search=async(generation,value,page=0)=>{
 };
 const schedule=()=>{
  const generation=++searchGeneration,value=query.value;
- clearTimeout(searchTimer);matches=[];highlight?.dispose();highlight=undefined;
+ clearTimeout(searchTimer);matches=[];clearHighlights();
  searchBatch=0;searchStarts=[{slideIndex:0,entryIndex:0,offset:0}];hasNextSearchBatch=false;
  document.getElementById('coverage').textContent='';controls();counter.textContent='等待搜索';
  searchTimer=setTimeout(()=>run(()=>search(generation,value)),180);
@@ -182,14 +230,15 @@ addEventListener('message',async event=>{
   const next=await PptxViewer.open(value.bytes,content,{renderMode:'slide',fitMode:'contain',zoomPercent:100,
    zipLimits:{...RECOMMENDED_ZIP_LIMITS,maxEntryUncompressedBytes:8*1024*1024,maxTotalUncompressedBytes:32*1024*1024,maxMediaBytes:32*1024*1024,maxConcurrency:2},
    lazyMedia:true,lazySlides:true,pdfjs:false,signal:controller.signal,onSlideChange:controls,onSlideError:fail,
-   onRenderStart:()=>{rendering=true;controls();reportWork();},onRenderComplete:()=>{rendering=false;controls();reportWork();},
+   onRenderStart:()=>{clearHighlights();rendering=true;controls();reportWork();},onRenderComplete:()=>{rendering=false;controls();reportWork();},
    onNodeError:()=>{partial=true;status.textContent='部分节点尚未成功绘制，请对照原文件。';}});
   if(closed){next.destroy();return;}viewer=next;
   if(!Number.isSafeInteger(viewer.slideCount)||viewer.slideCount<1||viewer.slideCount>50000)throw Error('PPTX_VIEW_LIMIT');
   region=createPptxRegion({content,getViewer:()=>viewer,isWorking:()=>busy||rendering,report,run});
   slideObserver=new MutationObserver(()=>{
    if(closed)return;
-   region.invalidate();
+   region.invalidate();clearHighlights();needsHighlights=!!query.value.trim();
+   if(needsHighlights&&!busy)run(()=>paintCurrentSlide());
    // Native main rendering disposes shared chart instances, including external thumbnails.
    if(thumbnailOpen)renderThumbnailPage(Math.floor(viewer.currentSlideIndex/4));
   });
