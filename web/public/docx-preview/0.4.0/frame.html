@@ -34,7 +34,9 @@
    <label>宽% <input id="region-width" type="number" min="0" max="100" step="0.1" disabled></label><label>高% <input id="region-height" type="number" min="0" max="100" step="0.1" disabled></label><span id="region-status" role="status"></span>
   </nav>
  </header>
- <details id="outline"><summary>目录</summary><p id="outline-status">等待渲染</p><ol id="headings"></ol></details>
+ <details id="outline"><summary>目录</summary><p id="outline-status" role="status">等待渲染</p>
+  <nav aria-label="文档目录分页"><button id="outline-previous" type="button" disabled>上一页标题</button><label>跳至目录页 <input id="outline-page" type="number" min="1" value="1" disabled></label><output id="outline-pages" aria-live="polite">0 / 0</output><button id="outline-next" type="button" disabled>下一页标题</button></nav><ol id="headings"></ol>
+ </details>
  <div id="styles"></div><main id="content" aria-label="Word文档内容"></main>
  <script nonce="__JOT_DOCX_NONCE__" src="./jszip.min.js"></script>
  <script nonce="__JOT_DOCX_NONCE__" src="./docx-preview.js"></script>

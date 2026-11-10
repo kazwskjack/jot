@@ -71,7 +71,7 @@
    if(!enabled||busy||!selection||selection.serial!==expected)return;
    const original=selection;busy=true;box.hidden=true;controls();status.textContent='正在生成有界PNG截图…';
    const old={zoom:content.style.zoom,width:surface.style.width,minWidth:surface.style.minWidth},replaced=[];let canvas;
-   const frozen=Array.from(document.querySelectorAll('#toolbar button,#toolbar input')).filter(node=>node!==cancel).map(node=>({node,disabled:node.disabled}));
+   const frozen=Array.from(document.querySelectorAll('#toolbar button,#toolbar input,#outline button,#outline input')).filter(node=>node!==cancel).map(node=>({node,disabled:node.disabled}));
    for(const {node}of frozen)node.disabled=true;
    try{
     const render=await loadEngine();

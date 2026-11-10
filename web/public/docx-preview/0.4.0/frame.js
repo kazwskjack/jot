@@ -269,20 +269,42 @@ function findTextSearchMatches(text, query, limit) {
   if(event.key==='Escape'){event.preventDefault();window.clearTimeout(searchTimer);query.value='';search();}
   if(event.key==='Enter'){event.preventDefault();window.clearTimeout(searchTimer);if(!matches.length)search();else navigate(event.shiftKey?-1:1);}
  });
+ let outlineItems=[],outlinePage=0;
+ const outlineInput=document.getElementById('outline-page'),outlinePrevious=document.getElementById('outline-previous'),outlineNext=document.getElementById('outline-next');
+ const renderOutlinePage=page=>{
+  const count=Math.ceil(outlineItems.length/100),list=document.getElementById('headings');
+  outlinePage=Math.max(0,Math.min(count-1,page));list.replaceChildren();
+  outlineInput.disabled=count===0;outlineInput.value=count?String(outlinePage+1):'0';outlineInput.max=String(Math.max(1,count));
+  outlinePrevious.disabled=count===0||outlinePage===0;outlineNext.disabled=count===0||outlinePage+1>=count;
+  document.getElementById('outline-pages').textContent=count?`第 ${outlinePage+1} / ${count} 页`:'0 / 0';
+  list.start=outlinePage*100+1;
+  for(const item of outlineItems.slice(outlinePage*100,(outlinePage+1)*100)){
+   const row=document.createElement('li'),button=document.createElement('button');button.type='button';
+   // Short directory labels retain their full original heading target.
+   button.textContent=item.title.length>256?item.title.slice(0,256)+'…':item.title;row.style.marginInlineStart=(item.level-1)+'rem';
+   button.addEventListener('click',()=>{if(item.element.isConnected){item.element.focus({preventScroll:true});item.element.scrollIntoView({block:'start'});}});
+   row.append(button);list.append(row);
+  }
+ };
+ const clearOutline=message=>{outlineItems=[];renderOutlinePage(0);document.getElementById('outline-status').textContent=message;};
+ outlinePrevious.addEventListener('click',()=>renderOutlinePage(outlinePage-1));
+ outlineNext.addEventListener('click',()=>renderOutlinePage(outlinePage+1));
+ outlineInput.addEventListener('change',()=>{
+  const value=Number(outlineInput.value);
+  if(Number.isSafeInteger(value)&&value>=1)renderOutlinePage(value-1);else outlineInput.value=outlineItems.length?String(outlinePage+1):'0';
+ });
  const buildOutline=()=>{
-  const list=document.getElementById('headings');let headings=0,limited=false;
+  outlineItems=[];
   for(const element of content.querySelectorAll('h1,h2,h3,h4,h5,h6,p')){
    const tag=/^H([1-6])$/.exec(element.tagName),style=String(element.className).match(/heading[\s_-]*([1-6])/i),level=Number(tag?.[1]??style?.[1]);
    const title=element.textContent?.replace(/\s+/g,' ').trim();
    if(!level||!title)continue;
-   if(headings===1000){limited=true;break;}
-   headings++;element.dataset.docxOutlineTarget=String(headings);element.tabIndex=-1;
-   // shortcut: display 1000 headings and 256-unit labels, extend the directory with larger-source navigation.
-   const row=document.createElement('li'),button=document.createElement('button');button.type='button';button.textContent=title.length>256?title.slice(0,256)+'…':title;row.style.marginInlineStart=(level-1)+'rem';
-   button.addEventListener('click',()=>{element.focus({preventScroll:true});element.scrollIntoView({block:'start'});});row.append(button);list.append(row);
+   outlineItems.push({element,level,title});element.dataset.docxOutlineTarget=String(outlineItems.length);element.tabIndex=-1;
   }
-  document.getElementById('outline-status').textContent=limited?'目录达到当前1000项上限，存在未列出标题。':headings?`识别到 ${headings} 个标题`:'此文档没有可识别的标题。';
+  renderOutlinePage(0);
+  document.getElementById('outline-status').textContent=outlineItems.length?`识别到 ${outlineItems.length} 个标题，每页最多100项。`:'此文档没有可识别的标题。';
  };
+ window.addEventListener('pagehide',()=>{window.clearTimeout(searchTimer);window.clearTimeout(selectionTimer);clearHighlights();matches=[];clearOutline('目录已关闭');},{once:true});
  content.addEventListener('click',event=>{if(event.target instanceof Element&&event.target.closest('a'))event.preventDefault();},true);
  document.addEventListener('submit',event=>event.preventDefault(),true);
  window.addEventListener('message',async event=>{
@@ -314,7 +336,7 @@ function findTextSearchMatches(text, query, limit) {
    if(value.focus)restoreFocus(value.focus);
   }catch(error){
    window.clearTimeout(searchTimer);window.clearTimeout(selectionTimer);clearHighlights();matches=[];visualView=undefined;proposal=undefined;query.disabled=true;
-   document.getElementById('headings').replaceChildren();document.getElementById('outline-status').textContent='视觉内容未能渲染';
+   clearOutline('视觉内容未能渲染');
    content.replaceChildren();styles.replaceChildren();status.textContent='视觉内容未能渲染';
    report({type:'jot-docx-error',code:error instanceof Error&&error.message==='DOCX_VIEW_LIMIT'?'DOCX_VIEW_LIMIT':'DOCX_RENDER_FAILED'});
   }finally{value.bytes=null;}
