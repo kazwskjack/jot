@@ -296,7 +296,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
     &&fileReferences.every(value=>(value.reference.renderer.id==='pdf'||modeCaps?.reference_snapshots?.renderers?.some(renderer=>renderer===value.reference.renderer.id))
      &&(!isFileRegion(value)||value.reference.renderer.id==='pdf'||modeCaps?.reference_snapshots?.region_renderers?.some(renderer=>renderer===value.reference.renderer.id))
      &&(!('text_view' in value)||value.text_view!==2||modeCaps?.reference_snapshots?.docx_text_views?.includes(2)));
-   if(!retry&&fileReferences.some(value=>isFileRegion(value)&&value.reference.renderer.id==='docx')&&!structured)throw Error('服务尚未确认整组引用快照及Word区域PNG输入能力，请刷新能力后重试。');
+   if(!retry&&fileReferences.some(value=>isFileRegion(value)&&['docx','pptx'].includes(value.reference.renderer.id))&&!structured)throw Error('服务尚未确认整组引用快照及Office区域PNG输入能力，请刷新能力后重试。');
    const message=structured?replyQuoteMessage(draft.trim()||'请结合以下原文件引用继续。',replyQuotes):preview;
    const referenceSnapshots=structured?{protocol:1,items:fileReferenceSnapshots(fileReferences,imageArtifact)}:undefined;
    if(!retry&&quoteCount&&goalPrompt(preview,ordinary&&!chatMode&&!run&&goalMode).length>100000)throw Error('引用与消息过长，请减少引用或缩短消息后发送');

@@ -2,7 +2,7 @@ import React,{useContext,useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
 import {readListedFilePreviewBytes,readOfficeViewerUrl,type ListedFilePreviewSource} from './activity-file-preview-client';
 import {FileTextReferenceContext,type FileTextReference,type OfficeTextFocus,type OfficeRegionFocus} from './FileTextReferences';
-import DocxFileRegionReference,{type DocxRegionSession} from './DocxFileRegionReference';
+import OfficeFileRegionReference,{type OfficeRegionSession} from './OfficeFileRegionReference';
 import {createTextContentReference} from './vendor/pilotdeck-content-reference';
 import {validateTextReferenceSource} from '../../packages/gateway/src/messages/content-reference.js';
 
@@ -48,7 +48,7 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
  const pendingTimer=useRef<number|undefined>(undefined);
  const [committing,setCommitting]=useState(false),[notice,setNotice]=useState(''),[focused,setFocused]=useState<boolean>();
  const [viewerUrl,setViewerUrl]=useState<string>();
- const regionSession=useRef<DocxRegionSession|undefined>(undefined);
+ const regionSession=useRef<OfficeRegionSession|undefined>(undefined);
  const disabled=!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId;
  useEffect(()=>{if(disabled){selected.current=undefined;pending.current=undefined;window.clearTimeout(pendingTimer.current);setCommitting(false);setProposal(undefined);}},[disabled]);
  useEffect(()=>{
@@ -147,7 +147,7 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
   {notice&&<p role="status">{notice}</p>}
   {state.phase!=='error'&&viewerUrl&&<iframe ref={frame} title="原固定版本Word视觉查看器" src={viewerUrl} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer"
    onLoad={event=>{loaded.current=event.currentTarget;notify.current(event.currentTarget);}}/>}
-  {state.phase==='ready'&&regionSession.current&&<DocxFileRegionReference source={source} owner={owner} session={regionSession.current} focus={officeRegionFocus}/>}
+  {state.phase==='ready'&&regionSession.current&&<OfficeFileRegionReference kind="docx" source={source} owner={owner} session={regionSession.current} focus={officeRegionFocus}/>}
   {proposal&&<section className="jot-docx-selection" aria-label="待确认的Word视觉文字引用"><blockquote>{proposal.reference.reference.selectedText}</blockquote><button type="button" disabled={disabled||committing} onPointerDown={event=>event.preventDefault()} onMouseDown={event=>event.preventDefault()} onClick={()=>commit.current()}>引用Word文字到当前对话</button></section>}
  </section>;
 }

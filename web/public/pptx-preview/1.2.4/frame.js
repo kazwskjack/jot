@@ -1,14 +1,15 @@
 /* Adapted from pinned PilotDeck PptxBuiltinPreview.tsx. See SOURCES.json and LICENSES.txt. */
 import {PptxViewer,RECOMMENDED_ZIP_LIMITS,buildTextIndex,searchText} from './pptx-renderer.js';
+import {createPptxRegion} from './pptx-region.js';
 
 const parentHost=new URLSearchParams(location.search).get('parent');
 if(!parentHost||!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(parentHost))throw Error('PPTX_PARENT_INVALID');
 const parentOrigin='http://'+parentHost,controller=new AbortController(),content=document.getElementById('content'),status=document.getElementById('status');
 const query=document.getElementById('query'),slide=document.getElementById('slide'),counter=document.getElementById('matches');
 const thumbnails=document.getElementById('thumbnails'),thumbnailList=document.getElementById('thumbnail-list'),thumbnailToggle=document.getElementById('thumbnail-toggle');
-let thumbnailOpen=false,thumbnailPage=0,thumbnailGeneration=0,thumbnailHandles=[];
+let thumbnailOpen=false,thumbnailPage=0,thumbnailGeneration=0,thumbnailHandles=[],region,slideObserver;
 let viewer,token,started=false,closed=false,busy=false,rendering=false,partial=false,chain=Promise.resolve(),matches=[],matchIndex=0,highlight,searchGeneration=0,searchTimer;
-const report=message=>parent.postMessage({protocol:1,token,...message},parentOrigin);
+const report=(message,transfer=[])=>parent.postMessage({protocol:1,token,...message},parentOrigin,transfer);
 const reportWork=()=>{if(!closed)report({type:'jot-pptx-work',busy:busy||rendering});};
 const boot=()=>parent.postMessage({type:'jot-pptx-boot',protocol:1,started},parentOrigin);
 const clearThumbnails=()=>{
@@ -17,7 +18,7 @@ const clearThumbnails=()=>{
  thumbnailHandles=[];
  thumbnailList.replaceChildren();
 };
-const dispose=()=>{closed=true;controller.abort();clearTimeout(searchTimer);clearThumbnails();highlight?.dispose();viewer?.destroy();viewer=undefined;matches=[];content.replaceChildren();};
+const dispose=()=>{closed=true;controller.abort();clearTimeout(searchTimer);slideObserver?.disconnect();region?.dispose();clearThumbnails();highlight?.dispose();viewer?.destroy();viewer=undefined;matches=[];content.replaceChildren();};
 const fail=()=>{if(closed)return;report({type:'jot-pptx-error',code:'PPTX_RENDER_FAILED'});dispose();status.textContent='幻灯片视觉读取失败';};
 const controls=()=>{
  const ready=!!viewer&&!closed,working=busy||rendering;slide.disabled=!ready||working;query.disabled=!ready;
@@ -26,7 +27,7 @@ const controls=()=>{
  document.getElementById('out').disabled=!ready||working||viewer.zoomPercent<=25;
  document.getElementById('in').disabled=!ready||working||viewer.zoomPercent>=300;
  document.getElementById('match-previous').disabled=!ready||working||!matches.length;document.getElementById('match-next').disabled=!ready||working||!matches.length;
- thumbnailToggle.disabled=!ready;thumbnailToggle.setAttribute('aria-expanded',String(thumbnailOpen));thumbnails.hidden=!thumbnailOpen;
+ thumbnailToggle.disabled=!ready||working;thumbnailToggle.setAttribute('aria-expanded',String(thumbnailOpen));thumbnails.hidden=!thumbnailOpen;
  document.getElementById('thumbnail-previous').disabled=!ready||working||thumbnailPage===0;
  document.getElementById('thumbnail-next').disabled=!ready||working||(thumbnailPage+1)*4>=viewer.slideCount;
  document.getElementById('thumbnail-page').textContent=ready?`${thumbnailPage+1} / ${Math.ceil(viewer.slideCount/4)}`:'0 / 0';
@@ -35,6 +36,7 @@ const controls=()=>{
   button.setAttribute('aria-current',ready&&Number(button.dataset.slideIndex)===viewer.currentSlideIndex?'page':'false');
  }
  if(ready){slide.value=String(viewer.currentSlideIndex+1);slide.max=String(viewer.slideCount);document.getElementById('count').textContent='/ '+viewer.slideCount;document.getElementById('zoom').textContent=viewer.zoomPercent+'%';}
+ region?.controls();
 };
 const run=action=>{
  chain=chain.then(async()=>{
@@ -75,11 +77,6 @@ const renderThumbnailPage=page=>{
    await handle.ready;
   }
  });
-};
-const syncThumbnailPage=()=>{
- if(!thumbnailOpen||!viewer)return;
- const page=Math.floor(viewer.currentSlideIndex/4);
- if(page!==thumbnailPage)renderThumbnailPage(page);
 };
 thumbnailToggle.addEventListener('click',()=>{
  thumbnailOpen=!thumbnailOpen;
@@ -147,17 +144,26 @@ addEventListener('message',async event=>{
  if(event.source!==parent||event.origin!==parentOrigin||!event.data||typeof event.data!=='object'||Array.isArray(event.data))return;
  const value=event.data;
  if(value.type==='jot-pptx-probe'&&value.protocol===1&&Object.keys(value).length===2){boot();return;}
+ if(started&&value.protocol===1&&value.token===token&&Object.keys(value).length===4){region?.command(value);return;}
  if(started||value.type!=='jot-pptx-init'||value.protocol!==1||typeof value.token!=='string'||!/^[a-f0-9-]{36}$/.test(value.token)||Object.keys(value).length!==4
   ||!(value.bytes instanceof ArrayBuffer)||value.bytes.byteLength>20*1024*1024)return;
  started=true;token=value.token;status.textContent='正在读取原幻灯片…';
  try{
   const next=await PptxViewer.open(value.bytes,content,{renderMode:'slide',fitMode:'contain',zoomPercent:100,
    zipLimits:{...RECOMMENDED_ZIP_LIMITS,maxEntryUncompressedBytes:8*1024*1024,maxTotalUncompressedBytes:32*1024*1024,maxMediaBytes:32*1024*1024,maxConcurrency:2},
-   lazyMedia:true,lazySlides:true,pdfjs:false,signal:controller.signal,onSlideChange:()=>{controls();syncThumbnailPage();},onSlideError:fail,
+   lazyMedia:true,lazySlides:true,pdfjs:false,signal:controller.signal,onSlideChange:controls,onSlideError:fail,
    onRenderStart:()=>{rendering=true;controls();reportWork();},onRenderComplete:()=>{rendering=false;controls();reportWork();},
    onNodeError:()=>{partial=true;status.textContent='部分节点尚未成功绘制，请对照原文件。';}});
   if(closed){next.destroy();return;}viewer=next;
   if(!Number.isSafeInteger(viewer.slideCount)||viewer.slideCount<1||viewer.slideCount>50000)throw Error('PPTX_VIEW_LIMIT');
+  region=createPptxRegion({content,getViewer:()=>viewer,isWorking:()=>busy||rendering,report,run});
+  slideObserver=new MutationObserver(()=>{
+   if(closed)return;
+   region.invalidate();
+   // Native main rendering disposes shared chart instances, including external thumbnails.
+   if(thumbnailOpen)renderThumbnailPage(Math.floor(viewer.currentSlideIndex/4));
+  });
+  slideObserver.observe(content,{childList:true});
   status.textContent=partial?'部分节点尚未成功绘制，请对照原文件。':'原幻灯片视觉内容';controls();report({type:'jot-pptx-ready',info:{slides:viewer.slideCount,partial}});reportWork();
  }catch{if(!controller.signal.aborted)fail();}finally{value.bytes=null;}
 });

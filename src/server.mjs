@@ -21,7 +21,7 @@ export async function buildServer(options={}){
   const officeViewerHost=`jot-office-${randomBytes(16).toString('hex')}.localhost`;
   const officeViewerFiles=new Set([
     ...['frame.html','frame.js','word-region.js','html2canvas.js','docx-preview.js','jszip.min.js','SOURCES.json','LICENSES.txt'].map(name=>'/docx-preview/0.4.0/'+name),
-    ...['frame.html','frame.js','pptx-renderer.js','SOURCES.json','LICENSES.txt'].map(name=>'/pptx-preview/1.2.4/'+name),
+    ...['frame.html','frame.js','pptx-region.js','pptx-renderer.js','SOURCES.json','LICENSES.txt'].map(name=>'/pptx-preview/1.2.4/'+name),
   ]);
   const officeOrigin=host=>`http://${officeViewerHost}${host.includes(':')?host.slice(host.lastIndexOf(':')):''}`;
   const flag=value=>{if(value===undefined||value==='false')return false;if(value==='true')return true;throw Error('invalid_chat_configuration');};

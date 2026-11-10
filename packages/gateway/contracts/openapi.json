@@ -27736,7 +27736,7 @@
               },
               "renderers": {"type":"array","minItems":1,"uniqueItems":true,"items":{"enum":["pdf","xlsx","docx","pptx"]},"description":"Supported reference metadata renderer IDs. Original file readers and input consumers retain their availability checks."},
               "docx_text_views": {"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"integer","enum":[1,2]},"description":"Accepted DOCX text locator protocols. Version 1 keeps structured inspection order. Version 2 pins docx-preview 0.4.0 raw visual DOM text-node order. This declares metadata acceptance only."},
-              "region_renderers": {"type":"array","minItems":1,"uniqueItems":true,"items":{"enum":["pdf","docx"]},"description":"Accepted region metadata renderers with original pinned PNG input. Client surface readiness remains independent."}
+              "region_renderers": {"type":"array","minItems":1,"uniqueItems":true,"items":{"enum":["pdf","docx","pptx"]},"description":"Accepted region metadata renderers with original pinned PNG input. Client surface readiness remains independent."}
             },
             "required": [
               "protocol",

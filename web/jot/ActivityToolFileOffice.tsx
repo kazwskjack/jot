@@ -341,6 +341,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
     {current.page.docx_visual?.ready!==true&&<p role="status">{current.page.docx_visual?.reason==='source_limit'?'原文件超过当前视觉渲染资源范围。':'原文件尚未通过视觉读取检查。'}</p>}
    </>}
    {current.page.document.kind==='pptx'&&<>
+    {props.officeRegionFocus&&(!visual||current.page.pptx_visual?.ready!==true)&&<p role="status">原幻灯片区域引用按视觉坐标定位，请打开幻灯片视觉内容核对原区域。</p>}
     <nav aria-label="幻灯片查看方式"><button type="button" aria-pressed={!visual} onClick={()=>setVisualState({identity,enabled:false})}>结构化文字与引用</button>
      <button type="button" aria-pressed={visual} disabled={current.page.pptx_visual?.protocol!==1||current.page.pptx_visual.ready!==true} onClick={()=>setVisualState({identity,enabled:true})}>幻灯片视觉内容</button></nav>
     {current.page.pptx_visual?.ready!==true&&<p role="status">{current.page.pptx_visual?.reason==='source_limit'?'原幻灯片超过当前视觉渲染资源范围。':'原幻灯片尚未通过视觉读取检查。'}</p>}

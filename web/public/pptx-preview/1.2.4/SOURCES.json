@@ -17,5 +17,23 @@
     "changes": "Original native PptxViewer single-slide/lazy-media/lazy-slides/zoom/search lifecycle is embedded in the fixed original-file viewer origin. Original PptxThumbnail uses the same native 144px thumbnail API with explicit external-handle ownership, paginated to four live thumbnails and sequential ready waits."
   },
   "dependency_notice_basis": "Published browser distribution headers plus pinned upstream dependency archive licenses. Bundled transitive build versions are not inferred from the consuming lock.",
-  "execution": "Source retained without installation, package execution or build."
+  "execution": "Source retained without installation, package execution or build.",
+  "region_source": {
+    "path": "ui/src/components/code-editor/view/subcomponents/RegionSelectionOverlay.tsx",
+    "sha256": "d58472f3c25eaa37cab8c03c12393070f13720dd6e9b1b2f1e689d0ba338afe5",
+    "license": "AGPL-3.0",
+    "changes": "Retains normalized slide region semantics, primary-pointer/whole-slide/percentage selection and explicit commit. Captures an owned native intrinsic-size slide using a bounded cropped PNG canvas and exact parent-origin/window/token messages. Temporary native handles, canvas and clone frames are explicitly released."
+  },
+  "shared_capture_engine": {
+    "name": "html2canvas",
+    "version": "1.4.1",
+    "url": "https://registry.npmjs.org/html2canvas/-/html2canvas-1.4.1.tgz",
+    "integrity": "sha512-fPU6BHNpsyIhr8yyMpTLLxAbkaK8ArIBcmZIRiBLiDhjeqvXolaEmDGmELFuX9I4xDcaKKcJl+TKZLqruBbmWA==",
+    "upstream_integrity": "sha512-fPU6BHNpsyIhr8yyMpTLLxAbkaK8ArIBcmZIRiBLiDhjeqvXolaEmDGmELFuX9I4xDcaKKcJl+TKZLqruBbmWA==",
+    "file": "html2canvas.js",
+    "sha256": "01c5b468ffa0427e535e3019165d2efd2489650ec9cf1379d6ab79fdbf75736b",
+    "modified": false,
+    "served_path": "/docx-preview/0.4.0/html2canvas.js",
+    "notices_path": "/docx-preview/0.4.0/LICENSES.txt"
+  }
 }

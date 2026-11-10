@@ -1,9 +1,12 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
 import {readOfficeViewerUrl,readListedFilePreviewBytes,type ListedFilePreviewSource} from './activity-file-preview-client';
+import type {OfficeRegionFocus} from './FileTextReferences';
+import OfficeFileRegionReference,{type OfficeRegionSession} from './OfficeFileRegionReference';
 
-function PptxAttempt({source,owner,identity}:{source:ListedFilePreviewSource;owner:string;identity:string}){
+function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:ListedFilePreviewSource;owner:string;identity:string;officeRegionFocus?:OfficeRegionFocus}){
  const frame=useRef<HTMLIFrameElement>(null),probe=useRef<(element:HTMLIFrameElement)=>void>(()=>{}),cancel=useRef<()=>void>(()=>{});
+ const regionSession=useRef<OfficeRegionSession|undefined>(undefined);
  const [url,setUrl]=useState<string>(),[state,setState]=useState<{phase:'loading'|'ready'|'error';message:string;working?:boolean}>({phase:'loading',message:'正在核对原幻灯片并读取视觉内容…'});
  useEffect(()=>{
   const controller=new AbortController(),token=crypto.randomUUID();let closed=false,origin:string|undefined,bytes:ArrayBuffer|undefined,booted=false,sent=false,ready=false,working=false,timer:number|undefined;
@@ -27,6 +30,7 @@ function PptxAttempt({source,owner,identity}:{source:ListedFilePreviewSource;own
    if(!sent||value.protocol!==1||value.token!==token||Object.keys(value).length!==4)return;
    if(value.type==='jot-pptx-error'&&value.code==='PPTX_RENDER_FAILED'){fail('幻灯片视觉读取失败，可重读或切换结构化文字查看。');return;}
    if(value.type==='jot-pptx-ready'&&value.info&&Object.keys(value.info).length===2&&Number.isSafeInteger(value.info.slides)&&value.info.slides>=1&&value.info.slides<=50000&&typeof value.info.partial==='boolean'){
+    if(frame.current?.contentWindow&&origin)regionSession.current={window:frame.current.contentWindow,origin,token,live,close:fail};
     ready=true;window.clearTimeout(timer);setState({phase:'ready',message:`已读取 ${value.info.slides} 张幻灯片${value.info.partial?'，部分节点尚未成功绘制，请对照原文件。':'。'}`});
    }else if(ready&&value.type==='jot-pptx-work'&&typeof value.busy==='boolean'){
     if(value.busy&&!working)arm();if(!value.busy)window.clearTimeout(timer);working=value.busy;
@@ -42,14 +46,15 @@ function PptxAttempt({source,owner,identity}:{source:ListedFilePreviewSource;own
    const verified=await readListedFilePreviewBytes(source,owner,controller.signal);if(!live())return;bytes=verified.buffer as ArrayBuffer;send();
   };
   void load().catch(error=>{if(!controller.signal.aborted)fail(error instanceof Error?error.message:'原幻灯片读取失败');});
-  return()=>{dispose();probe.current=()=>{};cancel.current=()=>{};};
+  return()=>{dispose();regionSession.current=undefined;probe.current=()=>{};cancel.current=()=>{};};
  },[identity,owner]);
  return <section className="jot-pptx-preview" aria-label="原幻灯片视觉内容">
   <p role={state.phase==='error'?'alert':'status'}>{state.working?'正在绘制或搜索幻灯片…':state.message} {(state.phase==='loading'||state.working)&&<button type="button" onClick={()=>cancel.current()}>取消并关闭视觉查看器</button>}</p>
   {state.phase!=='error'&&url&&<iframe ref={frame} src={url} title="原固定版本幻灯片视觉查看器" sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={event=>probe.current(event.currentTarget)}/>}
+  {state.phase==='ready'&&regionSession.current&&<OfficeFileRegionReference kind="pptx" source={source} owner={owner} session={regionSession.current} focus={officeRegionFocus}/>}
  </section>;
 }
-export default function ActivityToolFilePptx(source:ListedFilePreviewSource){
- const owner=taskDraftScope(),[revision,setRevision]=useState(0),identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,revision]);
- return <><button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取幻灯片视觉内容</button><PptxAttempt key={identity} source={source} owner={owner} identity={identity}/></>;
+export default function ActivityToolFilePptx(source:ListedFilePreviewSource&{officeRegionFocus?:OfficeRegionFocus}){
+ const owner=taskDraftScope(),[revision,setRevision]=useState(0),identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,source.officeRegionFocus?.key,revision]);
+ return <><button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取幻灯片视觉内容</button><PptxAttempt key={identity} source={source} owner={owner} identity={identity} officeRegionFocus={source.officeRegionFocus}/></>;
 }
