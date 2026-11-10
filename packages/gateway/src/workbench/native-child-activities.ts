@@ -218,11 +218,16 @@ export class NativeChildActivities {
      let current=latest?JSON.parse(latest.payload_json) as Input:original;
      const context={runId,sessionRef,attemptId:String(original.attempt_id??'native-observation'),messageId:'native-observation',
       blockId:'native-observation',deltaIndex:0,at:new Date(Number(event.time)).toISOString()};
-     if(current.kind==='search'||current.kind==='subagent'&&['glob','grep'].includes(String((current.detail as Input)?.tool_name))){
+     if((current.kind==='search'||current.kind==='subagent')&&['glob','grep'].includes(String((current.detail as Input)?.tool_name))){
+      const originalCall=this.db.prepare(`SELECT source_seq FROM wb_native_activity_receipts
+       WHERE run_id=? AND event_type='tool/call' AND call_id=? AND source_seq<? ORDER BY source_seq DESC LIMIT 1`)
+       .get(runId,callId,Number(event.seq)) as {source_seq:number}|undefined;
+      if(originalCall)current={...current,detail:{...(current.detail as Input),native_search_call_seq:originalCall.source_seq}};
       const projected=projectNativeToolEvent(event,context,current,publicResult);
       const detail=projected?.payload.detail as Input|undefined;
       if(projected?.payload.status==='succeeded'&&detail?.file_search)
-       current={...current,detail:{...(current.detail as Input),file_search:detail.file_search}};
+       current={...current,detail:{...(current.detail as Input),file_search:detail.file_search,
+        ...(detail.native_search_result_seq!==undefined?{native_search_result_seq:detail.native_search_result_seq}:{})}};
      }
      const receipts=(publicResult??publicNativeToolResult(event.data as Input)).artifact_receipts;
      const linked=bindToolArtifactReceipts(this.db,source.conversation_id,runId,current,receipts);
@@ -241,7 +246,9 @@ export class NativeChildActivities {
    const token=createHash('sha256').update(JSON.stringify([runId,callId,call?.source_seq??event.seq])).digest('hex');
    const context={runId,sessionRef,attemptId:`native-${token.slice(0,24)}`,
     messageId:'native-observation',blockId:'native-observation',deltaIndex:0,at:new Date(Number(event.time)).toISOString()};
-   const callProjection=call?JSON.parse(call.projection_json):undefined;
+   let callProjection=call?JSON.parse(call.projection_json):undefined;
+   if(callProjection&&['glob','grep'].includes(String(callProjection.detail?.tool_name)))
+    callProjection={...callProjection,detail:{...callProjection.detail,native_search_call_seq:call!.source_seq}};
    const projection=projectNativeToolEvent(event,context,callProjection,publicResult,publicCall);
    if(!projection||projection.type!=='activity.upsert')throw Error('native_activity_event_invalid');
    const linked=bindToolArtifactReceipts(this.db,source.conversation_id,runId,projection.payload,projection.artifactReceipts);

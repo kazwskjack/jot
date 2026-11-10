@@ -9,7 +9,7 @@ import ActivityToolResult from './ActivityToolResult';
 import './activity-timeline.css';
 
 type Group={id:string;kind:ToolActivity['kind'];rows:ActivityRow[]};
-type ToolResultAction={onOpenToolResult:(activity:ToolActivity)=>void};
+type ToolResultAction={onOpenToolResult:(activity:ToolActivity,nativeSource?:boolean)=>void};
 type ArtifactAction={onOpenArtifact:(activity:ToolActivity,target:ActivityArtifactTarget)=>void};
 type MemberDetailsAction={onOpenMember?:(target:NativeMemberTarget)=>void};
 
@@ -61,6 +61,10 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,
       <dl>{activityDetailRows(activity).map((detail,index)=><React.Fragment key={index}><dt>{detail.label}</dt><dd style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{detail.value}</dd></React.Fragment>)}</dl>
       {typeof activity.detail.tool_name==='string'&&(activity.detail.tool_name==='jot_workspace'||/^jot_mcp_[a-z0-9_]{1,50}$/.test(activity.detail.tool_name)
        ||(activity.kind==='search'||activity.kind==='subagent')&&['glob','grep'].includes(activity.detail.tool_name)&&activity.detail.file_search)&&<button type="button" data-chat-search-ignore onClick={()=>onOpenToolResult(activity)}>查看工具结果正文</button>}
+      {activity.status==='succeeded'&&(activity.kind==='search'||activity.kind==='subagent')&&['glob','grep'].includes(String(activity.detail.tool_name))
+       &&Number.isSafeInteger(activity.detail.native_search_call_seq)&&Number.isSafeInteger(activity.detail.native_search_result_seq)
+       &&activity.detail.file_search&&(activity.detail.file_search.shape==='source_limit'||activity.detail.file_search.truncated)
+       &&<button type="button" data-chat-search-ignore onClick={()=>onOpenToolResult(activity,true)}>读取已保留的大结果来源</button>}
       {targets.slice(targetPage*10,targetPage*10+10).map(target=><button type="button" key={JSON.stringify(target)} data-chat-search-ignore onClick={()=>onOpenArtifact(activity,target)}>{target.label}</button>)}
       {targetPageCount>1&&<nav aria-label="结果引用文件翻页" data-chat-search-ignore>
        <button type="button" disabled={targetPage===0} onClick={()=>setArtifactPages(values=>new Map(values).set(activity.activity_id,targetPage-1))}>上一页文件</button>
@@ -80,7 +84,7 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,
 export default function ActivityTimeline({conversationId,activities,runs,reveal,onOpenMember}:{conversationId:string;activities:Activity[];runs:Record<string,ActivityRun>;reveal?:ActivityReveal}&MemberDetailsAction){
  const [selection,setSelection]=useState('');
  const [artifact,setArtifact]=useState<{conversationId:string;runId:string;activityId:string;target:ActivityArtifactTarget}>();
- const [toolResult,setToolResult]=useState<{conversationId:string;runId:string;activityId:string;toolName:string}>();
+ const [toolResult,setToolResult]=useState<{conversationId:string;runId:string;activityId:string;toolName:string;nativeSource?:boolean}>();
  const selectRun=(id:string)=>{setSelection(id);setArtifact(undefined);setToolResult(undefined);};
  const appliedReveal=useRef('');
  const tools=useMemo(()=>activities.filter((activity):activity is ToolActivity=>activity.kind!=='compaction'),[activities]);
@@ -108,7 +112,7 @@ export default function ActivityTimeline({conversationId,activities,runs,reveal,
   <h3>工具与子任务</h3>
   <label>运行记录 <select value={selected} onChange={event=>selectRun(event.currentTarget.value)}>{runIds.map(id=><option key={id} value={id}>{runs[id]?.created_at??id} · {runs[id]?.status??'历史运行'}</option>)}</select></label>
   <small>当前已加载的公开步骤。父步骤缺失或终态未确认时会保留提示。</small>
-  {groups.map(group=><ActivityGroup key={`${selected}:${group.id}`} group={group} {...(run?{run}:{})} onSelectRun={selectRun} onOpenArtifact={(activity,target)=>{setToolResult(undefined);setArtifact({conversationId,runId:activity.run_id,activityId:activity.activity_id,target});}} onOpenToolResult={activity=>{setArtifact(undefined);setToolResult({conversationId,runId:activity.run_id,activityId:activity.activity_id,toolName:activity.detail.tool_name!});}} availableRuns={availableRuns} {...(onOpenMember?{onOpenMember}:{})} {...(reveal?{reveal}:{})}/>)}
+  {groups.map(group=><ActivityGroup key={`${selected}:${group.id}`} group={group} {...(run?{run}:{})} onSelectRun={selectRun} onOpenArtifact={(activity,target)=>{setToolResult(undefined);setArtifact({conversationId,runId:activity.run_id,activityId:activity.activity_id,target});}} onOpenToolResult={(activity,nativeSource)=>{setArtifact(undefined);setToolResult({conversationId,runId:activity.run_id,activityId:activity.activity_id,toolName:activity.detail.tool_name!,...(nativeSource?{nativeSource:true}:{})});}} availableRuns={availableRuns} {...(onOpenMember?{onOpenMember}:{})} {...(reveal?{reveal}:{})}/>)}
   {toolResult&&toolResult.conversationId===conversationId&&toolResult.runId===selected&&<section aria-label="已选步骤工具结果">
    <button type="button" data-chat-search-ignore onClick={()=>setToolResult(undefined)}>关闭工具结果正文</button>
    <ActivityToolResult key={JSON.stringify(toolResult)} conversationId={conversationId} target={toolResult}/>

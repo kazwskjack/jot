@@ -243,3 +243,11 @@ spill backend and opaque locators retain their native meaning. Jot captures a
 private bounded producer snapshot and requires the original successful linked
 Session result before returning a page. Native grep line-preview limits remain
 part of that source scope.
+
+
+Producer-retained native search sources are read through original owned Jot
+activity/native Session bindings. Child reads additionally match original native
+call/result observation receipts and member/parent bindings. Public source pages
+retain original event/content digests and native grep line-preview scope. The
+existing result viewer, original actor/BFF controls and original SDK MIT integration
+remain the basis for this source route.

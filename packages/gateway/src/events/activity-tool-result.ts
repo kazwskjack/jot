@@ -317,6 +317,8 @@ function originalActivity(db:DatabaseSync,owner:string,conversationId:string,act
  return activity;
 }
 
+export {originalActivity as readOriginalActivity};
+
 /** The caller authorizes the conversation and holds the original read transaction. */
 export function readActivityToolResult(db:DatabaseSync,owner:string,conversationId:string,activityId:string,query:Record<string,unknown>,reader?:WorkspaceFileReader):ActivityToolResultPage{
  if(!db.isTransaction)throw Error('activity_tool_result_read_transaction_required');

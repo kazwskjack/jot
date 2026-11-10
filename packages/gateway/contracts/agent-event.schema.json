@@ -1797,6 +1797,8 @@
         "detail": {
           "type": "object",
           "properties": {
+                "native_search_call_seq": {"type":"integer","minimum":0,"maximum":9007199254740991},
+                "native_search_result_seq": {"type":"integer","minimum":0,"maximum":9007199254740991},
                 "file_search": {"$ref": "#/$defs/NativeFileSearch"},
             "queries": {
               "type": "array",
@@ -2547,6 +2549,8 @@
         "detail": {
           "type": "object",
           "properties": {
+            "native_search_call_seq": {"type":"integer","minimum":0,"maximum":9007199254740991},
+            "native_search_result_seq": {"type":"integer","minimum":0,"maximum":9007199254740991},
             "file_search": {"$ref": "#/$defs/NativeFileSearch"},
             "child_run_id": {
               "type": "string",

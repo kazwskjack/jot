@@ -3,7 +3,7 @@ import React,{useEffect,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
 import type {ActivityToolResultPage,ActivityToolResultFile} from './types';
 
-type Target={runId:string;activityId:string;toolName:string;offset?:number;resultSha?:string;textSha?:string;match?:{offset:number;text:string}};
+type Target={nativeSource?:boolean;runId:string;activityId:string;toolName:string;offset?:number;resultSha?:string;textSha?:string;match?:{offset:number;text:string}};
 const sha=/^[a-f0-9]{64}$/;
 
 export default function ActivityToolResult({conversationId,target}:{conversationId:string;target:Target}){
@@ -21,7 +21,7 @@ export default function ActivityToolResult({conversationId,target}:{conversation
   setState({identity,offset});
   const load=async()=>{
    const query=new URLSearchParams({run_id:target.runId,offset_chars:String(offset),...(expected?{result_sha256:expected}:{}),...(expectedText?{text_sha256:expectedText}:{})});
-   const page=await request<ActivityToolResultPage>(`/conversations/${encodeURIComponent(conversationId)}/activities/${encodeURIComponent(target.activityId)}/tool-result?${query}`,'GET',undefined,undefined,controller.signal);
+   const page=await request<ActivityToolResultPage>(`/conversations/${encodeURIComponent(conversationId)}/activities/${encodeURIComponent(target.activityId)}/tool-result${target.nativeSource?'/source':''}?${query}`,'GET',undefined,undefined,controller.signal);
    if(taskDraftScope()!==owner||!page||page.conversation_id!==conversationId||page.run_id!==target.runId||page.activity_id!==target.activityId
     ||page.tool_name!==target.toolName||page.execution_authorized!==false
     ||(target.toolName==='jot_workspace'
@@ -29,10 +29,15 @@ export default function ActivityToolResult({conversationId,target}:{conversation
      :target.toolName==='glob'||target.toolName==='grep'
       ?page.source!=='native'||page.operation!==target.toolName||typeof page.source_truncated!=='boolean'||page.has_other_content!==false
       :page.source!=='mcp'||page.operation!==undefined||page.source_truncated!==undefined)
+    ||(target.nativeSource
+     ?page.source!=='native'||page.native_source_scope!==(target.toolName==='glob'?'all_paths':'all_entries_with_native_line_previews')
+      ||page.source_truncated!==(target.toolName==='grep')||typeof page.source_bytes!=='number'||!Number.isSafeInteger(page.source_bytes)
+      ||page.source_bytes<0||page.source_bytes>33554432||page.total_chars>page.source_bytes
+     :page.native_source_scope!==undefined||page.source_bytes!==undefined)
     ||((page.operation==='files.write'||page.operation==='files.delete')? !['available','base_unrecorded','preview_limit','content_unavailable','non_text'].includes(page.file_diff_state??''):page.file_diff_state!==undefined)
     ||typeof page.result_sha256!=='string'||!sha.test(page.result_sha256)||expected!==undefined&&page.result_sha256!==expected
     ||typeof page.text_sha256!=='string'||!sha.test(page.text_sha256)||expectedText!==undefined&&page.text_sha256!==expectedText||page.offset_chars!==offset
-    ||!Number.isSafeInteger(page.total_chars)||page.total_chars<offset||page.total_chars>6*1048576
+    ||!Number.isSafeInteger(page.total_chars)||page.total_chars<offset||page.total_chars>(target.nativeSource?33554432:6*1048576)
     ||typeof page.text!=='string'||page.text.length>16384||offset+page.text.length>page.total_chars||typeof page.has_other_content!=='boolean'
     ||(page.next_offset_chars===undefined?offset+page.text.length!==page.total_chars
      :!page.text.length||page.next_offset_chars!==offset+page.text.length||page.next_offset_chars>=page.total_chars))throw Error('工具结果来源或分页尚未确认');
@@ -48,7 +53,7 @@ export default function ActivityToolResult({conversationId,target}:{conversation
   };
   void load().catch(error=>{
    if(controller.signal.aborted)return;
-   const message=error instanceof ApiError&&error.status===404?'此步骤暂无已保存且可确认的结果正文。'
+   const message=error instanceof ApiError&&error.status===404?(target.nativeSource?'此步骤暂无可确认的大结果来源。':'此步骤暂无已保存且可确认的结果正文。')
     :error instanceof ApiError&&error.status===409?'正文来源已变化，请关闭后重新打开。'
     :error instanceof Error?error.message:'工具结果读取失败';
    setState({identity,offset,error:message});
@@ -58,8 +63,8 @@ export default function ActivityToolResult({conversationId,target}:{conversation
  const current=state?.identity===identity&&state.offset===offset?state:undefined,page=current?.page;
  const match=page&&target.match&&target.match.offset>=offset&&target.match.offset+target.match.text.length<=offset+page.text.length
   &&page.text.slice(target.match.offset-offset,target.match.offset-offset+target.match.text.length)===target.match.text?target.match:undefined;
- return <div ref={region} tabIndex={-1} className="jot-activity-content" aria-label="工具结果正文">
-  <h4>工具结果正文</h4>
+ return <div ref={region} tabIndex={-1} className="jot-activity-content" aria-label={target.nativeSource?"原生大结果来源":"工具结果正文"}>
+  <h4>{target.nativeSource?"原生大结果来源":"工具结果正文"}</h4>
   {(!current||!page&&!current.error)&&<p role="status">正在读取原工具结果…</p>}
   {page&&<>
    <section data-chat-search-content={JSON.stringify(['tool-result',identity,page.result_sha256,offset])}>
@@ -70,7 +75,8 @@ export default function ActivityToolResult({conversationId,target}:{conversation
     {page.file_links.map(file=><button type="button" key={JSON.stringify([file.path,file.version,file.sha256])} title={file.path} aria-label={`${file.path}，版本 ${file.version}`}
      onClick={()=>setSelected({identity,resultSha:page.result_sha256,file})}>{file.path.split('/').at(-1)} · 版本 {file.version}</button>)}
    </div>}
-   {page.source_truncated&&<p role="status">{page.source==='native'?'原生公开结果未覆盖全部来源，当前显示已保留内容。':page.operation==='files.list'?'原文件列表含后续页面或超出显示范围，当前展示已确认的留存部分。':'原工具回执中的正文已截断，当前显示回执保存的全部文本。'}</p>}
+   {page.native_source_scope&&<p role="status">{page.native_source_scope==='all_paths'?'显示原生保存的全部路径。':'显示原生保存的全部命中条目，行文本沿用原生预览范围。'}</p>}
+   {page.source_truncated&&!page.native_source_scope&&<p role="status">{page.source==='native'?'原生公开结果未覆盖全部来源，当前显示已保留内容。':page.operation==='files.list'?'原文件列表含后续页面或超出显示范围，当前展示已确认的留存部分。':'原工具回执中的正文已截断，当前显示回执保存的全部文本。'}</p>}
    {page.total_chars===0&&<p role="status">原结果未包含文本内容。</p>}
    {page.has_other_content&&<p role="status">原结果还包含图片或其他非文本内容。</p>}
    {offset>0&&<button type="button" data-chat-search-ignore onClick={()=>setCursor({identity,offset:0,previous:[],sha:page.result_sha256,textSha:page.text_sha256})}>从正文开头阅读</button>}

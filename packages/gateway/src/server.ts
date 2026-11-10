@@ -9,6 +9,7 @@ import {messageReferenceSnapshotsInstalled,commandReferenceSnapshotsInstalled,ca
 import {prepareReferenceSteeringText,type ReferenceSnapshotInput} from './messages/content-reference.js';
 import {createPinnedByteStore} from './artifacts/pinned-byte-source.ts';
 import {readActivityToolResult,searchActivityToolResults,readActivityToolResultFile,readActivityToolResultFileBytes,parseActivityFileDownloadQuery,readActivityToolResultFileDownload} from './events/activity-tool-result.ts';
+import {registerNativeSearchSourceRoutes,type NativeSearchSourceClient} from './events/native-search-source.ts';
 import {readActivityHistory} from './events/activity-history.ts';
 import {registerPluginProfileRoutes,type PluginProfileClient} from './workbench/plugin-profile-routes.ts';
 import {createPluginProfileReceiptExecutor,PLUGIN_PROFILE_RECEIPT_PROTOCOL} from './workbench/plugin-profile-receipts.ts';
@@ -228,6 +229,7 @@ export async function buildServer(config: {
   memoryReasoningClient?:MemoryReasoningClient;
   conversationGoalClient?: ConversationGoalClient;
   nativeMemberClient?:NativeMemberControlClient;
+  nativeSearchSourceClient?:NativeSearchSourceClient;
   terminalInventoryClient?:TerminalInventoryClient;
   terminalControlClient?:TerminalControlClient;
   terminalStreamClient?:TerminalStreamClient;
@@ -1063,6 +1065,7 @@ export async function buildServer(config: {
 
   registerDiscoveryPolicyRoutes(app,{policies:new DiscoveryPolicies(db,{onChange:(owner,receipt,event)=>persistentTasks.synchronizeDiscoveryPolicy(owner,receipt.policy_id,event)}),actor,role:(owner,id)=>workbench.getAgent(owner,id),atomic:atomicCommand});
   registerDiscoveryHistoryRoutes(app,{history:new DiscoveryHistory(db),actor,role:(owner,id)=>workbench.getAgent(owner,id)});
+  registerNativeSearchSourceRoutes(app,{db,actor,client:config.nativeSearchSourceClient});
   registerTerminalInventoryRoutes(app,{db,actor,client:config.terminalInventoryClient});
   registerTerminalControlRoutes(app,{db,actor,client:config.terminalControlClient});
   registerTerminalReceiptRoutes(app,{db,actor,client:config.terminalControlClient});

@@ -123,7 +123,7 @@ export function publicNativeToolResult(data, includeBrowse = true) {
   const artifacts = [...receipts.values()].sort((left, right) =>
     left.artifact_id < right.artifact_id ? -1 : left.artifact_id > right.artifact_id ? 1 : left.version - right.version
       || (left.sha256 < right.sha256 ? -1 : left.sha256 > right.sha256 ? 1 : 0))
-  return { failed: Boolean(data?.error || resultBlock?.isError || structuredToolFailure(data, resultBlock)),
+  return { failed: Boolean(data?.error || message?.isError || resultBlock?.isError || structuredToolFailure(data, resultBlock)),
     evidence: includeBrowse ? browseResultEvidence(data, resultBlock) : null,
     artifact_receipts: artifacts }
 }

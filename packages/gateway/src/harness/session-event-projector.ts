@@ -16,6 +16,7 @@ export interface JotProjection {
 export interface ProjectionContext {
   runId: string
   sessionRef?: string
+  nativeEventSeq?: number
   attemptId: string
   messageId: string
   blockId: string
@@ -100,7 +101,7 @@ export function projectNativeToolEvent(event: Record<string, unknown>, context: 
     tool.startedAt = priorCall.started_at
     knownTools.set(callId, tool)
   }
-  return toolActivity(data, { ...context, knownTools }, event.type === 'tool/result', publicResult, publicCall)
+  return toolActivity(data, { ...context, knownTools, nativeEventSeq: event.seq as number }, event.type === 'tool/result', publicResult, publicCall)
 }
 
 function toolActivity(data: Record<string, unknown>, context: ProjectionContext, completed: boolean, publicResult?: PublicNativeToolResult, publicCall?: PublicNativeToolCall): JotProjection | null {
@@ -127,6 +128,18 @@ function toolActivity(data: Record<string, unknown>, context: ProjectionContext,
     if (observed.action) detail.action = observed.action
     tool.publicDetail = detail
     tool.startedAt = context.at
+  }
+  const nativeSeq = context.nativeEventSeq;
+  if (['glob','grep'].includes(String(tool.publicDetail?.tool_name))
+    && typeof nativeSeq === 'number' && Number.isSafeInteger(nativeSeq) && nativeSeq >= 0) {
+    if (!completed) {
+      tool.publicDetail = {...tool.publicDetail, native_search_call_seq: nativeSeq};
+      delete tool.publicDetail.native_search_result_seq;
+      delete tool.publicDetail.file_search;
+    } else if (Number.isSafeInteger(tool.publicDetail?.native_search_call_seq)
+      && nativeSeq > Number(tool.publicDetail?.native_search_call_seq)) {
+      tool.publicDetail = {...tool.publicDetail, native_search_result_seq: nativeSeq};
+    }
   }
   if (!completed) context.knownTools?.set(callId, tool)
   const result = completed ? (publicResult ?? publicNativeToolResult(data, tool.kind === 'browse')) : null
@@ -296,8 +309,8 @@ export function projectSessionFrame(frameValue: unknown, context: ProjectionCont
   const data = record(event?.data)
   if (!event || !data) return null
   if(event.type==='compaction/start'||event.type==='compaction/end')return nativeCompaction(event.type,data,context)
-  if (event.type === 'tool/call') return toolActivity(data, context, false)
-  if (event.type === 'tool/result') return toolActivity(data, context, true)
+  if (event.type === 'tool/call') return toolActivity(data, {...context,nativeEventSeq:event.seq as number}, false)
+  if (event.type === 'tool/result') return toolActivity(data, {...context,nativeEventSeq:event.seq as number}, true)
   if (event.type === 'assistant/message') return settledAssistant(data, context)
   return null
 }
