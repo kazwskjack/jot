@@ -6,10 +6,10 @@
  <title>Word视觉查看器</title>
  <style>
   body { margin: 0; font-family: system-ui, sans-serif; background: #eee; color: #222; }
-  header { position: sticky; top: 0; z-index: 1; background: #fff; border-bottom: 1px solid #ccc; }
-  nav { padding: 0.4rem; }
-  button { min-width: 2.5rem; min-height: 2rem; margin-inline: 0.2rem; }
-  input { max-width: 12rem; min-height: 2rem; }
+  #toolbar { position: sticky; top: 0; z-index: 1; background: #fff; border-bottom: 1px solid #ccc; }
+  #toolbar nav { padding: 0.4rem; }
+  #toolbar button, #outline button { min-width: 2.5rem; min-height: 2rem; margin-inline: 0.2rem; }
+  #query { max-width: 12rem; min-height: 2rem; }
   #outline { padding: 0.5rem; background: #fff; }
   #outline ol { max-height: 16rem; overflow: auto; }
   #outline button { text-align: start; overflow-wrap: anywhere; }
@@ -21,7 +21,7 @@
  </style>
 </head>
 <body>
- <header>
+ <header id="toolbar">
   <nav aria-label="Word缩放"><button type="button" id="out" aria-label="缩小">−</button><output id="zoom" aria-live="polite">100%</output><button type="button" id="in" aria-label="放大">＋</button><span id="status" role="status">等待原文件</span></nav>
   <nav aria-label="Word文内搜索"><label>查找 <input id="query" type="search" maxlength="200" disabled></label><button id="previous" type="button" disabled>上一处</button><button id="next" type="button" disabled>下一处</button><output id="matches" aria-live="polite">尚未搜索</output><small id="coverage"></small></nav>
  </header>
