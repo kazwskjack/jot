@@ -1,4 +1,4 @@
-import {officePreviewFormat} from '../artifacts/office-preview-format.js';
+import {OFFICE_PRINT_SOURCE_MAX_BYTES,officePreviewFormat} from '../artifacts/office-preview-format.js';
 // Validates Jot snapshots of the retained PilotDeck content-reference schema.
 // All references remain user-provided context with execution_authorized=false.
 const exact=(value,required,optional=[])=>!!value&&typeof value==='object'&&!Array.isArray(value)
@@ -19,7 +19,7 @@ function officePrintPdfSource(value){
  if(!exact(print,['protocol','sha256','size','pageCount','proof'])||print.protocol!==1||!sha(print.sha256)
   ||!Number.isSafeInteger(print.size)||print.size<100||print.size>20*1024*1024
   ||!positive(print.pageCount)||print.pageCount>50000||typeof print.proof!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(print.proof)
-  ||typeof mime!=='string'||source?.mimeType!==mime||value.file.size>20*1024*1024
+  ||typeof mime!=='string'||source?.mimeType!==mime||value.file.size>OFFICE_PRINT_SOURCE_MAX_BYTES
   ||!exact(renderer,['id','backend','locatorQuality'])||renderer.id!=='office-pdf'||renderer.backend!=='libreoffice'
   ||renderer.locatorQuality!==(ref.selectionMode==='text'?'approximate':'visual'))throw invalid();
  const locator=ref.locator;

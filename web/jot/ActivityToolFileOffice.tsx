@@ -329,7 +329,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
   const load=async()=>{
    const format=officePreviewFormat(file.path);
    if(!format)throw Error('此文件类型的Office查看器尚未确认');
-   if(file.size>20*1024*1024)throw Error('此文件超过当前20 MiB结构化预览范围，可下载固定版本。');
+   if(file.size>20*1024*1024)throw Error('此文件超过当前20 MiB结构化预览范围。可在转换源文件上限内切换LibreOffice预览，或下载固定版本。');
    const params=new URLSearchParams({run_id:runId,result_sha256:resultSha,path:file.path,version:String(file.version),sha256:file.sha256,size_bytes:String(file.size)});
    const page=await request<Page>(`/conversations/${encodeURIComponent(conversationId)}/activities/${encodeURIComponent(activityId)}/tool-result/file/document?${params}`,'GET',undefined,undefined,controller.signal,60000);
    controller.signal.throwIfAborted();

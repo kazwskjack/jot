@@ -1,3 +1,4 @@
+import {OFFICE_PRINT_SOURCE_MAX_BYTES} from './artifacts/office-preview-format.js';
 import {createOfficePreviewCandidatePager} from './file-engine/office-preview-candidate-pages.ts';
 import {OfficePreviewConfigurationStore} from './file-engine/office-preview-configuration.ts';
 import {createOfficePreviewCandidateReader} from './file-engine/office-preview-candidates.ts';
@@ -703,7 +704,7 @@ export async function buildServer(config: {
     if(code==='memory_scope_forbidden')return reply.code(403).send({error:{code:'MEMORY_SCOPE_FORBIDDEN'}});
     if(code==='file_source_stale')return reply.code(409).send({error:{code:'FILE_SOURCE_STALE'}});
     if(code==='DOCUMENT_PREVIEW_TOO_LARGE')return reply.code(413).send({error:{code:'DOCUMENT_PREVIEW_TOO_LARGE'}});
-    if(['DOCUMENT_PREVIEW_FORMAT_INVALID','DOCUMENT_PREVIEW_CONTAINER_LIMIT','DOCUMENT_PREVIEW_RESULT_INVALID','DOCUMENT_PREVIEW_XML_UNSAFE','DOCUMENT_PREVIEW_XML_INVALID','FILE_CONTAINER_LIMIT','ENGINE_OUTPUT_TOO_LARGE'].includes(code))return reply.code(422).send({error:{code}});
+    if(['DOCUMENT_VISUAL_LIMIT','DOCUMENT_PREVIEW_FORMAT_INVALID','DOCUMENT_PREVIEW_CONTAINER_LIMIT','DOCUMENT_PREVIEW_RESULT_INVALID','DOCUMENT_PREVIEW_XML_UNSAFE','DOCUMENT_PREVIEW_XML_INVALID','FILE_CONTAINER_LIMIT','ENGINE_OUTPUT_TOO_LARGE'].includes(code))return reply.code(422).send({error:{code}});
     if(['ENGINE_TIMEOUT','ENGINE_CRASH','ENGINE_RESULT_INVALID'].includes(code))return reply.code(503).send({error:{code}});
     if(['active_run_mode_change','chat_model_fixed','conversation_mode_conflict','conversation_mode_scope_invalid','conversation_mode_goal_active','conversation_mode_goal_unconfirmed','conversation_mode_legacy_unconfirmed','conversation_mode_session_missing','conversation_mode_admission_required'].includes(code))return reply.code(409).send({error:{code:code.toUpperCase()}});
     if(code==='task_run_limit_unconfirmed')return reply.code(409).send({error:{code:'TASK_RUN_LIMIT_UNCONFIRMED'}});
@@ -1203,6 +1204,7 @@ export async function buildServer(config: {
     const {conversationId,activityId}=request.params as {conversationId:string;activityId:string},owner=actor(request as any);
     const {input,expected}=parseOfficePrintQuery(request.query as Record<string,unknown>);
     conversations.get(conversationId,owner);
+    if(input.size>OFFICE_PRINT_SOURCE_MAX_BYTES)throw Error('DOCUMENT_PREVIEW_TOO_LARGE');
     if(!officePrintReferencesReady)throw Error('office_print_reference_unproven');
     if(documentPreviewBusy)return reply.code(429).header('retry-after','1').send({error:{code:'DOCUMENT_PREVIEW_BUSY'}});
     documentPreviewBusy=true;

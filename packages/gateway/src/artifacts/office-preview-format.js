@@ -1,5 +1,6 @@
 // Format families/MIMEs follow PilotDeck 783499ff binaryFile.ts and FileArtifactCollector.ts.
 // AGPL-3.0 notice retained at packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt.
+export const OFFICE_PRINT_SOURCE_MAX_BYTES=100*1024*1024;
 const formats={
  docx:['docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document',true],
  doc:['docx','application/msword',false],

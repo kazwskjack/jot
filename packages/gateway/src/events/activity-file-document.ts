@@ -1,3 +1,5 @@
+import {withReadTransaction} from '../db/database.ts';
+import {OFFICE_PRINT_SOURCE_MAX_BYTES} from '../artifacts/office-preview-format.js';
 import {readRetainedOfficePdf,retainOfficePdf} from '../artifacts/office-print-store.ts';
 import type {DatabaseSync} from 'node:sqlite';
 import {constants,createWriteStream} from 'node:fs';
@@ -18,10 +20,10 @@ type OfficeSource={file:ReturnType<typeof readActivityToolResultFileDownload>;
 
 /** Seal original bytes and run preview work outside the database transaction. */
 async function withPinnedOfficeSource<T>(db:DatabaseSync,reader:Pick<WorkbenchService,'readBinaryFile'>,
- owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal,read:(source:OfficeSource)=>Promise<T>,binaryPath?:string){
+ owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal,read:(source:OfficeSource)=>Promise<T>,binaryPath?:string,maxSourceBytes=20*1024*1024){
  const format=officePreviewFormat(input.path);
  if(!format)throw Error('UNSUPPORTED_FORMAT_OPERATION');
- if(input.size>20*1024*1024)throw Error('DOCUMENT_PREVIEW_TOO_LARGE');
+ if(input.size>maxSourceBytes)throw Error('DOCUMENT_PREVIEW_TOO_LARGE');
  const store=createPinnedByteStore(root);let directory:string|undefined;
  try{
   const writer=await store.begin(input.fileSha,input.size,signal);signal.throwIfAborted();
@@ -77,12 +79,23 @@ export function parseOfficePrintQuery(query:Record<string,unknown>){
 
 export async function readActivityFileOfficePdf(db:DatabaseSync,reader:Pick<WorkbenchService,'readBinaryFile'>,
  owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal,expected?:{sha256:string;size:number;pageCount:number},binaryPath?:string){
+ const binding=createHash('sha256').update(JSON.stringify(['jot-office-print-store/v1',owner,conversationId,input.runId,activityId,input.resultSha,input.path,input.version,input.fileSha,input.size])).digest('hex');
+ if(expected){
+  if(!officePreviewFormat(input.path))throw Error('UNSUPPORTED_FORMAT_OPERATION');
+  if(input.size>OFFICE_PRINT_SOURCE_MAX_BYTES)throw Error('DOCUMENT_PREVIEW_TOO_LARGE');
+  signal.throwIfAborted();
+  const checksum=createHash('sha256');let received=0;
+  const file=withReadTransaction(db,()=>readActivityToolResultFileDownload(db,owner,conversationId,activityId,input,reader,bytes=>{
+   signal.throwIfAborted();received+=bytes.length;
+   if(received>input.size)throw Error('activity_tool_result_source_invalid');
+   checksum.update(bytes);
+  }));
+  signal.throwIfAborted();
+  if(received!==input.size||checksum.digest('hex')!==input.fileSha)throw Error('activity_tool_result_source_invalid');
+  const retained=await readRetainedOfficePdf(root,binding,expected,signal);
+  return {...file,...retained,execution_authorized:false as const};
+ }
  return withPinnedOfficeSource(db,reader,owner,conversationId,activityId,input,root,signal,async({file,format,path,directory,engine})=>{
-  const binding=createHash('sha256').update(JSON.stringify(['jot-office-print-store/v1',owner,conversationId,input.runId,activityId,input.resultSha,input.path,input.version,input.fileSha,input.size])).digest('hex');
-  if(expected){
-   const retained=await readRetainedOfficePdf(root,binding,expected,signal);
-   return {...file,...retained,execution_authorized:false as const};
-  }
   const output=join(directory,'preview.pdf');
   const result=await engine.run({operation:'office.export_pdf',input_path:path,output_path:output,
    media_type:format.mediaType,job_dir:directory,request:{save_as:{format:'pdf'},jot_preview_pdf:1}},
@@ -103,5 +116,5 @@ export async function readActivityFileOfficePdf(db:DatabaseSync,reader:Pick<Work
    await retainOfficePdf(db,root,directory,binding,retained,signal);
    return {...file,...retained,execution_authorized:false as const};
   }finally{await handle.close();}
- },binaryPath);
+ },binaryPath,OFFICE_PRINT_SOURCE_MAX_BYTES);
 }

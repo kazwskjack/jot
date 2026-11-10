@@ -1,3 +1,4 @@
+import {OFFICE_PRINT_SOURCE_MAX_BYTES} from '../../packages/gateway/src/artifacts/office-preview-format.js';
 import type {OfficePrintView} from '../../packages/gateway/contracts/types';
 import {ApiError,base,taskDraftScope} from './client';
 import {readVerifiedPreviewBytes} from './artifact-preview-bytes.mjs';
@@ -38,12 +39,13 @@ export type OfficePrintPreview={bytes:Uint8Array}&Omit<OfficePrintView,'protocol
 export async function readOfficePrintPreviewBytes({conversationId,runId,activityId,resultSha,file}:ListedFilePreviewSource,owner:string,signal:AbortSignal,expected?:Pick<OfficePrintView,'sha256'|'size'|'pageCount'>):Promise<OfficePrintPreview>{
  const check=()=>{signal.throwIfAborted();if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');};
  check();
- if(file.size>20*1024*1024)throw Error('文件超过20 MiB转换预览范围。');
+ if(file.size>OFFICE_PRINT_SOURCE_MAX_BYTES)throw Error('文件超过100 MiB转换源文件范围。');
  const params=new URLSearchParams({run_id:runId,result_sha256:resultSha,path:file.path,version:String(file.version),sha256:file.sha256,size_bytes:String(file.size)});
  if(expected){params.set('preview_sha256',expected.sha256);params.set('preview_size_bytes',String(expected.size));params.set('preview_page_count',String(expected.pageCount));}
  const response=await fetch(`${base}/v1/conversations/${encodeURIComponent(conversationId)}/activities/${encodeURIComponent(activityId)}/tool-result/file/print?${params}`,{credentials:'same-origin',cache:'no-store',redirect:'error',signal});
  try{
   check();
+  if(response.status===413)throw Error('转换源文件须在100 MiB以内，生成PDF须在20 MiB以内。');
   if(response.status===507)throw Error('转换PDF保留空间已满，已有副本继续保留。');
   if(expected&&response.status===404)throw Error('原转换PDF副本或原来源暂不可读取，可重新转换并对照原快照。');
   if(expected&&response.status===409)throw Error('原来源或转换PDF副本尚未通过核对，请对照原快照。');

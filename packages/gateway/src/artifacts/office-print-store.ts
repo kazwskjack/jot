@@ -1,7 +1,7 @@
 import {constants,existsSync,lstatSync,readdirSync,renameSync} from 'node:fs';
 import {mkdir,mkdtemp,lstat,open,rm} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
-import {join} from 'node:path';
+import {isAbsolute,join} from 'node:path';
 import type {DatabaseSync} from 'node:sqlite';
 import {withImmediateTransaction} from '../db/database.ts';
 
@@ -24,11 +24,11 @@ async function readPrivateFile(path:string,limit:number,signal:AbortSignal){
 }
 
 export async function readRetainedOfficePdf(root:string,binding:string,expected:ExpectedPdf,signal:AbortSignal):Promise<RetainedOfficePdf>{
- if(!hash(binding)||!hash(expected.sha256)||!Number.isSafeInteger(expected.size)||expected.size<100||expected.size>pdfLimit
+ if(typeof root!=='string'||!isAbsolute(root)||!hash(binding)||!hash(expected.sha256)||!Number.isSafeInteger(expected.size)||expected.size<100||expected.size>pdfLimit
   ||!Number.isSafeInteger(expected.pageCount)||expected.pageCount<1||expected.pageCount>50000)throw invalid();
  const folder=join(root,'retained-office-pdfs'),entry=join(folder,binding+'-'+expected.sha256);
  try{
-  for(const path of [folder,entry]){const stat=await lstat(path);if(!stat.isDirectory()||stat.isSymbolicLink())throw invalid();}
+  for(const path of [root,folder,entry]){const stat=await lstat(path);if(!stat.isDirectory()||stat.isSymbolicLink())throw invalid();}
   const metadata=JSON.parse((await readPrivateFile(join(entry,'source.json'),8192,signal)).toString('utf8'));
   if(!metadata||typeof metadata!=='object'||Object.keys(metadata).sort().join(',')!=='binding,engine,pageCount,protocol,sha256,size'
    ||metadata.protocol!==1||metadata.binding!==binding||metadata.sha256!==expected.sha256||metadata.size!==expected.size||metadata.pageCount!==expected.pageCount

@@ -79,10 +79,11 @@ def docx_preview(path: Path) -> dict:
         if remaining <= 0: truncated = True; break
     return {"paragraphs": paragraphs, "tables": tables, "truncated": truncated}
 
-def verify_ooxml_visual_source(path: Path):
+def verify_ooxml_visual_source(path: Path, max_expanded: int = 32 * 1024 * 1024,
+                               max_entry: int = 8 * 1024 * 1024):
     expanded, xml_nodes, names = 0, 0, set()
     try:
-        with safe_zip(path, 32 * 1024 * 1024, 8 * 1024 * 1024) as archive, path.open("rb") as raw:
+        with safe_zip(path, max_expanded, max_entry) as archive, path.open("rb") as raw:
             source_size = path.stat().st_size
             for info in archive.infolist():
                 if info.filename in names or "\\" in info.filename or info.flag_bits & 1:
@@ -107,7 +108,7 @@ def verify_ooxml_visual_source(path: Path):
                 def accept(data):
                     nonlocal actual, expanded, checksum
                     actual += len(data); expanded += len(data)
-                    if actual > info.file_size or actual > 8 * 1024 * 1024 or expanded > 32 * 1024 * 1024:
+                    if actual > info.file_size or actual > max_entry or expanded > max_expanded:
                         fail("DOCUMENT_VISUAL_LIMIT")
                     checksum = zlib.crc32(data, checksum)
                     if is_xml:
@@ -659,7 +660,7 @@ def execute(req: dict) -> dict:
         if req.get("request", {}).get("jot_preview_pdf") == 1:
             # Modern/ODF containers are mandatory ZIP; legacy/WPS may also contain ZIP data.
             if "openxmlformats-officedocument" in media_type or "vnd.oasis.opendocument" in media_type or zipfile.is_zipfile(input_path):
-                verify_ooxml_visual_source(input_path)
+                verify_ooxml_visual_source(input_path, DOCUMENT_PREVIEW_MAX_ZIP_BYTES, DOCUMENT_PREVIEW_MAX_ZIP_ENTRY_BYTES)
         result = uno_export_pdf(req, input_path, output_path, root); engine = "libreoffice_uno"
     elif operation.startswith("pdf."): result = pdf_edit(operation, input_path, output_path, req.get("request", {})); engine = "pypdf"
     else: result = uno_edit(req, input_path, output_path, root); engine = "libreoffice_uno"
