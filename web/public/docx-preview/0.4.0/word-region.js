@@ -12,7 +12,7 @@
   });return engine;
  };
  const sameView=(a,b)=>Math.abs(a.width-b.width)<=1&&Math.abs(a.height-b.height)<=1;
- window.JotWordRegion=({content,report})=>{
+ window.JotWordRegion=({content,report,isWorking=()=>false,onCaptureStart=()=>{}})=>{
   const wrapper=content.querySelector('.jot-docx-wrapper')??content,sections=Array.from(content.querySelectorAll('section.jot-docx'));
   let surface=sections[0];
   const startButton=document.getElementById('region-start'),whole=document.getElementById('region-whole'),cancel=document.getElementById('region-cancel'),status=document.getElementById('region-status');
@@ -24,8 +24,8 @@
   const view=bounds=>({protocol:1,section:sections.indexOf(surface)+1,width:bounds.width/zoom(),height:bounds.height/zoom()});
   const send=()=>report({type:'jot-docx-region',selection:selection??null});
   const controls=()=>{
-   startButton.disabled=!enabled||busy;whole.disabled=!active||busy;cancel.disabled=!active&&!busy;
-   for(const [key,input]of inputs){input.disabled=!active||busy;input.value=String(Math.round((selection?.rect[key]??(key==='width'||key==='height'?1:0))*10000)/100);}
+   startButton.disabled=!enabled||busy||isWorking();whole.disabled=!active||busy||isWorking();cancel.disabled=!active&&!busy;
+   for(const [key,input]of inputs){input.disabled=!active||busy||isWorking();input.value=String(Math.round((selection?.rect[key]??(key==='width'||key==='height'?1:0))*10000)/100);}
   };
   const clear=()=>{start=undefined;selection=undefined;box.hidden=true;serial++;send();controls();};
   const draw=rect=>{
@@ -41,14 +41,14 @@
    if(busy){report({type:'jot-docx-capture-cancel',reason:'cancelled'});return;}
    active=false;wrapper.style.touchAction='';clear();status.textContent='截图区域已取消。';
   };
-  startButton.addEventListener('click',()=>{if(!enabled||busy)return;active=true;wrapper.style.touchAction='none';window.getSelection()?.removeAllRanges();clear();status.textContent='在Word分段内拖动框选，或选择当前可见分段。';});
+  startButton.addEventListener('click',()=>{if(!enabled||busy||isWorking())return;active=true;wrapper.style.touchAction='none';window.getSelection()?.removeAllRanges();clear();status.textContent='在Word分段内拖动框选，或选择当前可见分段。';});
   whole.addEventListener('click',()=>{
-   if(!active||busy)return;
+   if(!active||busy||isWorking())return;
    const top=document.getElementById('toolbar').getBoundingClientRect().bottom;
    surface=sections.find(section=>{const bounds=section.getBoundingClientRect();return bounds.bottom>top&&bounds.top<window.innerHeight;})??surface;surface.append(box);choose({x:0,y:0,width:1,height:1});
   });cancel.addEventListener('click',stop);
   for(const [key,input]of inputs)input.addEventListener('change',()=>{
-   if(!active||busy)return;const value=Number(input.value);if(!Number.isFinite(value))return;
+   if(!active||busy||isWorking())return;const value=Number(input.value);if(!Number.isFinite(value))return;
    const rect={...(selection?.rect??{x:0,y:0,width:1,height:1}),[key]:Math.max(0,Math.min(1,value/100))};rect.width=Math.min(rect.width,1-rect.x);rect.height=Math.min(rect.height,1-rect.y);choose(rect);
   });
   const fromPoint=(x,y,bounds)=>({x:Math.max(0,Math.min(1,(x-bounds.left)/bounds.width)),y:Math.max(0,Math.min(1,(y-bounds.top)/bounds.height))});
@@ -57,7 +57,7 @@
    return {x:Math.min(start.x,end.x),y:Math.min(start.y,end.y),width:Math.abs(start.x-end.x),height:Math.abs(start.y-end.y)};
   };
   wrapper.addEventListener('pointerdown',event=>{
-   if(!active||busy||event.button!==0||!event.isPrimary)return;
+   if(!active||busy||isWorking()||event.button!==0||!event.isPrimary)return;
    const section=event.target instanceof Element?event.target.closest('section.jot-docx'):null;if(!section||!sections.includes(section))return;
    event.preventDefault();clear();surface=section;surface.append(box);const bounds=surface.getBoundingClientRect();start={...fromPoint(event.clientX,event.clientY,bounds),bounds,pointerId:event.pointerId};wrapper.setPointerCapture(event.pointerId);
   });
@@ -69,6 +69,8 @@
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&(active||busy)){event.preventDefault();stop();}});
   const capture=async expected=>{
    if(!enabled||busy||!selection||selection.serial!==expected)return;
+   if(isWorking()){report({type:'jot-docx-capture-error',reason:'capture_failed'});return;}
+   onCaptureStart();
    const original=selection;busy=true;box.hidden=true;controls();status.textContent='正在生成有界PNG截图…';
    const old={zoom:content.style.zoom,width:surface.style.width,minWidth:surface.style.minWidth},replaced=[];let canvas;
    const frozen=Array.from(document.querySelectorAll('#toolbar button,#toolbar input,#outline button,#outline input')).filter(node=>node!==cancel).map(node=>({node,disabled:node.disabled}));
@@ -121,7 +123,7 @@
    report({type:'jot-docx-region-focus',confirmed});
   };
   controls();
-  return {command(value){
+  return {get busy(){return busy;},refresh:controls,command(value){
    if(value.type==='jot-docx-region-enable'&&typeof value.enabled==='boolean'){enabled=value.enabled;if(!enabled){if(busy)report({type:'jot-docx-capture-cancel',reason:'scope_changed'});else{active=false;wrapper.style.touchAction='';clear();}}controls();}
    else if(value.type==='jot-docx-region-probe'){report({type:'jot-docx-region-ready',available:true});if(value.focus)void restore(value.focus);send();}
    else if(value.type==='jot-docx-capture')void capture(value.serial);

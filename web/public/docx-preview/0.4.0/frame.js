@@ -220,55 +220,97 @@ function findTextSearchMatches(text, query, limit) {
  document.getElementById('in').addEventListener('click',()=>resize(0.1));
  document.getElementById('out').addEventListener('click',()=>resize(-0.1));
  const query=document.getElementById('query'),previous=document.getElementById('previous'),next=document.getElementById('next'),counter=document.getElementById('matches');
- let matches=[],active=0,searchTimer,fallbackRange;
+ const batchPrevious=document.getElementById('search-batch-previous'),batchNext=document.getElementById('search-batch-next');
+ let matches=[],active=0,searchTimer,fallbackRange,searchGeneration=0,searchBusy=false,batch=0,batchStarts=[null],hasNextBatch=false;
+ const searchControls=()=>{
+  query.closest('nav').setAttribute('aria-busy',String(searchBusy));
+  previous.disabled=next.disabled=searchBusy||matches.length===0;
+  batchPrevious.disabled=searchBusy||batch===0;batchNext.disabled=searchBusy||!hasNextBatch;
+  regionController?.refresh?.();
+ };
  const clearHighlights=()=>{
   globalThis.CSS?.highlights?.delete('jot-docx-search');globalThis.CSS?.highlights?.delete('jot-docx-search-active');
   const selection=window.getSelection();
   if(fallbackRange&&selection?.rangeCount===1&&selection.getRangeAt(0)===fallbackRange)selection.removeAllRanges();
   fallbackRange=undefined;
  };
+ const cancelSearch=()=>{searchGeneration++;window.clearTimeout(searchTimer);searchBusy=false;searchControls();};
  const navigate=delta=>{
-  previous.disabled=next.disabled=matches.length===0;
+  if(searchBusy||closed||regionController?.busy)return;
+  searchControls();
   if(!matches.length){counter.textContent=query.value.trim()?'没有匹配':'尚未搜索';return;}
-  active=(active+delta+matches.length)%matches.length;counter.textContent=`${active+1} / ${matches.length}`;
+  active=(active+delta+matches.length)%matches.length;counter.textContent=`第 ${batch+1} 批 · ${active+1} / ${matches.length}`;
   const current=matches[active];
   if(globalThis.CSS?.highlights&&globalThis.Highlight){globalThis.CSS.highlights.set('jot-docx-search-active',new Highlight(current.range));}
   else{clearHighlights();const selection=window.getSelection();selection?.removeAllRanges();selection?.addRange(current.range);fallbackRange=current.range;}
   current.element.scrollIntoView({block:'center'});
  };
- const search=()=>{
-  clearHighlights();matches=[];active=0;
-  let characters=0,limited=false;
-  if(query.value.trim()){
-   const walker=document.createTreeWalker(content,NodeFilter.SHOW_TEXT,{acceptNode(node){
-    return node.textContent?.trim()&&!node.parentElement?.closest('style,script,[data-file-search-exclude]')?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT;
-   }});
-   let node;
-   // shortcut: bound searches to 2097152 UTF-16 units, 262144 per node and 2000 hits, extend coverage with larger-source work.
-   while((node=walker.nextNode())){
-    const original=node.textContent??'',budget=Math.min(256*1024,2*1024*1024-characters),text=original.slice(0,budget);
-    characters+=text.length;if(text.length<original.length)limited=true;
-    for(const hit of findTextSearchMatches(text,query.value,2001-matches.length)){
-     if(matches.length===2000){limited=true;break;}
-     const range=document.createRange();range.setStart(node,hit.from);range.setEnd(node,hit.to);matches.push({range,element:node.parentElement??content});
+ const search=async(page=0)=>{
+  if(closed||regionController?.busy)return;
+  cancelSearch();const generation=searchGeneration,value=query.value,found=[];
+  clearHighlights();matches=[];active=0;hasNextBatch=false;searchBusy=true;searchControls();counter.textContent='正在搜索…';
+  document.getElementById('coverage').textContent='';
+  try{
+   if(value.length>200)throw Error('SEARCH_QUERY_LIMIT');
+   if(value.trim()){
+    // Overlap covers a folded query while retaining surrogate pairs in source windows.
+    const overlap=foldTextWithSourceOffsets(value.trim()).value.length*2+2;
+    const walker=document.createTreeWalker(content,NodeFilter.SHOW_TEXT,{acceptNode(node){
+     return node.textContent?.trim()&&!node.parentElement?.closest('style,script,[data-file-search-exclude]')?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT;
+    }});
+    const cursor=batchStarts[page];let node=cursor?.node??walker.nextNode(),offset=cursor?.offset??0,chunks=0,nextCursor,more=false;
+    if(cursor)walker.currentNode=cursor.node;
+    outer:while(node){
+     if(closed||generation!==searchGeneration)return;
+     const original=node.textContent??'';
+     if(offset>=original.length){node=walker.nextNode();offset=0;continue;}
+     let end=Math.min(original.length,offset+16384);
+     if(end<original.length&&original.charCodeAt(end-1)>=0xd800&&original.charCodeAt(end-1)<=0xdbff)end--;
+     const hits=findTextSearchMatches(original.slice(offset,end),value,1001-found.length);
+     for(const hit of hits){
+      if(found.length===1000){more=true;break outer;}
+      const range=document.createRange();range.setStart(node,offset+hit.from);range.setEnd(node,offset+hit.to);
+      found.push({range,element:node.parentElement??content});
+      if(found.length===1000)nextCursor={node,offset:offset+hit.to};
+     }
+     // Resume after the last complete match so window overlap cannot duplicate it.
+     if(hits.length)offset+=hits[hits.length-1].to;
+     else if(end===original.length){node=walker.nextNode();offset=0;}
+     else{
+      offset=Math.max(offset+1,end-overlap);
+      if(original.charCodeAt(offset)>=0xdc00&&original.charCodeAt(offset)<=0xdfff)offset--;
+     }
+     if(++chunks%8===0){
+      counter.textContent=`正在搜索第 ${page+1} 批 · 已找到 ${found.length} 处`;
+      await new Promise(resolve=>window.setTimeout(resolve,0));
+     }
     }
-    if(matches.length===2000||characters>=2*1024*1024){limited=true;break;}
+    if(closed||generation!==searchGeneration)return;
+    hasNextBatch=more;batchStarts.length=page+1;if(more)batchStarts.push(nextCursor);
    }
-  }
-  document.getElementById('coverage').textContent=limited?' 搜索达到当前字符或命中上限，存在未覆盖内容。':'';
-  if(globalThis.CSS?.highlights&&globalThis.Highlight&&matches.length)globalThis.CSS.highlights.set('jot-docx-search',new Highlight(...matches.map(match=>match.range)));
-  navigate(0);
+   if(closed||generation!==searchGeneration)return;
+   matches=found;batch=page;
+   document.getElementById('coverage').textContent=hasNextBatch?'当前批最多1000处，可继续搜索后续全部已渲染文字。':value.trim()?'已搜索至文档末尾。':'';
+   if(globalThis.CSS?.highlights&&globalThis.Highlight&&matches.length)globalThis.CSS.highlights.set('jot-docx-search',new Highlight(...matches.map(match=>match.range)));
+   searchBusy=false;navigate(0);
+  }catch{
+   if(closed||generation!==searchGeneration)return;
+   clearHighlights();matches=[];hasNextBatch=false;counter.textContent='搜索未完成，请重新输入后重试。';
+  }finally{if(!closed&&generation===searchGeneration){searchBusy=false;searchControls();}}
  };
- query.addEventListener('input',()=>{
-  window.clearTimeout(searchTimer);clearHighlights();matches=[];previous.disabled=next.disabled=true;counter.textContent='等待搜索';
-  searchTimer=window.setTimeout(search,180);
- });
+ const resetSearch=()=>{
+  cancelSearch();clearHighlights();matches=[];batch=0;batchStarts=[null];hasNextBatch=false;searchControls();
+  document.getElementById('coverage').textContent='';counter.textContent='等待搜索';
+ };
+ query.addEventListener('input',()=>{resetSearch();searchTimer=window.setTimeout(()=>void search(),180);});
  previous.addEventListener('click',()=>navigate(-1));next.addEventListener('click',()=>navigate(1));
+ batchPrevious.addEventListener('click',()=>{if(batch>0&&!searchBusy)void search(batch-1);});
+ batchNext.addEventListener('click',()=>{if(hasNextBatch&&!searchBusy)void search(batch+1);});
  document.addEventListener('keydown',event=>{
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='f'&&!query.disabled){event.preventDefault();query.focus();query.select();}
-  if(event.target!==query)return;
-  if(event.key==='Escape'){event.preventDefault();window.clearTimeout(searchTimer);query.value='';search();}
-  if(event.key==='Enter'){event.preventDefault();window.clearTimeout(searchTimer);if(!matches.length)search();else navigate(event.shiftKey?-1:1);}
+  if(event.target!==query||query.disabled)return;
+  if(event.key==='Escape'){event.preventDefault();query.value='';resetSearch();counter.textContent='尚未搜索';}
+  if(event.key==='Enter'){event.preventDefault();window.clearTimeout(searchTimer);if(!matches.length)void search();else navigate(event.shiftKey?-1:1);}
  });
  let outlineItems=[],outlinePage=0;
  const outlineInput=document.getElementById('outline-page'),outlinePrevious=document.getElementById('outline-previous'),outlineNext=document.getElementById('outline-next');
@@ -306,7 +348,7 @@ function findTextSearchMatches(text, query, limit) {
   document.getElementById('outline-status').textContent=outlineItems.length?`识别到 ${outlineItems.length} 个标题，每页最多100项。`:'此文档没有可识别的标题。';
  };
  window.addEventListener('pagehide',()=>{
-  if(started)report({type:'jot-docx-closed',reason:'pagehide'});closed=true;
+  if(started)report({type:'jot-docx-closed',reason:'pagehide'});cancelSearch();closed=true;batchStarts=[];
   window.clearTimeout(searchTimer);window.clearTimeout(selectionTimer);clearHighlights();matches=[];clearOutline('目录已关闭');
   visualView=undefined;proposal=undefined;focusRange=undefined;regionController=undefined;content.replaceChildren();styles.replaceChildren();
  },{once:true});
@@ -338,7 +380,7 @@ function findTextSearchMatches(text, query, limit) {
    const sections=content.querySelectorAll('section.jot-docx').length;
    visualView=indexVisualText();
    buildOutline();query.disabled=false;
-   regionController=window.JotWordRegion({content,report});
+   regionController=window.JotWordRegion({content,report,isWorking:()=>searchBusy,onCaptureStart:cancelSearch});
    status.textContent='Word视觉内容';report({type:'jot-docx-ready',sections});
    if(value.focus)restoreFocus(value.focus);
   }catch(error){
