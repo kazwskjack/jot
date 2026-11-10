@@ -1,3 +1,4 @@
+import type {OfficePrintView} from '../../packages/gateway/contracts/types';
 import {taskDraftScope} from './client';
 import type {ListedFilePreviewSource,OfficePrintPreview} from './activity-file-preview-client';
 import type {Zoom} from './PdfFilePage';
@@ -5,6 +6,7 @@ import type {Zoom} from './PdfFilePage';
 import type {NormalizedRect} from './vendor/pilotdeck-content-reference';
 
 export type PdfReferenceFocus={key:string;pages:Array<{page:number;rect?:NormalizedRect}>;rotation?:number};
+export type OfficePrintFocus=PdfReferenceFocus&{view:OfficePrintView};
 export type PdfViewState={page:number;zoom:Zoom;rotation:number;continuous:boolean;position:number;left:number};
 export const defaultPdfView:PdfViewState={page:1,zoom:'width',rotation:0,continuous:false,position:0,left:0};
 const limit=32,memory=new Map<string,PdfViewState>();

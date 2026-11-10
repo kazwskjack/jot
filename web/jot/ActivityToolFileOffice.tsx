@@ -1,3 +1,4 @@
+import type {OfficePrintFocus} from './pdf-file-view-state';
 import OfficeFilePrintPreview from './OfficeFilePrintPreview';
 import OfficePreviewServiceStatus from './OfficePreviewServiceStatus';
 // Selection context bounds adapted from PilotDeck 783499ff SpreadsheetInteractivePreview.tsx.
@@ -303,12 +304,12 @@ function OfficeContent({value,source,officeFocus,officeTextFocus}:{value:OfficeD
  return <OfficeDocumentContent value={value} source={source} officeTextFocus={officeTextFocus}/>;
 }
 
-export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
- const {conversationId,runId,activityId,resultSha,file}=props,owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file.path,file.version,file.sha256,file.size,props.officeFocus?.key,props.officeTextFocus?.key,props.officeRegionFocus?.key]);
+export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus;printFocus?:OfficePrintFocus}){
+ const {conversationId,runId,activityId,resultSha,file}=props,owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file.path,file.version,file.sha256,file.size,props.officeFocus?.key,props.officeTextFocus?.key,props.officeRegionFocus?.key,props.printFocus?.key]);
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;page?:Page;error?:string}>(),[revision,setRevision]=useState(0);
  const [visualState,setVisualState]=useState<{identity:string;enabled:boolean}>();
- const [printSource,setPrintSource]=useState<string>();const print=printSource===identity;
+ const [printSource,setPrintSource]=useState<{identity:string;enabled:boolean}>();const print=printSource?.identity===identity?printSource.enabled:!!props.printFocus;
  const [fullscreen,setFullscreen]=useState(false),[displayError,setDisplayError]=useState('');
  const [fullscreenPending,setFullscreenPending]=useState(false),fullscreenRequest=useRef(false);
  const visual=visualState?.identity===identity?visualState.enabled:props.officeFocus?.value.cell_view===2||props.officeTextFocus?.value.text_view===2||!!props.officeRegionFocus;
@@ -363,13 +364,13 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
   <nav aria-label="Office查看器工具栏" data-chat-search-ignore>
    <button type="button" aria-pressed={fullscreen} disabled={fullscreenPending} onClick={()=>void toggleFullscreen()}>{fullscreen?'退出全屏':'全屏查看Office文件'}</button>
    <button type="button" disabled={loading} onClick={refresh}>重新读取固定版本</button>
-   <button type="button" aria-pressed={!print} onClick={()=>setPrintSource(undefined)}>内置Office查看器</button>
-   <button type="button" aria-pressed={print} disabled={loading} onClick={()=>setPrintSource(identity)}>LibreOffice转换PDF</button>
+   <button type="button" aria-pressed={!print} onClick={()=>setPrintSource({identity,enabled:false})}>内置Office查看器</button>
+   <button type="button" aria-pressed={print} disabled={loading} onClick={()=>setPrintSource({identity,enabled:true})}>LibreOffice转换PDF</button>
   </nav>
   {displayError&&<p role="alert">{displayError}</p>}
   <OfficePreviewServiceStatus key={identity} owner={owner} onRendererChange={refresh}/>
   <ActivityToolFileBytes {...props}/>
-  {print&&<OfficeFilePrintPreview key={identity+':print:'+revision} {...props}/>}
+  {print&&<OfficeFilePrintPreview key={identity+':print:'+revision} {...props} focus={props.printFocus}/>}
   {loading&&<p role="status">正在核对原版本并解析Office内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'Office读取已取消'});}}>取消读取</button></p>}
   {!print&&current?.page&&<>
    <p>原文件结构化内容 · {current.page.engine.name} {current.page.engine.version}</p>

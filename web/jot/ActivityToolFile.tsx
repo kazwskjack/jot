@@ -8,7 +8,7 @@ import {ApiError,request,taskDraftScope} from './client';
 import type {ActivityToolFilePage} from './types';
 
 import type {ListedFilePreviewSource} from './activity-file-preview-client';
-import type {PdfReferenceFocus} from './pdf-file-view-state';
+import type {PdfReferenceFocus,OfficePrintFocus} from './pdf-file-view-state';
 
 const ActivityToolFilePdf=lazy(()=>import('./ActivityToolFilePdf'));
 const ActivityToolFileOffice=lazy(()=>import('./ActivityToolFileOffice'));
@@ -60,8 +60,8 @@ function ActivityToolFileText({conversationId,runId,activityId,resultSha,file}:L
  </section>;
 }
 
-export default function ActivityToolFile(props:ListedFilePreviewSource&{focus?:PdfReferenceFocus;officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
- const identity=JSON.stringify([taskDraftScope(),props.conversationId,props.runId,props.activityId,props.resultSha,props.file,props.focus?.key,props.officeFocus?.key,props.officeTextFocus?.key,props.officeRegionFocus?.key]),[textView,setTextView]=useState<string>();
+export default function ActivityToolFile(props:ListedFilePreviewSource&{focus?:PdfReferenceFocus;printFocus?:OfficePrintFocus;officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
+ const identity=JSON.stringify([taskDraftScope(),props.conversationId,props.runId,props.activityId,props.resultSha,props.file,props.focus?.key,props.officeFocus?.key,props.officeTextFocus?.key,props.officeRegionFocus?.key,props.printFocus?.key]),[textView,setTextView]=useState<string>();
  const pdf=props.file.path.toLowerCase().endsWith('.pdf'),office=officePreviewFormat(props.file.path);
  if(office)return <ConversationDisplayBoundary key={identity} label="Office查看器"><Suspense fallback={<p role="status">正在载入Office查看器…</p>}><ActivityToolFileOffice {...props}/></Suspense></ConversationDisplayBoundary>;
  if(!pdf&&!listedFileImageType(props.file.path))return <ActivityToolFileText {...props}/>;

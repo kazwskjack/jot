@@ -1,3 +1,5 @@
+import type {OfficePrintView} from '../../packages/gateway/contracts/types';
+import {officePreviewFormat} from '../../packages/gateway/src/artifacts/document-preview-content';
 // Adapted from PilotDeck revision 783499ffdb2d501bf590b2e035acd027a882df10.
 // Original source ui/src/components/code-editor/view/subcomponents/RegionSelectionOverlay.tsx.
 // Adapted portions retain GNU AGPL v3 terms.
@@ -16,10 +18,11 @@ const fromPoints=(x:number,y:number,endX:number,endY:number):Rect=>({left:Math.m
 const clamp=(rect:Rect,bounds:DOMRect):Rect=>({left:Math.max(bounds.left,Math.min(bounds.right,rect.left)),top:Math.max(bounds.top,Math.min(bounds.bottom,rect.top)),right:Math.max(bounds.left,Math.min(bounds.right,rect.right)),bottom:Math.max(bounds.top,Math.min(bounds.bottom,rect.bottom))});
 const normalized=(rect:Rect,bounds:DOMRect)=>normalizeRect({x:(rect.left-bounds.left)/bounds.width,y:(rect.top-bounds.top)/bounds.height,width:(rect.right-rect.left)/bounds.width,height:(rect.bottom-rect.top)/bounds.height});
 
-export default function PdfFileRegionReference({root,source,page,rotation}:{root:RefObject<HTMLDivElement|null>;source:ListedFilePreviewSource;page:number;rotation:number}){
+export default function PdfFileRegionReference({root,source,page,rotation,printView}:{root:RefObject<HTMLDivElement|null>;source:ListedFilePreviewSource;page:number;rotation:number;printView?:OfficePrintView}){
  const context=useContext(FileTextReferenceContext),latest=useRef(context);latest.current=context;
- const owner=taskDraftScope(),identity=JSON.stringify([owner,source,rotation]),sourceIdentity=useRef(identity);sourceIdentity.current=identity;
- const disabled=!context||context.disabled||context.regionDisabled||context.owner!==owner||context.conversationId!==source.conversationId;
+ const owner=taskDraftScope(),identity=JSON.stringify([owner,source,rotation,printView]),sourceIdentity=useRef(identity);sourceIdentity.current=identity;
+ const printMime=printView?officePreviewFormat(source.file.path)?.mediaType:undefined;
+ const disabled=!context||context.disabled||context.regionDisabled||context.owner!==owner||context.conversationId!==source.conversationId||!!printView&&(!printMime||!context.printViews?.includes(1))||!!printView&&!context.regionRenderers?.includes('office-pdf');
  const [active,setActive]=useState(false),[bounds,setBounds]=useState<DOMRect>(),[target,setTarget]=useState<Target>(),[rect,setRect]=useState<Rect>(),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const overlay=useRef<HTMLDivElement>(null),panel=useRef<HTMLElement>(null),start=useRef<{x:number;y:number;target:Target}|undefined>(undefined),sequence=useRef(0),capturing=useRef(false);
  const cancel=()=>{sequence.current++;capturing.current=false;start.current=undefined;setActive(false);setTarget(undefined);setRect(undefined);setBusy(false);};
@@ -52,7 +55,8 @@ export default function PdfFileRegionReference({root,source,page,rotation}:{root
   const check=()=>{
    const current=latest.current;
    if(sequence.current!==job||sourceIdentity.current!==expected||taskDraftScope()!==owner||!current
-    ||current.disabled||current.regionDisabled||current.owner!==owner||current.conversationId!==source.conversationId)throw new DOMException('选区已变化','AbortError');
+    ||current.disabled||current.regionDisabled||current.owner!==owner||current.conversationId!==source.conversationId
+    ||!!printView&&(!current.printViews?.includes(1)||!current.regionRenderers?.includes('office-pdf')))throw new DOMException('选区已变化','AbortError');
   };
   try{
    const crop=window.document.createElement('canvas');allocated=crop;
@@ -72,13 +76,13 @@ export default function PdfFileRegionReference({root,source,page,rotation}:{root
    const name=`pdf-page-${target.page}-region-${crypto.randomUUID()}.png`,file=new File([blob],name,{type:'image/png'}),original=source.file;
    const reference=createImageRegionContentReference({
     selectionMode:'region',
-    source:{relativePath:original.path,fileName:original.path.split('/').at(-1)!,mimeType:'application/pdf',revision:{id:String(original.version),size:original.size,sha256:original.sha256}},
-    renderer:{id:'pdf',backend:'builtin',locatorQuality:'visual'},
+    source:{relativePath:original.path,fileName:original.path.split('/').at(-1)!,mimeType:printMime??'application/pdf',revision:{id:String(original.version),size:original.size,sha256:original.sha256}},
+    renderer:{id:printView?'office-pdf':'pdf',backend:printView?'libreoffice':'builtin',locatorQuality:'visual'},
     locator:{surface:'page',pageNumber:target.page,rect:{x:x/canvasWidth,y:y/canvasHeight,width:crop.width/canvasWidth,height:crop.height/canvasHeight}},
     image:{name,mimeType:'image/png',width:crop.width,height:crop.height,sha256:sha},
    });
    crop.width=0;crop.height=0;
-   const accepted=await latest.current!.onAddRegion({owner,conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,file:{path:original.path,version:original.version,sha256:original.sha256,size:original.size},reference,imageBytes:file.size,rotation},file);
+   const accepted=await latest.current!.onAddRegion({...(printView?{print_view:printView}:{}),owner,conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,file:{path:original.path,version:original.version,sha256:original.sha256,size:original.size},reference,imageBytes:file.size,rotation},file);
    if(sourceIdentity.current===expected){if(accepted)cancel();else if(sequence.current===job)setError('截图引用未被接收，请查看当前对话的提示。');}
   }catch(error){if(sequence.current===job&&(error as DOMException)?.name!=='AbortError')setError(error instanceof Error?error.message:'区域截图失败');}
   finally{if(fileRegionCapture.owner===lease)fileRegionCapture.owner=undefined;if(allocated){allocated.width=0;allocated.height=0;}if(sequence.current===job){capturing.current=false;setBusy(false);}}

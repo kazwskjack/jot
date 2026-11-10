@@ -18,10 +18,12 @@ import ActivityToolFileBytes from './ActivityToolFileBytes';
 pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const assets=new URL('pdfjs/6.1.200/',new URL(workerUrl,document.baseURI)).href;
 
-export default function ActivityToolFilePdf(props:ListedFilePreviewSource&{focus?:PdfReferenceFocus;officePrint?:OfficePrintPreview&{onRetry:()=>void}}){
+export default function ActivityToolFilePdf(props:ListedFilePreviewSource&{focus?:PdfReferenceFocus;officePrint?:OfficePrintPreview&{onRetry:()=>void;focus?:PdfReferenceFocus}}){
  const {conversationId,runId,activityId,resultSha,file,officePrint}=props,owner=taskDraftScope();
  const identity=pdfViewIdentity(props,owner,officePrint);
- const sourceFocus=officePrint?undefined:props.focus;
+ const sourceFocus=officePrint?officePrint.focus:props.focus;
+ const source=useMemo(()=>({conversationId,runId,activityId,resultSha,file:{path:file.path,version:file.version,sha256:file.sha256,size:file.size}}),[conversationId,runId,activityId,resultSha,file.path,file.version,file.sha256,file.size]);
+ const printView=useMemo(()=>officePrint?{protocol:1 as const,sha256:officePrint.sha256,size:officePrint.size,pageCount:officePrint.pageCount,proof:officePrint.proof}:undefined,[officePrint?.sha256,officePrint?.size,officePrint?.pageCount,officePrint?.proof]);
  const focus=useRef(sourceFocus);focus.current=sourceFocus;
  const referenceJump=useRef<{key:string;page:number}|undefined>(undefined);
  const root=useRef<HTMLElement>(null),viewport=useRef<HTMLDivElement>(null),scale=useRef(1);
@@ -150,9 +152,9 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource&{focus
    }
   }}>
   <h4>{file.path} · 版本 {file.version}</h4>
-  {officePrint&&<p role="status">LibreOffice转换PDF · {officePrint.pageCount}页 · 摘要 <code>{officePrint.sha256}</code>。转换引用入口继续接入中。</p>}
+  {officePrint&&<p role="status">LibreOffice转换PDF · {officePrint.pageCount}页 · 摘要 <code>{officePrint.sha256}</code>。文字引用按近似页定位保存。</p>}
   {officePrint&&<details><summary>转换来源证明</summary><code>{officePrint.proof}</code></details>}
-  {document&&!officePrint&&<><PdfFileTextReferenceAction root={root} source={props} rotation={currentView.rotation}/><PdfFileRegionReference root={viewport} source={props} page={page} rotation={currentView.rotation}/></>}
+  {document&&<><PdfFileTextReferenceAction root={root} source={source} rotation={currentView.rotation} printView={printView}/><PdfFileRegionReference root={viewport} source={source} page={page} rotation={currentView.rotation} printView={printView}/></>}
   <ActivityToolFileBytes key={identity} conversationId={conversationId} runId={runId} activityId={activityId} resultSha={resultSha} file={file}/>
   {challenge?.identity===identity&&<form onSubmit={event=>{event.preventDefault();challenge.update(password);setPassword('');setChallenge(undefined);}}>
    <label>PDF密码<input type="password" autoComplete="current-password" value={password} onChange={event=>setPassword(event.target.value)}/></label>
