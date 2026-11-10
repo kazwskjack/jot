@@ -1,6 +1,6 @@
 import {cellRangeCoordinates} from '../../packages/gateway/src/messages/content-reference.js';
 import {FileTextReferenceContext,type OfficeCellFocus} from './FileTextReferences';
-import {createCellRangeContentReference} from './vendor/pilotdeck-content-reference';
+import {createCellRangeContentReference,type CellRangeSnapshot} from './vendor/pilotdeck-content-reference';
 import './activity-tool-file-office.css';
 import React,{useContext,useEffect,useMemo,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
@@ -56,36 +56,119 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
  const cells=useMemo(()=>Object.entries(value.sheets[part]?.cells??{}).sort(([a],[b])=>a.localeCompare(b,undefined,{numeric:true})),[value,part]);
  const [page,setPage]=useState(()=>Math.max(0,Math.floor(cells.findIndex(([address])=>address===focused?.address)/50)));
  const [selected,setSelected]=useState<string[]>([]),[notice,setNotice]=useState('');
+ const [rangeDraft,setRangeDraft]=useState(officeFocus?.value.reference.locator.activeRange??'A1:J20');
+ const [rangeView,setRangeView]=useState<string|undefined>(()=>{
+  const range=officeFocus?.value.reference.locator.activeRange;
+  return range&&(range.includes(':')||!value.sheets[part]?.cells[range])?range:undefined;
+ });
+ const [rangeRow,setRangeRow]=useState(0),[rangeColumn,setRangeColumn]=useState(0);
+ const anchor=useRef<{row:number;column:number}|null>(null),drag=useRef<number|undefined>(undefined);
+ useEffect(()=>{
+  const stop=()=>{drag.current=undefined;};
+  window.addEventListener('pointerdown',stop,true);window.addEventListener('pointerup',stop);window.addEventListener('pointercancel',stop);window.addEventListener('blur',stop);
+  return()=>{window.removeEventListener('pointerdown',stop,true);window.removeEventListener('pointerup',stop);window.removeEventListener('pointercancel',stop);window.removeEventListener('blur',stop);};
+ },[]);
  const sheet=value.sheets[part],disabled=!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId;
  useEffect(()=>{
   if(jumped.current||!focused?.confirmed||part!==focused.index)return;
   const target=root.current?.querySelector<HTMLElement>(`[data-office-reference-cell="${focused.address}"]`);
   if(target){target.scrollIntoView({block:'center',inline:'nearest'});jumped.current=true;}
  },[focused,part,page]);
- const capture=()=>{
-  if(!context||disabled||taskDraftScope()!==owner||!sheet?.name||!selected.length)return;
+ const capture=(ranges:string[])=>{
+  if(!context||disabled||taskDraftScope()!==owner||!sheet?.name||!ranges.length)return;
+  let snapshots:CellRangeSnapshot[];
+  try{
+   snapshots=ranges.map(range=>{
+    let dimensions:ReturnType<typeof cellRangeCoordinates>;
+    try{dimensions=cellRangeCoordinates(range);}catch{throw Error('单元格范围无效，请使用A1或A1:C10等范围。');}
+    const rows=Math.min(dimensions.rows,100),columns=Math.min(dimensions.columns,50);
+    const displayValues:string[][]=[],formulas:string[][]=[];
+    for(let row=0;row<rows;row++){
+     const values:string[]=[],expressions:string[]=[];
+     for(let column=0;column<columns;column++){
+      const address=cellAddress(dimensions.left+column,dimensions.top+row),cell=sheet.cells[address];
+      if(!cell&&value.truncated)throw Error(`当前解析尚未覆盖${address}，无法确认该单元格为空，请缩小范围或读取完整来源。`);
+      values.push(cell?.value??'');expressions.push(cell?.formula??'');
+     }
+     displayValues.push(values);formulas.push(expressions);
+    }
+    return {range,displayValues,formulas,rowCount:dimensions.rows,columnCount:dimensions.columns,
+     truncated:value.truncated||rows<dimensions.rows||columns<dimensions.columns};
+   });
+  }catch(error){setNotice(error instanceof Error?error.message:'选区快照尚未完成核对');return;}
   const reference=createCellRangeContentReference({
    source:{relativePath:source.file.path,fileName:source.file.path.split('/').at(-1)!,mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     revision:{id:String(source.file.version),sha256:source.file.sha256,size:source.file.size}},
    renderer:{id:'xlsx',backend:'builtin',locatorQuality:'semantic'},
-   locator:{surface:'sheet',sheetId:`sheet-${part}`,sheetName:sheet.name,ranges:[...selected],activeRange:selected[0]},
-   cells:selected.map(address=>({range:address,displayValues:[[sheet.cells[address].value]],formulas:[[sheet.cells[address].formula??'']],rowCount:1,columnCount:1})),
+   locator:{surface:'sheet',sheetId:`sheet-${part}`,sheetName:sheet.name,ranges:[...ranges],activeRange:ranges[0]},
+   cells:snapshots,
   });
   if(context.onAdd({conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,file:{path:source.file.path,version:source.file.version,sha256:source.file.sha256,size:source.file.size},owner,reference})){
-   setSelected([]);setNotice('单元格引用已加入当前对话草稿。');
+   setSelected([]);setRangeDraft('');anchor.current=null;drag.current=undefined;setNotice('单元格引用已加入当前对话草稿。');
   }else setNotice('单元格引用尚未保存，请检查草稿状态或减少选中的内容。');
  };
+ const chooseCell=(row:number,column:number,extend:boolean)=>{
+  if(!extend||!anchor.current)anchor.current={row,column};
+  const start=anchor.current;
+  const first=cellAddress(Math.min(start.column,column),Math.min(start.row,row));
+  const last=cellAddress(Math.max(start.column,column),Math.max(start.row,row));
+  setRangeDraft(first===last?first:first+':'+last);
+ };
+ const showRange=()=>{
+  const range=rangeDraft.trim().toUpperCase();
+  try{cellRangeCoordinates(range);}catch{setNotice('单元格范围无效，请使用A1或A1:C10等范围。');return;}
+  setRangeView(range);setRangeRow(0);setRangeColumn(0);setNotice('');anchor.current=null;drag.current=undefined;
+ };
+ const viewport=rangeView?cellRangeCoordinates(rangeView):undefined;
+ const pendingRange=useMemo(()=>{
+  try{return cellRangeCoordinates(rangeDraft.trim().toUpperCase());}catch{return undefined;}
+ },[rangeDraft]);
  return <section ref={root} aria-label="原工作表单元格">
-  {officeFocus&&<p role="status">{focused?.confirmed?'已核对原引用工作表、显示值及保存的公式。':'原引用选区尚未完成核对，请对照原引用快照。'}</p>}
-  <label>工作表 <select value={part} onChange={event=>{setPart(Number(event.target.value));setPage(0);setSelected([]);setNotice('');}}>
+  {officeFocus&&<p role="status">{focused?.confirmed?(value.truncated||officeFocus.value.reference.cells.some(snapshot=>snapshot.truncated)?'已核对原引用保存的快照片段，当前解析或原选区存在截断。':'已核对原引用工作表、显示值及保存的公式。'):'原引用选区尚未完成核对，请对照原引用快照。'}</p>}
+  <label>工作表 <select value={part} onChange={event=>{setPart(Number(event.target.value));setPage(0);setSelected([]);setNotice('');setRangeView(undefined);setRangeDraft('A1:J20');setRangeRow(0);setRangeColumn(0);anchor.current=null;drag.current=undefined;}}>
    {value.sheets.map((sheet,index)=><option key={index} value={index}>{sheet.name||`工作表 ${index+1}`}</option>)}
   </select></label>
   <div data-chat-search-ignore>
-   <button type="button" disabled={disabled||!selected.length||!sheet?.name} onClick={capture}>引用选中的 {selected.length} 个单元格</button>
-   <button type="button" disabled={!selected.length} onClick={()=>setSelected([])}>清空单元格选择</button>
+   <button type="button" disabled={disabled||!selected.length||!sheet?.name} onClick={()=>capture(selected)}>引用选中的 {selected.length} 个单元格</button>
+   <button type="button" disabled={!selected.length&&!rangeDraft.trim()} onClick={()=>{setSelected([]);setRangeDraft('');anchor.current=null;drag.current=undefined;}}>清空选择</button>
    <span>每次最多选择100个单元格，可跨页选择。</span>
   </div>
   {notice&&<p role="status">{notice}</p>}
+  <fieldset data-chat-search-ignore>
+   <legend>矩形选区</legend>
+   <label>单元格范围 <input value={rangeDraft} maxLength={32} onChange={event=>{setRangeDraft(event.target.value);anchor.current=null;drag.current=undefined;}} placeholder="A1:C10"/></label>
+   <button type="button" onClick={showRange}>查看范围</button>
+   <button type="button" disabled={disabled||!sheet?.name||!rangeDraft.trim()} onClick={()=>capture([rangeDraft.trim().toUpperCase()])}>引用矩形选区</button>
+   {rangeView&&<button type="button" onClick={()=>{setRangeView(undefined);drag.current=undefined;}}>返回单元格列表</button>}
+   <p>在选区表格中拖选，或用键盘选定起点后按住Shift选择终点。快照最多保留100行、50列，截断状态随引用保存。</p>
+  </fieldset>
+  {viewport?<>
+   <table className="jot-sheet-grid"><caption>{sheet?.name||'工作表'} · {rangeView}</caption>
+    <thead><tr><th scope="col">行</th>{Array.from({length:Math.min(10,viewport.columns-rangeColumn*10)},(_value,index)=>
+     <th scope="col" key={index}>{cellAddress(viewport.left+rangeColumn*10+index,1).replace(/[0-9]+$/,'')}</th>)}</tr></thead>
+    <tbody>{Array.from({length:Math.min(20,viewport.rows-rangeRow*20)},(_value,rowIndex)=>{
+     const row=viewport.top+rangeRow*20+rowIndex;
+     return <tr key={row}><th scope="row">{row}</th>{Array.from({length:Math.min(10,viewport.columns-rangeColumn*10)},(_value,columnIndex)=>{
+      const column=viewport.left+rangeColumn*10+columnIndex,address=cellAddress(column,row),cell=sheet?.cells[address];
+      const original=focused?.confirmed&&focused.index===part&&ranges.some(range=>column>=range.left&&column<=range.right&&row>=range.top&&row<=range.bottom);
+      return <td key={address} data-office-reference-cell={original?address:undefined} style={original?{outline:'2px solid var(--accent)'}:undefined}>
+       <button type="button" className="jot-sheet-cell" aria-pressed={!!pendingRange&&column>=pendingRange.left&&column<=pendingRange.right&&row>=pendingRange.top&&row<=pendingRange.bottom} aria-label={`${address} ${cell?.value.slice(0,80)??(value.truncated?'尚未覆盖':'空单元格')}`}
+        onPointerDown={event=>{if(event.button!==0||!event.isPrimary)return;event.preventDefault();event.currentTarget.focus();drag.current=event.pointerId;chooseCell(row,column,event.shiftKey);}}
+        onPointerEnter={event=>{if(drag.current===event.pointerId&&event.buttons===1)chooseCell(row,column,true);}}
+        onKeyDown={event=>{
+         if(event.key==='Escape'){drag.current=undefined;anchor.current=null;return;}
+         if(event.key==='Enter'||event.key===' '){event.preventDefault();chooseCell(row,column,event.shiftKey);}
+        }}
+        onClick={event=>{if(event.detail===0)chooseCell(row,column,event.shiftKey);}}>
+        <span>{address}</span><pre>{cell?.value??(value.truncated?'尚未覆盖':'')}</pre>{cell?.formula&&<code>={cell.formula}</code>}
+       </button>
+      </td>;
+     })}</tr>;
+    })}</tbody>
+   </table>
+   <Pager page={rangeRow} count={Math.ceil(viewport.rows/20)} onChange={page=>{setRangeRow(page);drag.current=undefined;}} label="矩形选区行翻页"/>
+   <Pager page={rangeColumn} count={Math.ceil(viewport.columns/10)} onChange={page=>{setRangeColumn(page);drag.current=undefined;}} label="矩形选区列翻页"/>
+  </>:<>
   <table><caption>{sheet?.name||'工作表'} · 单元格与保存的公式</caption>
    <thead><tr><th scope="col">引用</th><th scope="col">单元格</th><th scope="col">保存值</th><th scope="col">公式</th></tr></thead>
    <tbody>{cells.slice(page*50,(page+1)*50).map(([address,cell])=>{
@@ -107,6 +190,7 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
   </table>
   {!cells.length&&<p>此工作表没有可显示的单元格。</p>}
   <Pager page={page} count={Math.ceil(cells.length/50)} onChange={setPage} label="工作表单元格翻页"/>
+  </>}
  </section>;
 }
 function OfficeContent({value,source,officeFocus}:{value:OfficeDocumentPreview;source:ListedFilePreviewSource;officeFocus?:OfficeCellFocus}){

@@ -4,3 +4,7 @@
 .jot-office-content th, .jot-office-content td { border: 1px solid var(--line); padding: 0.5rem; vertical-align: top; text-align: left; }
 .jot-office-content pre { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 5rem; max-width: 36rem; }
 .jot-office-preview select { max-width: 100%; }
+.jot-sheet-cell { width: 100%; min-width: 6rem; border-radius: 0; text-align: left; touch-action: none; }
+.jot-sheet-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.jot-sheet-cell > span { font-size: 0.8rem; color: var(--muted); }
+.jot-sheet-cell[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
