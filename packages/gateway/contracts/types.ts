@@ -836,6 +836,8 @@ export type OfficePreviewBinaryStatus={binaryPath:string}&(
 );
 export type OfficePreviewCandidates={protocol:1;checkedAt:string;candidates:OfficePreviewBinaryStatus[];truncated:boolean;execution_authorized:false};
 
+export type OfficePreviewCandidatePage=Omit<OfficePreviewCandidates,'protocol'>&{protocol:2;next_cursor?:string};
+
 export type OfficePreviewStatus = {
   protocol: 1;
   service: 'builtin'|'libreoffice';

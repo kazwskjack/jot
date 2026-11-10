@@ -1,3 +1,4 @@
+import {createOfficePreviewCandidatePager} from './file-engine/office-preview-candidate-pages.ts';
 import {OfficePreviewConfigurationStore} from './file-engine/office-preview-configuration.ts';
 import {createOfficePreviewCandidateReader} from './file-engine/office-preview-candidates.ts';
 import {signOfficePrintProof} from './messages/office-print-proof.ts';
@@ -656,6 +657,9 @@ export async function buildServer(config: {
   app.setErrorHandler((error, request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
     if(['content_reference_request_invalid','content_reference_request_too_large','content_reference_attachment_mismatch','office_print_reference_unproven'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(code==='office_preview_candidate_query_invalid')return reply.code(422).send({error:{code:'OFFICE_PREVIEW_QUERY_INVALID'}});
+    if(code==='office_preview_candidate_cursor_stale')return reply.code(409).send({error:{code:'OFFICE_PREVIEW_CANDIDATE_CURSOR_STALE'}});
+    if(code==='office_preview_candidate_scan_busy')return reply.code(429).header('retry-after','1').send({error:{code:'OFFICE_PREVIEW_CANDIDATE_SCAN_BUSY'}});
     if(code==='office_preview_configuration_forbidden')return reply.code(403).send({error:{code:'OFFICE_PREVIEW_CONFIGURATION_FORBIDDEN'}});
     if(code==='office_preview_configuration_conflict')return reply.code(409).send({error:{code:'OFFICE_PREVIEW_CONFIGURATION_CONFLICT'}});
     if(code==='office_preview_configuration_invalid')return reply.code(422).send({error:{code:'OFFICE_PREVIEW_CONFIGURATION_INVALID'}});
@@ -813,8 +817,9 @@ export async function buildServer(config: {
   const officePreviewConfiguration=new OfficePreviewConfigurationStore(db,config.officePreviewOwnerId);
   const readOfficePreviewSettings=()=>officePreviewConfiguration.get();
   const officePreviewStatus=createOfficePreviewStatusReader(readOfficePreviewSettings),officePreviewCandidates=createOfficePreviewCandidateReader(readOfficePreviewSettings);
+  const officePreviewCandidatePages=createOfficePreviewCandidatePager(readOfficePreviewSettings);
   const officePrintReferencesReady=typeof config.internalChannelToken==='string'&&config.internalChannelToken.length>=16;
-  app.addHook('onClose',async()=>{officePreviewStatus.close();officePreviewCandidates.close();});
+  app.addHook('onClose',async()=>{officePreviewStatus.close();officePreviewCandidates.close();await officePreviewCandidatePages.close();});
   app.get('/v1/office-preview/configuration',async(request,reply)=>{
     const owner=actor(request as any);reply.header('cache-control','private, no-store');
     if(Object.keys(request.query as Record<string,unknown>).length)throw Error('office_preview_configuration_invalid');
@@ -836,13 +841,16 @@ export async function buildServer(config: {
     return officePreviewStatus.read(query.refresh==='1'||query.refresh==='true');
   });
   app.get('/v1/office-preview/candidates',async(request,reply)=>{
-    actor(request as any);
-    const query=request.query as Record<string,unknown>;
-    if(Object.keys(query).some(key=>key!=='refresh')
-      ||query.refresh!==undefined&&(typeof query.refresh!=='string'||!['1','true','0','false'].includes(query.refresh))){
+    const owner=actor(request as any),query=request.query as Record<string,unknown>;
+    if(Object.keys(query).some(key=>!['refresh','scan_protocol','cursor'].includes(key))
+      ||query.scan_protocol!==undefined&&(typeof query.scan_protocol!=='string'||!['1','2'].includes(query.scan_protocol))
+      ||query.refresh!==undefined&&(typeof query.refresh!=='string'||!['1','true','0','false'].includes(query.refresh))
+      ||query.cursor!==undefined&&(typeof query.cursor!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(query.cursor))
+      ||query.scan_protocol==='2'&&query.refresh!==undefined||query.scan_protocol!=='2'&&query.cursor!==undefined){
       return reply.code(422).send({error:{code:'OFFICE_PREVIEW_QUERY_INVALID'}});
     }
     reply.header('cache-control','no-store');
+    if(query.scan_protocol==='2')return officePreviewCandidatePages.read(owner,query.cursor as string|undefined);
     return officePreviewCandidates.read(query.refresh==='1'||query.refresh==='true');
   });
   app.get('/v1/push/vapid-public-key',async(_request,reply)=>{

@@ -8,15 +8,16 @@ import {fileEngineChildEnvironment} from './engine.ts';
 import {probeOfficePreviewBinary} from './office-preview-status.ts';
 import type {OfficePreviewCandidates} from '../../contracts/types.ts';
 
-async function scanCandidates(environment:NodeJS.ProcessEnv,signal:AbortSignal):Promise<OfficePreviewCandidates>{
+export type OfficePreviewCandidateDirectory={root:string;pattern:RegExp;suffix:string[]};
+export function officePreviewCandidateLocations(environment:NodeJS.ProcessEnv){
  const paths=new Set<string>();let truncated=false;
  const add=(value:string|undefined)=>{
   const candidate=value?.trim();if(!candidate)return;
-  if(candidate.length>4096||/[\u0000-\u001f\u007f]/.test(candidate)||paths.size>=32&&!paths.has(candidate)){truncated=true;return;}
+  if(candidate.length>4096||/[\u0000-\u001f\u007f]/.test(candidate)){truncated=true;return;}
   paths.add(candidate);
  };
  add(environment.GENERAL_AGENT_LIBREOFFICE);add(environment.LIBREOFFICE_PATH);add(environment.SOFFICE_PATH);
- const directories:Array<{root:string;pattern:RegExp;suffix:string[]}> = [];
+ const directories:OfficePreviewCandidateDirectory[] = [];
  if(process.platform==='win32'){
   for(const root of new Set([environment.ProgramW6432,environment.ProgramFiles,environment['ProgramFiles(x86)'],'C:\\Program Files','C:\\Program Files (x86)'])){
    if(root)add(win32.join(root,'LibreOffice','program','soffice.com'));
@@ -28,11 +29,22 @@ async function scanCandidates(environment:NodeJS.ProcessEnv,signal:AbortSignal):
   for(const path of ['/usr/bin/soffice','/usr/bin/libreoffice','/usr/local/bin/soffice','/usr/local/bin/libreoffice','/snap/bin/libreoffice','/opt/libreoffice/program/soffice'])add(path);
   directories.push({root:'/opt',pattern:/^libreoffice/i,suffix:['program','soffice']});
  }
- // Reserve PATH launchers before bounded directory discovery fills the list.
+ // Keep fixed PATH launchers ahead of versioned installation directories.
  add(process.platform==='win32'?'soffice.com':'soffice');add('libreoffice');
+ return {paths:[...paths],directories,truncated};
+}
+
+async function scanCandidates(environment:NodeJS.ProcessEnv,signal:AbortSignal):Promise<OfficePreviewCandidates>{
+ const locations=officePreviewCandidateLocations(environment),paths=new Set(locations.paths);
+ let truncated=locations.truncated;
+ const directories=locations.directories;
+ const add=(candidate:string)=>{
+  if(candidate.length>4096||/[\u0000-\u001f\u007f]/.test(candidate)||paths.size>=32&&!paths.has(candidate)){truncated=true;return;}
+  paths.add(candidate);
+ };
  for(const directory of directories){
   signal.throwIfAborted();
-  // shortcut: scan the first64 entries; add directory paging for complete large-installation discovery.
+  // Protocol1 keeps its original prefix limit; protocol2 continues through candidateBatches.
   const found:string[]=[];let count=0;
   try{
    const entries=await opendir(directory.root,{bufferSize:16});
