@@ -224,3 +224,11 @@ The source hash binds that canonical public projection and original step identit
 A shared portable text formatter keeps activity display, result pagination and
 historical search aligned. It adds no native filesystem invocation or provider
 execution path. Existing native MIT and PilotDeck file-list notices apply.
+
+
+Native child public-result observation revision 3 carries the selected native
+SearchMeta or an explicit null alongside the original artifact receipts.
+It retains original full-event, transport and chunk hashes and the original
+immutable observation receipts. Capability negotiation leaves revision 2 as the
+legacy default. Additional projected metadata is appended to Jot's public event
+history under the original source identity and existing DSH MIT integration.

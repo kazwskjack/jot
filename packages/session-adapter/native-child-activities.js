@@ -3,15 +3,27 @@ import {nativeToolResultObservation,nativeToolCallObservation,sessionToolCallId}
 import {nativeChildLogJson as json,updateNativeChildLogHash} from './native-child-closure.js';
 
 function projectionRevision(source){
+ if(!source||typeof source!=='object'||Array.isArray(source))throw Error('native_activity_source_invalid');
  const revision=source.projection_revision===undefined?1:source.projection_revision;
- if(![1,2].includes(revision))throw Error('native_activity_source_invalid');
+ if(![1,2,3].includes(revision))throw Error('native_activity_source_invalid');
  return revision;
+}
+
+function preferredRevision(source){
+ const current=projectionRevision(source),supported=source.supported_projection_revision===undefined?current:source.supported_projection_revision;
+ if(![1,2,3].includes(supported))throw Error('native_activity_source_invalid');
+ const available=source.available_projection_revisions;
+ if(available===undefined)return supported;
+ if(!Array.isArray(available)||!available.length||available.length>3||new Set(available).size!==available.length
+  ||available.some(value=>![1,2,3].includes(value))||!available.includes(current)||!available.includes(supported))throw Error('native_activity_source_invalid');
+ return Math.max(...available);
 }
 
 async function sendNativeChildActivity({binding,event,bridge,metadata,signal,observationRevision=1}){
  const sha=updateNativeChildLogHash(createHash('sha256'),event).digest('hex');
  const call=event.type==='tool/call'?nativeToolCallObservation(event):null;
- const observation=event.type==='tool/result'?nativeToolResultObservation(event):call??{event};
+ const observation=event.type==='tool/result'?nativeToolResultObservation(event,observationRevision):call??{event};
+ const revisionFields=observationRevision>=3?{projection_revision:observationRevision}:{};
  if(event.type==='tool/result'&&observationRevision<2)delete observation.public_result.artifact_receipts;
  const format=event.type==='tool/result'?'public-result-v1':call?'public-call-v1':undefined;
  const evidence=format?{event_format:format,source_event_sha256:sha}:{};
@@ -24,7 +36,7 @@ async function sendNativeChildActivity({binding,event,bridge,metadata,signal,obs
    signal?.throwIfAborted();
    const chunk=encoded.slice(index*65_536,(index+1)*65_536);
    const chunkSha=createHash('sha256').update(json(chunk)).digest('hex');
-   receipt=await bridge.request('native-child-activities',binding,{...metadata,
+   receipt=await bridge.request('native-child-activities',binding,{...metadata,...revisionFields,
     action:metadata.action==='live-append'?'live-append-chunk':'append-chunk',
     ...(observationRevision>=2?{observation_format:format}:{}),event_seq:event.seq,source_event_sha256:sha,event_sha256:transportSha,
     chunk_index:index,chunk_count:count,chunk_data:chunk,chunk_sha256:chunkSha},signal);
@@ -34,7 +46,7 @@ async function sendNativeChildActivity({binding,event,bridge,metadata,signal,obs
     ||receipt.event_sha256!==sha||receipt.chunk_index!==index||receipt.chunk_sha256!==chunkSha)throw Error('native_activity_chunk_receipt_invalid');
   }
  }else{
-  receipt=await bridge.request('native-child-activities',binding,{...metadata,
+  receipt=await bridge.request('native-child-activities',binding,{...metadata,...revisionFields,
    ...observation,...evidence,event_sha256:transportSha},signal);
  }
  if(!receipt||receipt.accepted!==true||receipt.execution_authorized!==false||receipt.run_id!==binding.runId||receipt.session_ref!==binding.sessionRef
@@ -44,7 +56,12 @@ async function sendNativeChildActivity({binding,event,bridge,metadata,signal,obs
 
 /** Replay a verified closed prefix without loading or retaining an Agent. */
 export async function replayNativeChildActivities({binding,bridge,persistence,signal}){
- const source=await bridge.request('native-child-activities',binding,{action:'source'},signal);
+ let source=await bridge.request('native-child-activities',binding,{action:'source'},signal);
+ const preferred=preferredRevision(source);
+ if(preferred>projectionRevision(source)){
+  source=await bridge.request('native-child-activities',binding,{action:'source',projection_revision:preferred},signal);
+  if(projectionRevision(source)!==preferred)throw Error('native_activity_source_invalid');
+ }
  if(!source||source.protocol!==1||source.execution_authorized!==false||source.run_id!==binding.runId||source.session_ref!==binding.sessionRef
   ||typeof persistence?.open!=='function'||!Number.isSafeInteger(source.source_start)||source.source_start<0
   ||!Number.isSafeInteger(source.source_end)||source.source_end<source.source_start
@@ -52,7 +69,7 @@ export async function replayNativeChildActivities({binding,bridge,persistence,si
   ||source.last_event_seq!==null&&(!Number.isSafeInteger(source.last_event_seq)||source.last_event_seq<source.source_start||source.last_event_seq>=source.source_end)
   ||typeof source.complete!=='boolean')throw Error('native_activity_source_invalid');
  const revision=projectionRevision(source);
- if(revision===2&&(typeof source.refresh_tool_results!=='boolean'||typeof source.replay_complete!=='boolean'
+ if(revision>=2&&(typeof source.refresh_tool_results!=='boolean'||typeof source.replay_complete!=='boolean'
   ||source.complete&&(!source.replay_complete||source.refresh_tool_results)))throw Error('native_activity_source_invalid');
  if(source.complete)return source;
  const settled=source.settled_web_call_ids;
@@ -80,10 +97,10 @@ export async function replayNativeChildActivities({binding,bridge,persistence,si
    await sendNativeChildActivity({binding,event,bridge,metadata:{action:'append',source_log_sha256:source.log_sha256},signal,observationRevision:revision});
    last=Math.max(last??-1,seq);
   }
-  signal?.throwIfAborted();const completed=await bridge.request('native-child-activities',binding,{action:'complete',source_log_sha256:source.log_sha256,expected_last_event_seq:last,...(revision===2?{expected_projection_revision:revision}:{})},signal);
+  signal?.throwIfAborted();const completed=await bridge.request('native-child-activities',binding,{action:'complete',source_log_sha256:source.log_sha256,expected_last_event_seq:last,...(revision>=2?{expected_projection_revision:revision}:{})},signal);
   if(!completed||completed.complete!==true||completed.execution_authorized!==false||completed.run_id!==binding.runId||completed.session_ref!==binding.sessionRef
    ||completed.log_sha256!==source.log_sha256||completed.source_start!==source.source_start||completed.source_end!==source.source_end
-   ||completed.last_event_seq!==last||revision===2&&(completed.projection_revision!==revision||completed.refresh_tool_results!==false))throw Error('native_activity_receipt_invalid');
+   ||completed.last_event_seq!==last||revision>=2&&(completed.projection_revision!==revision||completed.refresh_tool_results!==false))throw Error('native_activity_receipt_invalid');
   return completed;
  }finally{await handle.close();}
 }
@@ -108,26 +125,33 @@ export function createNativeChildActivityObserver({ctx,bridge,accepted,bindingFo
    let failed=false;
    try{
     if(!state.source){
-     const source=await bridge.request('native-child-activities',state.binding,{action:'live-source'},state.signal);
+     let source=await bridge.request('native-child-activities',state.binding,{action:'live-source'},state.signal);
+     const preferred=preferredRevision(source);
+     if(preferred>projectionRevision(source)){
+      source=await bridge.request('native-child-activities',state.binding,{action:'live-source',projection_revision:preferred},state.signal);
+      if(projectionRevision(source)!==preferred)throw Error('native_activity_source_invalid');
+     }
      if(!source||source.protocol!==1||source.kind!=='native_child_live_observation'||source.execution_authorized!==false
       ||source.run_id!==state.binding.runId||source.session_ref!==state.binding.sessionRef||source.parent_session_ref!==state.session.header?.parentSession
       ||!Number.isSafeInteger(source.source_start)||source.source_start<0||source.source_start>state.session.seq
       ||typeof source.snapshot_sha256!=='string'||!/^[a-f0-9]{64}$/.test(source.snapshot_sha256))throw Error('native_activity_source_invalid');
      projectionRevision(source);state.source=source;state.cursor=source.source_start;
     }
-    while(current(state)&&state.cursor<state.session.seq){
+    while(current(state)&&state.source&&state.cursor<state.session.seq){
      const seq=state.cursor,event=state.session.eventAt(seq);
      if(event?.seq!==seq)throw Error('native_activity_prefix_changed');
      if(['tool/call','tool/result'].includes(event.type)
       &&!(event.type==='tool/result'&&event.surfaceOp!==undefined&&event.surfaceOp!=='append')){
-      await sendNativeChildActivity({binding:state.binding,event,bridge,metadata:{action:'live-append',
+      const receipt=await sendNativeChildActivity({binding:state.binding,event,bridge,metadata:{action:'live-append',
        source_snapshot_sha256:state.source.snapshot_sha256},signal:state.signal,observationRevision:projectionRevision(state.source)});
+      if(preferredRevision(receipt)>projectionRevision(state.source))state.source=null;
      }
      state.cursor=seq+1;state.reported=false;
      if(state.cursor%256===0)await new Promise(resolve=>setImmediate(resolve));
     }
    }catch{
     failed=true;
+    state.source=null;
     if(current(state)&&!state.reported){
      state.reported=true;console.warn('[jot-native-public-activities]',JSON.stringify({runId:state.binding.runId,status:'live_replay_pending'}));
     }
@@ -136,7 +160,7 @@ export function createNativeChildActivityObserver({ctx,bridge,accepted,bindingFo
     if(!current(state)){stop(state.binding.runId);return;}
     if(failed){
      state.timer=setTimeout(()=>kick(state),2000);state.timer.unref?.();
-    }else if(state.cursor<state.session.seq){
+    }else if(!state.source||state.cursor<state.session.seq){
      state.timer=setTimeout(()=>kick(state),0);state.timer.unref?.();
     }
    }
@@ -175,8 +199,9 @@ export async function recoverPendingNativeChildActivities({bridge,persistence,re
     const page=await bridge.request('native-child-activities',undefined,{action:'pending',limit:25,...(cursor?{cursor}:{}),...(revision?{projection_revision:revision}:{})},signal);
     if(!page||page.protocol!==1||page.kind!=='native_closed_activity_pending'||page.execution_authorized!==false
      ||!Array.isArray(page.items)||page.items.length>25||page.next_cursor!==undefined&&(!id(page.next_cursor)||!page.items.length))throw Error('native_activity_pending_source_invalid');
-    if(page.supported_projection_revision!==undefined&&![1,2].includes(page.supported_projection_revision))throw Error('native_activity_pending_source_invalid');
-    if(revision===undefined&&page.supported_projection_revision===2){revision=2;continue;}
+    const preferred=preferredRevision(page);
+    if(revision!==undefined&&page.supported_projection_revision!==undefined&&page.supported_projection_revision<revision)throw Error('native_activity_pending_source_invalid');
+    if(preferred>(revision??1)){revision=preferred;cursor=undefined;continue;}
     let previous=cursor;
     for(const item of page.items){
      if(!item||!id(item.run_id)||!id(item.session_ref)||previous!==undefined&&item.run_id<=previous)throw Error('native_activity_pending_source_invalid');

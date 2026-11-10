@@ -2,6 +2,7 @@ export type NativeArtifactReceipt=import('../../contracts/types.js').ActivityRes
 export function publicNativeFileSearch(value:unknown):import('../../contracts/types.js').NativeFileSearch|undefined;
 export function collectArtifactRefs(value: unknown, output?: Set<string>, receipts?: Map<string,NativeArtifactReceipt>): void;
 export interface PublicNativeToolResult {
+  file_search?:import('../../contracts/types.js').NativeFileSearch|null;
   artifact_receipts?: NativeArtifactReceipt[];
   failed: boolean;
   evidence: null | {
@@ -13,7 +14,7 @@ export interface PublicNativeToolResult {
   };
 }
 export function publicNativeToolResult(data: Record<string, unknown>, includeBrowse?: boolean): PublicNativeToolResult;
-export function parsePublicNativeToolResult(value: unknown): PublicNativeToolResult;
+export function parsePublicNativeToolResult(value: unknown,projectionRevision?:1|2|3): PublicNativeToolResult;
 export function sessionToolCallId(data: Record<string, unknown>): unknown;
 export function nativeBatchWebCall(data: Record<string, unknown>): {name: 'universe_read_page' | 'universe_browse' | 'universe_execute'} | null;
 

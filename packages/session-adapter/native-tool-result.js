@@ -158,10 +158,25 @@ export function publicNativeFileSearch(value) {
 }
 
 /** Strict public vocabulary for authenticated result observations. */
-export function parsePublicNativeToolResult(value) {
+export function parsePublicNativeToolResult(value, projectionRevision = 2) {
   const result = record(value)
-  if (!result || Object.keys(result).sort().join(',') !== (result.artifact_receipts === undefined ? 'evidence,failed' : 'artifact_receipts,evidence,failed') || typeof result.failed !== 'boolean') {
+  const fields=['evidence','failed'];
+  if(result?.artifact_receipts!==undefined)fields.push('artifact_receipts');
+  if(projectionRevision===3)fields.push('file_search');
+  if (![1,2,3].includes(projectionRevision)||!result||Object.keys(result).sort().join(',')!==fields.sort().join(',')
+    ||typeof result.failed!=='boolean'||projectionRevision===3&&result.artifact_receipts===undefined) {
     throw Error('native_activity_public_result_invalid')
+  }
+  if(projectionRevision===3&&result.file_search!==null){
+    const search=record(result.file_search);
+    if(!search)throw Error('native_activity_public_result_invalid');
+    if(search.shape==='source_limit'){
+      if(Object.keys(search).length!==1)throw Error('native_activity_public_result_invalid');
+    }else{
+      const selected=publicNativeFileSearch(search);
+      if(!selected||selected.shape==='source_limit')throw Error('native_activity_public_result_invalid');
+    }
+    if(result.failed)throw Error('native_activity_public_result_invalid');
   }
   if (result.artifact_receipts !== undefined) {
     if (!Array.isArray(result.artifact_receipts)) throw Error('native_activity_public_result_invalid')
@@ -195,10 +210,12 @@ export function parsePublicNativeToolResult(value) {
 }
 
 /** Source digest is carried separately from this bounded public observation. */
-export function nativeToolResultObservation(event) {
-  if (event?.type !== 'tool/result' || !record(event.data)) throw Error('native_activity_event_invalid')
+export function nativeToolResultObservation(event, projectionRevision = 1) {
+  if (event?.type !== 'tool/result' || !record(event.data)||![1,2,3].includes(projectionRevision)) throw Error('native_activity_event_invalid')
+  const result=publicNativeToolResult(event.data);
+  if(projectionRevision>=3)result.file_search=result.failed?null:publicNativeFileSearch(event.data.meta)??null;
   return { event: { type: event.type, seq: event.seq, time: event.time, data: { callId: sessionToolCallId(event.data) } },
-    public_result: publicNativeToolResult(event.data) }
+    public_result: result }
 }
 
 export function nativeBatchWebCall(data){
