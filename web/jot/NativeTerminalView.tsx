@@ -63,9 +63,11 @@ export default function NativeTerminalView(props:Props) {
   async function copyText(text:string,current:Live) {
     const isCurrent=()=>live.current===current&&!current.abort.signal.aborted;
     if(!text||!isCurrent())return;
+    const startingFocus=document.activeElement;
     let copied=false;
     try{if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(text);copied=true;}}catch{}
     if(!isCurrent())return;
+    if(!copied&&document.activeElement!==startingFocus){setNotice('复制未完成，可在当前焦点稳定后重试。');return;}
     if(!copied){
       const previous=document.activeElement,field=document.createElement('textarea');field.value=text;
       field.readOnly=true;field.style.cssText='position:fixed;opacity:0;pointer-events:none';
