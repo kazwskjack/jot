@@ -854,3 +854,5 @@ export type OfficePrintView={protocol:1;sha256:string;size:number;pageCount:numb
 export type {TerminalInfo,TerminalInventory} from '../src/terminal/inventory.js';
 
 export type {TerminalOptions,TerminalCommand} from '../src/terminal/control.js';
+
+export type {TerminalReceipt} from '../src/terminal/control.js';

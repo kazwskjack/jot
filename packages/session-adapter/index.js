@@ -640,17 +640,18 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       try{return json(200,await memoryExtractionHost.run(agent,{signal}));}
       catch{return json(409,{error:'memory_extraction_not_completed'});}
     }
-    const terminalOperation=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/terminals\/(options|commands)$/)
+    const terminalOperation=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/terminals\/(options|commands|receipts)$/)
     if(terminalOperation){
-      const sessionId=decodeURIComponent(terminalOperation[1]),write=terminalOperation[2]==='commands';
+      const sessionId=decodeURIComponent(terminalOperation[1]),operation=terminalOperation[2],write=operation!=='options';
       if(method!=='POST')return json(405,{error:'method_not_allowed'});
       if(!ID.test(sessionId)||url.search||!body||typeof body!=='object'||Array.isArray(body)
         ||Object.keys(body).sort().join(',')!==(write?'command,owner_id':'owner_id')
         ||typeof body.owner_id!=='string'||!ID.test(body.owner_id))return json(422,{error:'terminal_control_input_invalid'});
       if(!terminalControl)return json(503,{error:'terminal_control_unavailable'});
-      try{return json(200,await (write?terminalControl.command(body.owner_id,sessionId,body.command,signal):terminalControl.options(body.owner_id,sessionId,signal)));}
+      try{return json(200,await (operation==='commands'?terminalControl.command(body.owner_id,sessionId,body.command,signal):
+        operation==='receipts'?terminalControl.receipt(body.owner_id,sessionId,body.command,signal):terminalControl.options(body.owner_id,sessionId,signal)));}
       catch(error){
-        if(error?.message==='terminal_host_changed')return json(409,{error:'terminal_host_changed'});
+        if(['terminal_host_changed','terminal_command_conflict','terminal_receipt_capacity'].includes(error?.message))return json(409,{error:error.message});
         return json(503,{error:'terminal_control_unavailable'});
       }
     }
@@ -974,7 +975,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
     }
     return json(404, { error: 'not_found' })
   };
-  const quietPost=(request)=>request?.method==='POST'&&(['/v1/host-admin/bootstrap/redeem','/v1/host-admin/settings/read','/v1/host-admin/settings/editor/read','/v1/host-admin/settings/attempt/read','/v1/host-admin/settings/readiness','/v1/taskmaster/installation','/v1/models','/v1/models/metadata','/v1/models/metadata/readiness','/v1/conversation-modes/readiness'].includes(request?.url?.pathname)||/^\/v1\/sessions\/[^/]+\/terminals\/(?:list|options)$/.test(request?.url?.pathname??''));
+  const quietPost=(request)=>request?.method==='POST'&&(['/v1/host-admin/bootstrap/redeem','/v1/host-admin/settings/read','/v1/host-admin/settings/editor/read','/v1/host-admin/settings/attempt/read','/v1/host-admin/settings/readiness','/v1/taskmaster/installation','/v1/models','/v1/models/metadata','/v1/models/metadata/readiness','/v1/conversation-modes/readiness'].includes(request?.url?.pathname)||/^\/v1\/sessions\/[^/]+\/terminals\/(?:list|options|receipts)$/.test(request?.url?.pathname??''));
   return async request=>{
     if(!hostAdmissionGuard||quietPost(request)||!authorized(request?.headers?.authorization,token))return dispatch(request);
     let admission;

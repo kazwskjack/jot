@@ -28,3 +28,21 @@ export function validateTerminalCommand(value) {
       ||value.shell_path!==null&&!text(value.shell_path)))throw Error('terminal_command_invalid');
   return Object.freeze({...value});
 }
+
+export function validateTerminalReceipt(value,command,sessionId) {
+  validateTerminalCommand(command);
+  validateTerminalInventory({protocol:1,session_id:sessionId,terminals:[],execution_authorized:false},sessionId);
+  if(!exact(value,'execution_authorized,host_instance,inventory,protocol,rejection,request_id,session_id,state')
+    ||value.protocol!==1||value.session_id!==sessionId||value.host_instance!==command.host_instance
+    ||value.request_id!==command.request_id||value.execution_authorized!==false
+    ||!['not_admitted','pending','completed','rejected','unknown'].includes(value.state))throw Error('terminal_receipt_invalid');
+  if(value.state==='rejected') {
+    if(!exact(value.rejection,'error_code,status')||!Number.isInteger(value.rejection.status)
+      ||value.rejection.status<400||value.rejection.status>=500||value.rejection.status===408
+      ||typeof value.rejection.error_code!=='string'||!/^[A-Z][A-Z0-9_]{0,127}$/.test(value.rejection.error_code)
+      ||value.rejection.error_code==='IDEMPOTENCY_IN_PROGRESS')throw Error('terminal_receipt_invalid');
+  }else if(value.rejection!==null)throw Error('terminal_receipt_invalid');
+  const inventory=value.state==='completed'?validateTerminalInventory(value.inventory,sessionId):null;
+  if(value.state!=='completed'&&value.inventory!==null)throw Error('terminal_receipt_invalid');
+  return Object.freeze({...value,inventory,rejection:value.rejection===null?null:Object.freeze({...value.rejection})});
+}

@@ -1,0 +1,53 @@
+import {validateTerminalCommand} from '../../packages/gateway/src/terminal/control.js';
+
+/** Same-tab recovery keeps the original owner-scoped command before dispatch. */
+export class TerminalCommandStore {
+  constructor(storage,scope,conversationId,runId) {
+    if(typeof scope!=='string'||!/^[a-f0-9]{64}$/.test(scope)||![conversationId,runId].every(id=>typeof id==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(id)))
+      throw Error('terminal_storage_scope_invalid');
+    this.storage=storage;
+    this.path=`/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/terminals/commands`;
+    this.key=`jot-terminal-command/v1/${scope}${this.path}`;
+  }
+  validate(command) {
+    if(!command||typeof command!=='object'||Array.isArray(command)
+      ||Object.keys(command).sort().join(',')!=='body,key,method,path'
+      ||command.path!==this.path||command.method!=='POST'||command.key!==command.body?.request_id)
+      throw Error('terminal_storage_command_invalid');
+    validateTerminalCommand(command.body);
+    return command;
+  }
+  read() {
+    const raw=this.storage.getItem(this.key);
+    if(raw===null)return null;
+    if(raw.length>1048576)throw Error('terminal_storage_command_invalid');
+    return {command:this.validate(JSON.parse(raw))};
+  }
+  saveCommand(command,expected) {
+    if(command===null){this.complete(expected);return;}
+    this.validate(command);
+    const current=this.read()?.command;
+    if(current&&(current.key!==command.key||Object.entries(current.body).some(([key,value])=>command.body[key]!==value)))
+      throw Error('terminal_storage_conflict');
+    const raw=JSON.stringify(command);
+    if(raw.length>1048576)throw Error('terminal_storage_command_invalid');
+    this.storage.setItem(this.key,raw);
+  }
+  complete(expected) {
+    const current=this.read()?.command;
+    if(expected&&current?.key!==expected.key)throw Error('terminal_storage_conflict');
+    this.storage.removeItem(this.key);
+  }
+}
+
+export function pendingTerminalRuns(storage,scope,conversationId) {
+  const probe=new TerminalCommandStore(storage,scope,conversationId,'scope-probe');
+  const prefix=probe.key.slice(0,probe.key.indexOf('/runs/')+6),suffix='/terminals/commands',runs=[];
+  for(let index=0;index<storage.length;index++) {
+    const key=storage.key(index);
+    if(typeof key!=='string'||!key.startsWith(prefix)||!key.endsWith(suffix))continue;
+    const runId=decodeURIComponent(key.slice(prefix.length,-suffix.length));
+    if(new TerminalCommandStore(storage,scope,conversationId,runId).read()?.command)runs.push(runId);
+  }
+  return [...new Set(runs)].sort();
+}

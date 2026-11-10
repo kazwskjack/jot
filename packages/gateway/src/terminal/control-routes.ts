@@ -3,9 +3,10 @@ import type {DatabaseSync} from 'node:sqlite';
 import {SessionAdapterError} from '../harness/session-controller-client.ts';
 import {readOwnedTerminalSession} from './inventory-routes.ts';
 import {validateTerminalInventory,type TerminalInventory} from './inventory.js';
-import {validateTerminalOptions,validateTerminalCommand,type TerminalOptions,type TerminalCommand} from './control.js';
+import {validateTerminalOptions,validateTerminalCommand,type TerminalOptions,type TerminalCommand,type TerminalReceipt} from './control.js';
 
 export interface TerminalControlClient {
+  terminalReceipt?(ownerId:string,sessionId:string,command:TerminalCommand,signal?:AbortSignal):Promise<TerminalReceipt>;
   terminalOptions(ownerId:string,sessionId:string,signal?:AbortSignal):Promise<TerminalOptions>;
   terminalCommand(ownerId:string,sessionId:string,command:TerminalCommand,signal?:AbortSignal):Promise<TerminalInventory>;
 }
@@ -40,8 +41,8 @@ export function registerTerminalControlRoutes(app:FastifyInstance,options:{
         return reply.code(write?503:409).send({error:{code:write?'TERMINAL_OUTCOME_UNKNOWN':'TERMINAL_SESSION_CHANGED'}});
       return result;
     } catch(error) {
-      if(error instanceof SessionAdapterError&&error.status===409&&error.protocolCode==='terminal_host_changed')
-        return reply.code(409).send({error:{code:'TERMINAL_HOST_CHANGED'}});
+      if(error instanceof SessionAdapterError&&error.status===409&&['terminal_host_changed','terminal_command_conflict','terminal_receipt_capacity'].includes(error.protocolCode??''))
+        return reply.code(409).send({error:{code:error.protocolCode!.toUpperCase()}});
       const code=(error as Error)?.message;
       if(code==='unauthorized')return reply.code(401).send({error:{code:'UNAUTHORIZED'}});
       if(code==='terminal_command_invalid')return reply.code(422).send({error:{code:'TERMINAL_INPUT_INVALID'}});

@@ -158,3 +158,7 @@ The PilotDeck shell hook and mobile shortcuts at pinned revision
 The same native terminal integration also uses `environment`, `shells`, `create`
 and `close` through published `0.2.1-rc.2` APIs. Host-instance binding and Jot's
 original Gateway idempotency receipts preserve explicit user command identity.
+
+Terminal receipt recovery observes the exact original native operation result.
+It retains bounded Host metadata snapshots and reuses Jot's original Gateway
+idempotency reservation, without invoking another native terminal operation.

@@ -10,7 +10,7 @@ import type {TaskmasterRuntimeVersionRequest} from '../../contracts/types.ts'
 import {validateTaskmasterInstallation,validateTaskmasterRuntimeVersion} from '../persistent-tasks/taskmaster-installation.ts'
 
 import {validateTerminalInventory,type TerminalInventory} from '../terminal/inventory.js'
-import {validateTerminalOptions,validateTerminalCommand,type TerminalOptions,type TerminalCommand} from '../terminal/control.js'
+import {validateTerminalOptions,validateTerminalCommand,validateTerminalReceipt,type TerminalOptions,type TerminalCommand,type TerminalReceipt} from '../terminal/control.js'
 
 export type AdapterFetch = (input: string | URL, init?: RequestInit) => Promise<Response>
 
@@ -197,7 +197,7 @@ export class SessionControllerClient {
     if (!response.ok) {
       const reasonCode = typeof value.reason_code === 'string' && SAFE_ADAPTER_REASON_CODES.has(value.reason_code)
         ? value.reason_code : 'DSH_NO_RUNTIME_OUTCOME'
-      throw new SessionAdapterError(response.status, reasonCode,typeof value.error==='string'&&['goal_revision_changed','goal_cold_input_pending','terminal_host_changed'].includes(value.error)?value.error:undefined)
+      throw new SessionAdapterError(response.status, reasonCode,typeof value.error==='string'&&['goal_revision_changed','goal_cold_input_pending','terminal_host_changed','terminal_command_conflict','terminal_receipt_capacity'].includes(value.error)?value.error:undefined)
     }
     return value
   }
@@ -403,6 +403,14 @@ export class SessionControllerClient {
     if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='execution_authorized,request_id,status'
       ||value.execution_authorized!==false||value.request_id!==requestId||!['accepted','unknown'].includes(String(value.status)))throw Error('native_member_wake_receipt_invalid');
     return Object.freeze(value as NativeMemberWakeReceipt);
+  }
+
+  async terminalReceipt(ownerId:string,sessionId:string,input:TerminalCommand,signal?:AbortSignal):Promise<TerminalReceipt>{
+    if(![ownerId,sessionId].every(value=>typeof value==='string'&&DRIVER_ID.test(value)))throw Error('terminal_control_input_invalid');
+    const command=validateTerminalCommand(input);
+    const receipt=validateTerminalReceipt(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/terminals/receipts`,{owner_id:ownerId,command},signal),command,sessionId);
+    if(!['pending','completed','unknown'].includes(receipt.state))throw Error('terminal_receipt_invalid');
+    return receipt;
   }
 
   async terminalOptions(ownerId:string,sessionId:string,signal?:AbortSignal):Promise<TerminalOptions>{

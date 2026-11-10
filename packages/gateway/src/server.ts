@@ -63,6 +63,7 @@ import {registerPublicationExecutionRoutes} from './git/publication-execution-ro
 import {registerPublicationDispatchRoutes} from './git/publication-dispatch-routes.ts';
 import type {NativeGitClient} from './git/native-transport-client.ts';
 import {WorkPublicationExecutions} from './persistent-tasks/work-publication-executions.ts';
+import {registerTerminalReceiptRoutes} from './terminal/receipt-routes.ts';
 import {registerTerminalControlRoutes,type TerminalControlClient} from './terminal/control-routes.ts';
 import {registerTerminalInventoryRoutes,type TerminalInventoryClient} from './terminal/inventory-routes.ts';
 import { EventStore, ExpiredCursorError, FutureCursorError } from './events/event-store.ts';
@@ -509,6 +510,7 @@ export async function buildServer(config: {
       reply.header('cache-control','private, no-store');return;
     }
     if((request.routeOptions.config as {officePreviewConfigurationCommand?:boolean}).officePreviewConfigurationCommand===true)return;
+    if(request.method==='POST'&&(request.routeOptions.config as {terminalReceiptReconciliation?:boolean}).terminalReceiptReconciliation===true)return;
     // Binary imports own a content-aware immutable receipt in the workspace service.
     if(request.method==='PUT'&&request.routeOptions.url==='/v1/workspaces/:workspaceId/files/binary')return;
     if(request.method==='POST'&&[
@@ -1049,6 +1051,7 @@ export async function buildServer(config: {
   registerDiscoveryHistoryRoutes(app,{history:new DiscoveryHistory(db),actor,role:(owner,id)=>workbench.getAgent(owner,id)});
   registerTerminalInventoryRoutes(app,{db,actor,client:config.terminalInventoryClient});
   registerTerminalControlRoutes(app,{db,actor,client:config.terminalControlClient});
+  registerTerminalReceiptRoutes(app,{db,actor,client:config.terminalControlClient});
   registerConversationGoalRoutes(app,{db,conversations,actor,client:config.conversationGoalClient,resumeAdmission:{enabled:config.conversationGoalResumeEnabled===true,controls:new ConversationGoalControls(db,events,runs),atomic:atomicCommand}});
   if(config.skillCatalogClient){
     const catalog=new SkillCatalogService(db,workbench,config.skillCatalogClient);
