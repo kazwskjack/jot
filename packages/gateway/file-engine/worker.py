@@ -440,7 +440,7 @@ def uno_edit(req: dict, input_path: Path, output_path: Path, job_dir: Path) -> d
     process = subprocess.Popen([office, "--headless", "--nologo", "--nodefault", "--nofirststartwizard",
         "--nolockcheck", f"-env:UserInstallation={uno.systemPathToFileUrl(str(profile))}",
         f"--accept=pipe,name={pipe};urp;StarOffice.ComponentContext"], stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE, start_new_session=True)
+        stderr=subprocess.DEVNULL, start_new_session=False)
     document = None
     reopened = None
     try:
@@ -520,7 +520,9 @@ def uno_edit(req: dict, input_path: Path, output_path: Path, job_dir: Path) -> d
                 except Exception: pass
         process.terminate()
         try: process.wait(timeout=5)
-        except Exception: process.kill()
+        except Exception:
+            process.kill()
+            process.wait(timeout=5)
     if req["operation"] == "writer.fill_template":
         with safe_zip(output_path) as archive:
             if any(b"[[DSH:" in archive.read(name) for name in archive.namelist() if name.endswith(".xml")):
@@ -546,7 +548,7 @@ def uno_export_pdf(req: dict, input_path: Path, output_path: Path, job_dir: Path
     process = subprocess.Popen([office, "--headless", "--nologo", "--nodefault", "--nofirststartwizard",
         "--nolockcheck", f"-env:UserInstallation={uno.systemPathToFileUrl(str(profile))}",
         f"--accept=pipe,name={pipe};urp;StarOffice.ComponentContext"], stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE, start_new_session=True)
+        stderr=subprocess.DEVNULL, start_new_session=False)
     document = None
     try:
         local = uno.getComponentContext()
@@ -577,7 +579,9 @@ def uno_export_pdf(req: dict, input_path: Path, output_path: Path, job_dir: Path
             except Exception: pass
         process.terminate()
         try: process.wait(timeout=5)
-        except Exception: process.kill()
+        except Exception:
+            process.kill()
+            process.wait(timeout=5)
     return {"output_path": str(output_path), "checks": {"page_count": content["page_count"],
         "engine_saved": "PASS", "saved_and_reopened": "PASS", "macro_execution": "DISABLED",
         "external_links": "DISABLED"}}

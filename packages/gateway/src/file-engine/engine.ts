@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import {join} from 'node:path';
 
 export function fileEngineChildEnvironment(environment: NodeJS.ProcessEnv = process.env): Record<string, string> {
   return {
@@ -47,11 +48,44 @@ export class FileEngineAdapter {
         throw new Error('ENGINE_OUTPUT_LIMIT_INVALID');
       }
       const child = spawn(this.python, [this.workerPath], {
-        stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform!=='win32',
         env: fileEngineChildEnvironment(),
       });
       const stdout: Buffer[] = [];let outputBytes=0,failure:Error|undefined;
-      const stop=(error:Error)=>{failure??=error;child.kill('SIGKILL');};
+      let termination:Promise<void>|undefined;
+      const terminateTree=():Promise<void>=>{
+        if(termination)return termination;
+        if(child.pid===undefined)return Promise.resolve();
+        const pid=child.pid;
+        // Same owned-process-group/taskkill pattern as archive-executor and Taskmaster probing.
+        if(process.platform==='win32'){
+          termination=new Promise<void>(done=>{
+            const complete=(error:unknown)=>{
+              if(error){
+                failure=new Error('ENGINE_PROCESS_TREE_STOP_FAILED',{cause:failure??error});
+                child.kill('SIGKILL');
+              }
+              done();
+            };
+            try{
+              const executable=join(process.env.SystemRoot||'C:\Windows','System32','taskkill.exe');
+              execFile(executable,['/PID',String(pid),'/T','/F'],
+                {windowsHide:true,timeout:5000,maxBuffer:4096,killSignal:'SIGKILL'},complete);
+            }catch(error){complete(error);}
+          });
+        }else{
+          try{process.kill(-pid,'SIGKILL');}
+          catch(error){
+            if((error as NodeJS.ErrnoException).code!=='ESRCH'){
+              failure=new Error('ENGINE_PROCESS_TREE_STOP_FAILED',{cause:failure??error});
+              child.kill('SIGKILL');
+            }
+          }
+          termination=Promise.resolve();
+        }
+        return termination;
+      };
+      const stop=(error:Error)=>{failure??=error;void terminateTree();};
       const abort=()=>stop(signal?.reason instanceof Error?signal.reason:new Error('ENGINE_CANCELLED'));
       const timer=setTimeout(()=>stop(new Error('ENGINE_TIMEOUT')),this.timeoutMs);
       const cleanup=()=>{clearTimeout(timer);signal?.removeEventListener('abort',abort);};
@@ -69,8 +103,10 @@ export class FileEngineAdapter {
         failure??=new Error('ENGINE_CRASH');
         if(child.pid===undefined){cleanup();reject(failure);}
       });
-      child.once('close', code => {
+      child.once('close', async code => {
         cleanup();
+        if(process.platform!=='win32')await terminateTree();
+        else if(termination)await termination;
         if(failure){reject(failure);return;}
         let value: FileEngineResult;
         try { value = JSON.parse(Buffer.concat(stdout).toString('utf8')) as FileEngineResult; }
