@@ -1,13 +1,25 @@
 /* Adapted from pinned PilotDeck SpreadsheetInteractivePreview.tsx. See SOURCES.json and LICENSES.txt. */
-export function createCellReferences({getBook,isWorking,report,run}){
+import {createSpreadsheetContextSelectionIntent,shouldShowSpreadsheetSelectionPopup} from './context-selection.js';
+
+export function createCellReferences({api,content,getBook,isWorking,report,run}){
  const controller=new AbortController(),options={signal:controller.signal};
  const prepare=document.getElementById('cell-prepare'),status=document.getElementById('cell-status');
  const focusRanges=document.getElementById('cell-focus-range'),locate=document.getElementById('cell-locate');
- let enabled=false,disposed=false,serial=0,proposal,focus;
- const controls=()=>{prepare.disabled=!enabled||disposed||isWorking();focusRanges.disabled=!focus||disposed||isWorking();locate.disabled=focusRanges.disabled;};
+ const intent=createSpreadsheetContextSelectionIntent(),subscriptions=[];
+ let enabled=false,disposed=false,serial=0,proposal,focus,popup,popupComponent,popupFrame,gesture=0;
+ function hidePopup(){const handle=popup;popup=undefined;handle?.dispose();}
+ function resetContext(){
+  gesture++;intent.reset();
+  if(popupFrame!==undefined)cancelAnimationFrame(popupFrame);
+  popupFrame=undefined;hidePopup();
+ }
+ const controls=()=>{
+  prepare.disabled=!enabled||disposed||isWorking();focusRanges.disabled=!focus||disposed||isWorking();locate.disabled=focusRanges.disabled;
+  if(prepare.disabled)resetContext();
+ };
  const invalidate=()=>{
   if(disposed)return;
-  proposal=undefined;serial++;report({type:'jot-xlsx-cells',selection:null});
+  hidePopup();proposal=undefined;serial++;report({type:'jot-xlsx-cells',selection:null});
  };
  const key=value=>JSON.stringify([value.sheetId,value.sheetName,value.ranges,value.activeRange,
   value.cells.map(cell=>[cell.range,cell.displayValues,cell.rawValues,cell.formulas,cell.rowCount,cell.columnCount,cell.truncated]),value.headers,value.surroundingValues]);
@@ -59,10 +71,15 @@ export function createCellReferences({getBook,isWorking,report,run}){
   invalidate();status.textContent=code==='SELECTION_TOO_LARGE'?'原生选区或上下文超过当前引用范围，请缩小选区。':'当前原生选区尚未就绪，请重新选择。';
   report({type:'jot-xlsx-cell-error',code});
  };
- prepare.addEventListener('click',()=>run(()=>{
-  if(!enabled||disposed)return;
-  try{offer(current());}catch(cause){error(cause.message==='SELECTION_TOO_LARGE'?'SELECTION_TOO_LARGE':'SELECTION_UNAVAILABLE');}
- }),options);
+ function prepareCurrent(){
+  if(!enabled||disposed||isWorking())return;
+  resetContext();
+  run(()=>{
+   if(!enabled||disposed)return;
+   try{offer(current());}catch(cause){error(cause.message==='SELECTION_TOO_LARGE'?'SELECTION_TOO_LARGE':'SELECTION_UNAVAILABLE');}
+  });
+ }
+ prepare.addEventListener('click',prepareCurrent,options);
  function restore(value,rangeIndex=0){
   let confirmed=false;
   try{
@@ -80,9 +97,57 @@ export function createCellReferences({getBook,isWorking,report,run}){
   report({type:'jot-xlsx-cell-focus',confirmed});
  }
  locate.addEventListener('click',()=>{if(focus){const value=focus,index=Number(focusRanges.value);run(()=>restore(value,index));}},options);
+ const isPopup=target=>target instanceof Element&&!!target.closest('.jot-native-cell-action');
+ content.addEventListener('pointerdown',event=>{
+  if(isPopup(event.target))return;
+  resetContext();intent.recordPointerDown(event.button,event.ctrlKey);
+ },{...options,capture:true});
+ content.addEventListener('contextmenu',event=>event.preventDefault(),options);
+ content.addEventListener('pointercancel',resetContext,options);
+ document.addEventListener('keydown',event=>{
+  if(!(event.target instanceof Node)||!content.contains(event.target)&&!isPopup(event.target))return;
+  if(event.key==='Escape'){
+   const restoreFocus=isPopup(event.target);resetContext();if(restoreFocus&&!prepare.disabled)prepare.focus();
+  }else if(!isPopup(event.target))resetContext();
+ },{...options,capture:true});
+ document.addEventListener('pointerdown',event=>{
+  if(!(event.target instanceof Node)||!content.contains(event.target)&&!isPopup(event.target))resetContext();
+ },{...options,capture:true});
+ window.addEventListener('blur',resetContext,options);
+ function dispose(){
+  disposed=true;resetContext();controller.abort();
+  for(const subscription of subscriptions)subscription.dispose();
+  subscriptions.length=0;popupComponent?.dispose();popupComponent=undefined;
+  proposal=undefined;focus=undefined;focusRanges.replaceChildren();
+ }
+ try{
+  const componentKey='jot-native-cell-reference-'+crypto.randomUUID();
+  popupComponent=api.registerComponent(componentKey,()=>window.React.createElement('button',{
+   type:'button',className:'jot-native-cell-action',onPointerDown:event=>event.stopPropagation(),onPointerUp:event=>event.stopPropagation(),onClick:prepareCurrent
+  },'准备引用到当前对话'));
+  subscriptions.push(api.addEvent(api.Event.SelectionMoveStart,hidePopup));
+  subscriptions.push(api.addEvent(api.Event.SelectionMoveEnd,hidePopup));
+  subscriptions.push(api.addEvent(api.Event.CellPointerDown,({worksheet})=>{
+   if(enabled&&!disposed&&!isWorking()&&intent.recordCellPointerDown(worksheet))invalidate();
+  }));
+  subscriptions.push(api.addEvent(api.Event.CellPointerUp,()=>{
+   const worksheet=intent.consumeContextAction(),generation=gesture;
+   if(!worksheet||!shouldShowSpreadsheetSelectionPopup('context-action',false))return;
+   if(popupFrame!==undefined)cancelAnimationFrame(popupFrame);
+   popupFrame=requestAnimationFrame(()=>{
+    popupFrame=undefined;
+    if(disposed||!enabled||isWorking()||generation!==gesture)return;
+    try{
+     if(getBook().getActiveSheet().getSheetId()!==worksheet.getSheetId())return;
+     const range=worksheet.getSelection()?.getActiveRangeList()[0];if(!range)return;
+     hidePopup();popup=range.attachRangePopup({componentKey,direction:'top-center',offset:[0,-8]})??undefined;
+    }catch{hidePopup();status.textContent='原生浮动入口尚未就绪，可使用工具栏准备引用。';}
+   });
+  }));
+ }catch(cause){dispose();throw cause;}
  return {
   invalidate,controls,
-  dispose(){disposed=true;controller.abort();proposal=undefined;focus=undefined;focusRanges.replaceChildren();},
+  dispose,
   command(value){
    if(value.type==='jot-xlsx-cell-enable'&&typeof value.enabled==='boolean'){
     enabled=value.enabled;if(!enabled)invalidate();controls();

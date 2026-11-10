@@ -8,6 +8,8 @@
  input,select,button { min-height: 2rem; } input { width: 4rem; } input[type=search] { width: 12rem; max-width: 100%; }
  #cell { display: block; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 5rem; overflow: auto; }
  #status { margin: 0.3rem 0; } #content { flex: 1; min-height: 24rem; position: relative; overflow: hidden; }
+ .jot-native-cell-action { min-height: 2rem; padding: 0.4rem 0.8rem; border: 1px solid #ccc; border-radius: 999px; color: #222; background: white; box-shadow: 0 3px 12px #0002; font: 500 12px system-ui,sans-serif; white-space: nowrap; cursor: pointer; }
+ .jot-native-cell-action:hover { background: #f5f5f5; } .jot-native-cell-action:focus-visible { outline: 2px solid #2459bd; outline-offset: 2px; }
 </style></head><body>
 <header><nav aria-label="原生工作表导航"><label>工作表 <select id="sheet" disabled></select></label><label>缩放 % <input id="zoom" type="number" min="25" max="300" step="10" value="100" disabled></label></nav>
 <nav aria-label="原生工作簿跨表搜索"><label>查找 <input id="query" type="search" maxlength="200" disabled></label><button id="search" type="button" disabled>重新搜索</button><button id="match-previous" type="button" disabled>上一处</button><button id="match-next" type="button" disabled>下一处</button><output id="matches" aria-live="polite">尚未搜索</output><small>在可见工作表中搜索单元格显示值。</small><small id="coverage"></small></nav>

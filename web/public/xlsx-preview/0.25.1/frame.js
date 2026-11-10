@@ -172,7 +172,7 @@ addEventListener('message',async event=>{
    cellReferences?.invalidate();const first=selections[0];if(first)updateCell(worksheet,first.startRow,first.startColumn);
   });
   activeSheetListener=api.addEvent(api.Event.ActiveSheetChanged,({activeSheet})=>{if(!closed){cellReferences?.invalidate();sheetSelect.value=activeSheet.getSheetId();updateCell(activeSheet);}});
-  cellReferences=createCellReferences({getBook:()=>book,isWorking:()=>busy,report,run});
+  cellReferences=createCellReferences({api,content,getBook:()=>book,isWorking:()=>busy,report,run});
   controls();status.textContent='原生工作簿已读取。'+data.warnings.map(warning=>warning.message).join(' ');
   report({type:'jot-xlsx-ready',info:{sheets:data.workbook.sheetOrder.length,warnings:data.warnings.length}});
  }catch{if(!closed)fail();}finally{value.bytes=null;}
