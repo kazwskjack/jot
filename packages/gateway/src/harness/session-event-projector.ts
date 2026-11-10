@@ -131,7 +131,8 @@ function toolActivity(data: Record<string, unknown>, context: ProjectionContext,
   if (!completed) context.knownTools?.set(callId, tool)
   const result = completed ? (publicResult ?? publicNativeToolResult(data, tool.kind === 'browse')) : null
   const failed = result?.failed === true
-  if(completed&&!failed&&tool.kind==='search'&&['glob','grep'].includes(String(tool.publicDetail?.tool_name))){
+  // Legacy native calls used the subagent presentation and keep their original identity.
+  if(completed&&!failed&&['search','subagent'].includes(tool.kind)&&['glob','grep'].includes(String(tool.publicDetail?.tool_name))){
     const fileSearch=publicResult?.file_search??publicNativeFileSearch(data.meta);
     if(fileSearch&&(fileSearch.shape==='source_limit'||fileSearch.shape===(tool.publicDetail?.tool_name==='glob'?'paths':'matches')))
       tool.publicDetail={...(tool.publicDetail??detailFor(tool,context.runId)),file_search:fileSearch};

@@ -280,7 +280,7 @@ function activityText(db:DatabaseSync,owner:string,activity:Record<string,unknow
 }
 
 function nativeSearchText(activity:Record<string,unknown>,name:'glob'|'grep',runId:string,callId:string):TextSource {
- if(activity.kind!=='search'||activity.status!=='succeeded'||typeof activity.ended_at!=='string')throw Error('activity_tool_result_not_found');
+ if(!['search','subagent'].includes(String(activity.kind))||activity.status!=='succeeded'||typeof activity.ended_at!=='string')throw Error('activity_tool_result_not_found');
  if(typeof activity.activity_id!=='string'||!ID.test(activity.activity_id)||typeof activity.started_at!=='string'
   ||activity.attempt_id!==undefined&&typeof activity.attempt_id!=='string')throw Error('activity_tool_result_source_invalid');
  const retained=object(object(activity.detail)?.file_search);

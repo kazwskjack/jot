@@ -32,7 +32,6 @@ export function activityDetailRows(activity:ToolActivity):Array<{label:string;va
   case 'search':
    add('搜索词',activity.detail.queries);add('搜索数量',activity.detail.query_count);
    add('提供方',activity.detail.provider);add('来源',activity.detail.source_ids);
-   if(activity.detail.file_search)rows.push(...nativeFileSearchRows(activity.detail.file_search));
    break;
   case 'browse':
    add('网页操作',activity.detail.operation);add('操作编号',activity.detail.operation_id);
@@ -69,6 +68,8 @@ export function activityDetailRows(activity:ToolActivity):Array<{label:string;va
    for(const error of activity.detail.errors??[])add(`失败条目 ${error.input_index+1}`,[error.error_code,error.url]);
    break;
  }
+ if((activity.kind==='search'||activity.kind==='subagent')&&['glob','grep'].includes(String(activity.detail.tool_name))&&activity.detail.file_search)
+  rows.push(...nativeFileSearchRows(activity.detail.file_search));
  if(detail.result_artifacts?.length)add('结果引用文件',detail.result_artifacts.map(artifact=>`${artifact.artifact_id} · 版本 ${artifact.version} · ${artifact.sha256}`));
  add('开始时间',activity.started_at);add('结束时间',activity.ended_at);add('错误编号',activity.error_code);
  add('父步骤',activity.parent_activity_id);add('步骤编号',activity.activity_id);add('工具调用',activity.tool_call_id);add('尝试编号',activity.attempt_id);

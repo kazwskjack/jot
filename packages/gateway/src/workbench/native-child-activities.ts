@@ -218,7 +218,7 @@ export class NativeChildActivities {
      let current=latest?JSON.parse(latest.payload_json) as Input:original;
      const context={runId,sessionRef,attemptId:String(original.attempt_id??'native-observation'),messageId:'native-observation',
       blockId:'native-observation',deltaIndex:0,at:new Date(Number(event.time)).toISOString()};
-     if(current.kind==='search'){
+     if(current.kind==='search'||current.kind==='subagent'&&['glob','grep'].includes(String((current.detail as Input)?.tool_name))){
       const projected=projectNativeToolEvent(event,context,current,publicResult);
       const detail=projected?.payload.detail as Input|undefined;
       if(projected?.payload.status==='succeeded'&&detail?.file_search)
