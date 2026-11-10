@@ -1,3 +1,4 @@
+import type {OfficePrintView} from '../../packages/gateway/contracts/types';
 import {base,taskDraftScope} from './client';
 import {readVerifiedPreviewBytes} from './artifact-preview-bytes.mjs';
 import type {ActivityToolResultFile} from './types';
@@ -33,7 +34,7 @@ export async function readListedFilePreviewBytes({conversationId,runId,activityI
  }catch(error){await response.body?.cancel().catch(()=>{});throw error;}
 }
 
-export type OfficePrintPreview={bytes:Uint8Array;sha256:string;size:number;pageCount:number};
+export type OfficePrintPreview={bytes:Uint8Array}&Omit<OfficePrintView,'protocol'>;
 export async function readOfficePrintPreviewBytes({conversationId,runId,activityId,resultSha,file}:ListedFilePreviewSource,owner:string,signal:AbortSignal):Promise<OfficePrintPreview>{
  const check=()=>{signal.throwIfAborted();if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');};
  check();
@@ -49,12 +50,12 @@ export async function readOfficePrintPreviewBytes({conversationId,runId,activity
    ||response.headers.get('x-jot-preview-protocol')!=='1'||response.headers.get('x-jot-preview-renderer')!=='libreoffice'
    ||response.headers.get('x-jot-preview-media-type')!=='application/pdf'||response.headers.get('x-jot-execution-authorized')!=='false')throw Error('原Office来源或转换PDF尚未确认。');
   const sha256=response.headers.get('x-jot-preview-sha256')??'',sizeText=response.headers.get('x-jot-preview-size'),pagesText=response.headers.get('x-jot-preview-pages');
-  const size=Number(sizeText),pageCount=Number(pagesText);
-  if(!/^[a-f0-9]{64}$/.test(sha256)||!Number.isSafeInteger(size)||String(size)!==sizeText||size<100||size>20*1024*1024
+  const size=Number(sizeText),pageCount=Number(pagesText),proof=response.headers.get('x-jot-preview-proof')??'';
+  if(!/^[A-Za-z0-9_-]{43}$/.test(proof)||!/^[a-f0-9]{64}$/.test(sha256)||!Number.isSafeInteger(size)||String(size)!==sizeText||size<100||size>20*1024*1024
    ||!Number.isSafeInteger(pageCount)||String(pageCount)!==pagesText||pageCount<1||pageCount>50000
    ||response.headers.has('content-length')&&response.headers.get('content-length')!==String(size))throw Error('转换PDF摘要、大小或页数尚未确认。');
   const bytes=await readVerifiedPreviewBytes(response,{size_bytes:size,sha256},signal);check();
   if(new TextDecoder('ascii').decode(bytes.subarray(0,5))!=='%PDF-')throw Error('转换PDF文件头尚未确认。');
-  return Object.freeze({bytes,sha256,size,pageCount});
+  return Object.freeze({bytes,sha256,size,pageCount,proof});
  }catch(error){await response.body?.cancel().catch(()=>{});throw error;}
 }

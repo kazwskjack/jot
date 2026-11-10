@@ -1,3 +1,4 @@
+import {signOfficePrintProof} from './messages/office-print-proof.ts';
 import {createOfficePreviewStatusReader} from './file-engine/office-preview-status.ts';
 import {readActivityFileDocument,readActivityFileOfficePdf} from './events/activity-file-document.ts';
 import {messageReferenceSnapshotsInstalled,commandReferenceSnapshotsInstalled,captureRunCommandReferenceSnapshots,assertReferenceSnapshotImages} from './messages/reference-snapshots.ts';
@@ -288,7 +289,7 @@ export async function buildServer(config: {
       },
     });
   }
-  const runs = new RunRepository(db, events,{workAgentPreset:config.workAgentPreset??'jot-general'});
+  const runs = new RunRepository(db, events,{workAgentPreset:config.workAgentPreset??'jot-general',officePrintProofKey:config.internalChannelToken});
   const conversationModes=new ConversationModes(db,conversations,runs,config.conversationModeClient,config.chatModeEnabled===true,config.modelCatalogClient);
   const commands = new RunCommandService(db, events);
   const artifactRoot=config.uploadRoot??join(dirname(config.databasePath),'general-agent-uploads');
@@ -648,7 +649,7 @@ export async function buildServer(config: {
 
   app.setErrorHandler((error, request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
-    if(['content_reference_request_invalid','content_reference_request_too_large','content_reference_attachment_mismatch'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(['content_reference_request_invalid','content_reference_request_too_large','content_reference_attachment_mismatch','office_print_reference_unproven'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(code==='content_reference_request_conflict')return reply.code(409).send({error:{code:'CONTENT_REFERENCE_REQUEST_CONFLICT'}});
     if(code==='content_reference_storage_unavailable')return reply.code(503).send({error:{code:'CONTENT_REFERENCE_STORAGE_UNAVAILABLE'}});
     // Extended SQLite BUSY results retain primary result code 5.
@@ -1161,7 +1162,11 @@ export async function buildServer(config: {
       const value=await readActivityFileOfficePdf(db,workbench,owner,conversationId,activityId,input,
         join(dirname(resolve(config.databasePath)),'.jot-document-previews'),controller.signal);
       conversations.get(conversationId,owner);
+      const proof=signOfficePrintProof(config.internalChannelToken,owner,{conversationId,runId:input.runId,activityId,resultSha:input.resultSha,
+        file:{path:input.path,version:input.version,sha256:input.fileSha,size:input.size}},
+        {sha256:value.pdf.sha256,size:value.pdf.size,pageCount:value.pdf.page_count});
       return reply.header('cache-control','private, no-store').header('x-content-type-options','nosniff')
+        .header('x-jot-preview-proof',proof)
         .header('x-activity-file-sha256',value.sha256).header('x-activity-file-size',String(value.size))
         .header('x-activity-file-version',String(value.version)).header('x-activity-tool-result-sha256',value.result_sha256)
         .header('x-jot-preview-protocol','1').header('x-jot-preview-renderer','libreoffice')
@@ -1280,7 +1285,7 @@ export async function buildServer(config: {
       if(Object.hasOwn(input,'reference_snapshots')){
         if(!messageReferenceSnapshotsInstalled(db))throw Error('content_reference_storage_unavailable');
         const prepared=prepareReferenceSteeringText(input.text,input.attachments??[],input.reference_snapshots);
-        assertReferenceSnapshotImages(db,owner,String(runs.get(runId,owner).conversation_id),prepared.referenceSnapshots.items);
+        assertReferenceSnapshotImages(db,owner,String(runs.get(runId,owner).conversation_id),prepared.referenceSnapshots.items,config.internalChannelToken);
         referenceSnapshots=prepared.referenceSnapshots;
         const {reference_snapshots,...original}=input;
         input={...original,text:prepared.text};

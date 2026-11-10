@@ -150,7 +150,8 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource&{focus
    }
   }}>
   <h4>{file.path} · 版本 {file.version}</h4>
-  {officePrint&&<p role="status">LibreOffice转换PDF · {officePrint.pageCount}页 · 摘要 <code>{officePrint.sha256}</code>。转换引用的来源协议继续接入中。</p>}
+  {officePrint&&<p role="status">LibreOffice转换PDF · {officePrint.pageCount}页 · 摘要 <code>{officePrint.sha256}</code>。转换引用入口继续接入中。</p>}
+  {officePrint&&<details><summary>转换来源证明</summary><code>{officePrint.proof}</code></details>}
   {document&&!officePrint&&<><PdfFileTextReferenceAction root={root} source={props} rotation={currentView.rotation}/><PdfFileRegionReference root={viewport} source={props} page={page} rotation={currentView.rotation}/></>}
   <ActivityToolFileBytes key={identity} conversationId={conversationId} runId={runId} activityId={activityId} resultSha={resultSha} file={file}/>
   {challenge?.identity===identity&&<form onSubmit={event=>{event.preventDefault();challenge.update(password);setPassword('');setChallenge(undefined);}}>

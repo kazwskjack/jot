@@ -10,7 +10,29 @@ const positive=value=>Number.isSafeInteger(value)&&value>0;
 const invalid=()=>Error('content_reference_invalid');
 const relative=value=>text(value,4096)&&value.length>0&&!/[\\:\u0000-\u001f\u007f]/.test(value)&&value.split('/').every(part=>part&&part!=='.'&&part!=='..');
 
+// Validate the original Office source, then reuse the native PDF selection shape without rewriting stored data.
+function officePrintPdfSource(value){
+ const print=value?.print_view,ref=value?.reference,source=ref?.source,renderer=ref?.renderer;
+ const path=value?.file?.path;
+ const mimes={docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation'};
+ const mime=typeof path==='string'?mimes[path.toLowerCase().split('.').at(-1)]:undefined;
+ if(!exact(print,['protocol','sha256','size','pageCount','proof'])||print.protocol!==1||!sha(print.sha256)
+  ||!Number.isSafeInteger(print.size)||print.size<100||print.size>20*1024*1024
+  ||!positive(print.pageCount)||print.pageCount>50000||typeof print.proof!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(print.proof)
+  ||typeof mime!=='string'||source?.mimeType!==mime||value.file.size>20*1024*1024
+  ||!exact(renderer,['id','backend','locatorQuality'])||renderer.id!=='office-pdf'||renderer.backend!=='libreoffice'
+  ||renderer.locatorQuality!==(ref.selectionMode==='text'?'approximate':'visual'))throw invalid();
+ const locator=ref.locator;
+ if(Array.isArray(locator?.pageNumbers)&&locator.pageNumbers.some(page=>page>print.pageCount)
+  ||locator?.pageNumber>print.pageCount)throw invalid();
+ const {print_view,...original}=value;
+ return {...original,reference:{...ref,source:{...source,mimeType:'application/pdf'},
+  renderer:{id:'pdf',backend:'builtin',locatorQuality:ref.selectionMode==='text'?'semantic':'visual'}}};
+}
+
 export function validateTextReferenceSource(value,conversation){
+ if(value?.print_view!==undefined||value?.reference?.renderer?.id==='office-pdf'){validateTextReferenceSource(officePrintPdfSource(value),conversation);return;}
  if(['docx','pptx'].includes(value?.reference?.renderer?.id)){validateOfficeTextReferenceSource(value,conversation);return;}
  if(!exact(value,['conversationId','runId','activityId','resultSha','file','reference'],['rotation'])
   ||value.rotation!==undefined&&![0,90,180,270].includes(value.rotation)||value.conversationId!==conversation||!id(value.runId)||!id(value.activityId)||!sha(value.resultSha))throw invalid();
@@ -85,6 +107,7 @@ export function validateOfficeRegionView(view,renderer){
 }
 
 export function validateRegionCaptureSource(capture,conversation){
+ if(capture?.print_view!==undefined||capture?.reference?.renderer?.id==='office-pdf'){validateRegionCaptureSource(officePrintPdfSource(capture),conversation);return capture;}
  const docx=capture?.reference?.renderer?.id==='docx',pptx=capture?.reference?.renderer?.id==='pptx',xlsx=capture?.reference?.renderer?.id==='xlsx',office=docx||pptx||xlsx;
  if(!exact(capture,['conversationId','runId','activityId','resultSha','file','reference','imageBytes','rotation'],office?['region_view']:[])
   ||capture.conversationId!==conversation||!identifier(capture.runId)||!identifier(capture.activityId)||!sha(capture.resultSha)
@@ -170,7 +193,7 @@ export function validateCellReferenceSource(value,conversation){
 }
 
 export function validateContentReference(snapshot){
- if(!exact(snapshot,['conversationId','runId','activityId','resultSha','file','reference','execution_authorized'],['rotation','imageBytes','image_artifact','text_view','region_view','cell_view'])
+ if(!exact(snapshot,['conversationId','runId','activityId','resultSha','file','reference','execution_authorized'],['rotation','imageBytes','image_artifact','text_view','region_view','cell_view','print_view'])
   ||snapshot.execution_authorized!==false||!id(snapshot.conversationId))throw invalid();
  const {execution_authorized,image_artifact,...source}=snapshot;
  if(snapshot.reference?.selectionMode==='text'){

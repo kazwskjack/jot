@@ -39,8 +39,8 @@ function automaticTitle(input: unknown): string | null {
 export class RunRepository {
   private readonly db: DatabaseSync;
   private readonly events: EventStore;
-  private readonly options:{workAgentPreset?:string};
-  constructor(db: DatabaseSync, events: EventStore,options:{workAgentPreset?:string}={}) { this.db = db; this.events = events;this.options=options; }
+  private readonly options:{workAgentPreset?:string;officePrintProofKey?:string};
+  constructor(db: DatabaseSync, events: EventStore,options:{workAgentPreset?:string;officePrintProofKey?:string}={}) { this.db = db; this.events = events;this.options=options; }
 
   usesDatabase(db: DatabaseSync): boolean { return this.db === db && this.events.usesDatabase(db); }
 
@@ -88,7 +88,7 @@ export class RunRepository {
     const generatedTitle = AUTOMATIC_TITLES.has(conversation.title) ? automaticTitle(input.content) : null;
     withImmediateTransaction(this.db, () => {
       if(hostSettingsAdmissionIsClosed(this.db))throw Error('host_settings_admission_fenced');
-      if(referenceSnapshots)assertReferenceSnapshotImages(this.db,ownerId,conversationId,referenceSnapshots.items);
+      if(referenceSnapshots)assertReferenceSnapshotImages(this.db,ownerId,conversationId,referenceSnapshots.items,this.options.officePrintProofKey);
       const current=this.db.prepare('SELECT mode,version FROM ga_conversations WHERE id=? AND owner_id=?').get(conversationId,ownerId)!;
       if(options.expectedConversationVersion!==undefined&&options.expectedConversationVersion!==current.version)throw Error('version_conflict');
       const mode=conversationMode(current.mode),chat=mode==='chat'?chatModePolicy(options.modePolicy):undefined;

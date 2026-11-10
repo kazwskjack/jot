@@ -841,3 +841,5 @@ export type OfficePreviewStatus = {
   );
   execution_authorized: false;
 };
+
+export type OfficePrintView={protocol:1;sha256:string;size:number;pageCount:number;proof:string};

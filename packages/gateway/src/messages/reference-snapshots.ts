@@ -1,3 +1,4 @@
+import {assertOfficePrintProof} from './office-print-proof.ts';
 import {validateAttachmentManifest} from '../artifacts/pinned-manifest.ts';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
@@ -28,9 +29,10 @@ export const messageReferenceSnapshotsInstalled=(db:DatabaseSync)=>Boolean(db.pr
 
 export const commandReferenceSnapshotsInstalled=(db:DatabaseSync)=>Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ga_run_command_reference_snapshots'").get());
 
-export function assertReferenceSnapshotImages(db:DatabaseSync,ownerId:string,conversationId:string,items:Array<Record<string,unknown>>){
+export function assertReferenceSnapshotImages(db:DatabaseSync,ownerId:string,conversationId:string,items:Array<Record<string,unknown>>,officePrintProofKey?:string){
  for(const value of items){
   const reference=validateContentReference(value) as {reference:{selectionMode:string};image_artifact?:{artifact_id:string;version:number;sha256:string;size_bytes:number}};
+  assertOfficePrintProof(officePrintProofKey,ownerId,value);
   if(reference.reference.selectionMode!=='region')continue;
   const image=reference.image_artifact!;
   const row=db.prepare(`SELECT a.current_version,v.sha256,v.size_bytes,v.mime_type,v.metadata_json FROM ga_artifacts a
