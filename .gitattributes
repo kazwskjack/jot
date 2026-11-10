@@ -5,4 +5,5 @@ web/jot/vendor/LICENSE.twemoji-parser.md -text
 web/public/docx-preview/0.4.0/** -text
 web/public/docx-preview/0.4.0/docx-preview.js -whitespace
 web/public/docx-preview/0.4.0/jszip.min.js -whitespace
+web/public/docx-preview/0.4.0/html2canvas.js -whitespace
 web/public/docx-preview/0.4.0/LICENSES.txt -whitespace

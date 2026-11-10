@@ -69,7 +69,8 @@ function validateOfficeTextReferenceSource(value,conversation){
 }
 
 export function validateRegionCaptureSource(capture,conversation){
- if(!exact(capture,['conversationId','runId','activityId','resultSha','file','reference','imageBytes','rotation'])
+ const docx=capture?.reference?.renderer?.id==='docx';
+ if(!exact(capture,['conversationId','runId','activityId','resultSha','file','reference','imageBytes','rotation'],docx?['region_view']:[])
   ||capture.conversationId!==conversation||!identifier(capture.runId)||!identifier(capture.activityId)||!sha(capture.resultSha)
   ||!positive(capture.imageBytes)||![0,90,180,270].includes(capture.rotation))throw invalid();
  const source=capture.file,ref=capture.reference;
@@ -78,13 +79,17 @@ export function validateRegionCaptureSource(capture,conversation){
   ||ref.schemaVersion!==1||ref.kind!=='content-reference'||ref.selectionMode!=='region'||!identifier(ref.id)||typeof ref.createdAt!=='string'||!Number.isFinite(Date.parse(ref.createdAt))
   ||ref.nearbyText!==undefined&&(typeof ref.nearbyText!=='string'||ref.nearbyText.length>100000))throw invalid();
  const file=ref.source,renderer=ref.renderer,locator=ref.locator,image=ref.image;
- if(!exact(file,['relativePath','fileName','mimeType','revision'])||file.relativePath!==source.path||file.fileName!==source.path.split('/').at(-1)||file.mimeType!=='application/pdf'
+ const mime=docx?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':'application/pdf';
+ if(!exact(file,['relativePath','fileName','mimeType','revision'])||file.relativePath!==source.path||file.fileName!==source.path.split('/').at(-1)||file.mimeType!==mime
   ||!exact(file.revision,['id','size','sha256'])||file.revision.id!==String(source.version)||file.revision.size!==source.size||file.revision.sha256!==source.sha256
-  ||!exact(renderer,['id','backend','locatorQuality'])||renderer.id!=='pdf'||renderer.backend!=='builtin'||renderer.locatorQuality!=='visual'
-  ||!exact(locator,['surface','pageNumber','rect'])||locator.surface!=='page'||!positive(locator.pageNumber)
+  ||!exact(renderer,['id','backend','locatorQuality'])||renderer.id!==(docx?'docx':'pdf')||renderer.backend!=='builtin'||renderer.locatorQuality!=='visual'
+  ||!exact(locator,docx?['surface','rect']:['surface','pageNumber','rect'])||locator.surface!==(docx?'document':'page')||!docx&&!positive(locator.pageNumber)
   ||!exact(locator.rect,['x','y','width','height'])||Object.values(locator.rect).some(number=>typeof number!=='number'||!Number.isFinite(number)||number<0||number>1)
   ||!locator.rect.width||!locator.rect.height||locator.rect.x+locator.rect.width>1+1e-9||locator.rect.y+locator.rect.height>1+1e-9
   ||!exact(image,['name','mimeType','width','height','sha256'])||typeof image.name!=='string'||!image.name||image.name.length>255||/[\\/\u0000-\u001f\u007f]/.test(image.name)||image.mimeType!=='image/png'||!positive(image.width)||!positive(image.height)||!sha(image.sha256))throw invalid();
+ if(docx&&(!exact(capture.region_view,['protocol','section','width','height'])||capture.region_view.protocol!==1||!positive(capture.region_view.section)||capture.region_view.section>50000||capture.rotation!==0
+  ||capture.imageBytes>8*1024*1024||image.width>4096||image.height>4096||image.width*image.height>4194304
+  ||['width','height'].some(key=>typeof capture.region_view[key]!=='number'||!Number.isFinite(capture.region_view[key])||capture.region_view[key]<=0||capture.region_view[key]>33554432)))throw invalid();
  return capture;
 }
 
@@ -139,7 +144,7 @@ export function validateCellReferenceSource(value,conversation){
 }
 
 export function validateContentReference(snapshot){
- if(!exact(snapshot,['conversationId','runId','activityId','resultSha','file','reference','execution_authorized'],['rotation','imageBytes','image_artifact','text_view'])
+ if(!exact(snapshot,['conversationId','runId','activityId','resultSha','file','reference','execution_authorized'],['rotation','imageBytes','image_artifact','text_view','region_view'])
   ||snapshot.execution_authorized!==false||!id(snapshot.conversationId))throw invalid();
  const {execution_authorized,image_artifact,...source}=snapshot;
  if(snapshot.reference?.selectionMode==='text'){

@@ -110,12 +110,12 @@ function findTextSearchMatches(text, query, limit) {
 }
 
  const content=document.getElementById('content'),styles=document.getElementById('styles'),status=document.getElementById('status');
- let started=false,zoom=1,sessionToken,visualView,selectionSerial=0,proposal,focusRange;
+ let started=false,zoom=1,sessionToken,visualView,selectionSerial=0,proposal,focusRange,regionController;
  const boot=()=>window.parent.postMessage({type:'jot-docx-boot',protocol:1,started},parentOrigin);
  window.addEventListener('message',event=>{
   if(event.source===window.parent&&event.origin===parentOrigin&&event.data?.type==='jot-docx-probe'&&event.data.protocol===1&&Object.keys(event.data).length===2)boot();
  });
- const report=message=>window.parent.postMessage({protocol:1,token:sessionToken,...message},parentOrigin);
+ const report=(message,transfer=[])=>window.parent.postMessage({protocol:1,token:sessionToken,...message},parentOrigin,transfer);
  // text_view 2 pins docx-preview 0.4.0 raw DOM text order. A renderer upgrade needs a new locator protocol.
  const indexVisualText=()=>{
   const walker=document.createTreeWalker(content,NodeFilter.SHOW_TEXT),parts=[],nodes=[];let length=0,node;
@@ -210,7 +210,7 @@ function findTextSearchMatches(text, query, limit) {
    else{proposal=undefined;report({type:'jot-docx-selection',selection:null});}
   }else if(value.type==='jot-docx-added'&&value.serial===proposal?.data.serial){
    proposal=undefined;window.getSelection()?.removeAllRanges();report({type:'jot-docx-selection',selection:null});
-  }
+  }else regionController?.command(value);
  });
  const resize=delta=>{
   zoom=Math.min(3,Math.max(0.25,Math.round((zoom+delta)*100)/100));
@@ -309,6 +309,7 @@ function findTextSearchMatches(text, query, limit) {
    const sections=content.querySelectorAll('section.jot-docx').length;
    visualView=indexVisualText();
    buildOutline();query.disabled=false;
+   regionController=window.JotWordRegion({content,report});
    status.textContent='Word视觉内容';report({type:'jot-docx-ready',sections});
    if(value.focus)restoreFocus(value.focus);
   }catch(error){

@@ -20,6 +20,16 @@
       "upstream_integrity": "sha512-xXDvecyTpGLrqFrvkrUSoxxfJI5AH7U8zxxtVclpsUtMCq4JQ290LY8AW5c7Ggnr/Y/oK+bQMbqK2qmtk3pN4g==",
       "sha256": "acc7e41455a80765b5fd9c7ee1b8078a6d160bbbca455aeae854de65c947d59e",
       "modified": false
+    },
+    {
+      "name": "html2canvas",
+      "version": "1.4.1",
+      "url": "https://registry.npmjs.org/html2canvas/-/html2canvas-1.4.1.tgz",
+      "integrity": "sha512-fPU6BHNpsyIhr8yyMpTLLxAbkaK8ArIBcmZIRiBLiDhjeqvXolaEmDGmELFuX9I4xDcaKKcJl+TKZLqruBbmWA==",
+      "upstream_integrity": "sha512-fPU6BHNpsyIhr8yyMpTLLxAbkaK8ArIBcmZIRiBLiDhjeqvXolaEmDGmELFuX9I4xDcaKKcJl+TKZLqruBbmWA==",
+      "file": "html2canvas.js",
+      "sha256": "01c5b468ffa0427e535e3019165d2efd2489650ec9cf1379d6ab79fdbf75736b",
+      "modified": false
     }
   ],
   "consumption": "Public classic browser scripts inside a dedicated random localhost viewer origin. The viewer host serves only fixed public files, with allow-scripts/allow-same-origin sandbox and restricted CSP. Parent and child messages verify exact origin and source window before token-bound operations. No package installation or script execution performed during development.",
@@ -41,6 +51,12 @@
       "sha256": "42c6d3627c37725c12d2472a3f78e07cc6ceb2f507546209a39c44412d751db1",
       "license": "AGPL-3.0",
       "changes": "Retained Unicode source-offset case folding, removed TypeScript annotations for the static script and bounded match count."
+    },
+    {
+      "path": "ui/src/components/code-editor/view/subcomponents/RegionSelectionOverlay.tsx",
+      "sha256": "d58472f3c25eaa37cab8c03c12393070f13720dd6e9b1b2f1e689d0ba338afe5",
+      "license": "AGPL-3.0",
+      "changes": "Retained normalized per-section regions, source section context and html2canvas capture. Direct bounded crop avoids full-page bitmap allocation. Source section identity/layout, original file/upload/pinned-image proof are checked before use."
     }
   ],
   "jot_source_adaptations": [

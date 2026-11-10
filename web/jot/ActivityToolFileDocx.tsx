@@ -1,7 +1,8 @@
 import React,{useContext,useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
 import {readListedFilePreviewBytes,type ListedFilePreviewSource} from './activity-file-preview-client';
-import {FileTextReferenceContext,type FileTextReference,type OfficeTextFocus} from './FileTextReferences';
+import {FileTextReferenceContext,type FileTextReference,type OfficeTextFocus,type OfficeRegionFocus} from './FileTextReferences';
+import DocxFileRegionReference,{type DocxRegionSession} from './DocxFileRegionReference';
 import {createTextContentReference} from './vendor/pilotdeck-content-reference';
 import {validateTextReferenceSource} from '../../packages/gateway/src/messages/content-reference.js';
 
@@ -50,7 +51,7 @@ function originalVisualFocus(focus:OfficeTextFocus|undefined,source:ListedFilePr
  return {selectedText:value.reference.selectedText,occurrenceIndex:locator.occurrenceIndex!,prefix:locator.quote.prefix??'',suffix:locator.quote.suffix??''};
 }
 
-function DocxAttempt({source,owner,identity,officeTextFocus}:{source:ListedFilePreviewSource;owner:string;identity:string;officeTextFocus?:OfficeTextFocus}){
+function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{source:ListedFilePreviewSource;owner:string;identity:string;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
  const context=useContext(FileTextReferenceContext),currentContext=useRef(context);currentContext.current=context;
  const frame=useRef<HTMLIFrameElement>(null),loaded=useRef<HTMLIFrameElement|null>(null);
  const notify=useRef<(frame:HTMLIFrameElement)=>void>(()=>{});
@@ -60,6 +61,7 @@ function DocxAttempt({source,owner,identity,officeTextFocus}:{source:ListedFileP
  const pendingTimer=useRef<number|undefined>(undefined);
  const [committing,setCommitting]=useState(false),[notice,setNotice]=useState(''),[focused,setFocused]=useState<boolean>();
  const [viewerUrl,setViewerUrl]=useState<string>();
+ const regionSession=useRef<DocxRegionSession|undefined>(undefined);
  const disabled=!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId;
  useEffect(()=>{if(disabled){selected.current=undefined;pending.current=undefined;window.clearTimeout(pendingTimer.current);setCommitting(false);setProposal(undefined);}},[disabled]);
  useEffect(()=>{
@@ -131,6 +133,7 @@ function DocxAttempt({source,owner,identity,officeTextFocus}:{source:ListedFileP
    if(event.effectiveDirective==='frame-src'&&(event.blockedURI===viewerOrigin||event.blockedURI.startsWith(viewerOrigin+'/')))
     fail('当前Jot页面无法载入独立Word查看器，请重新加载Jot页面后重试。');
   };
+  if(target?.contentWindow)regionSession.current={window:target.contentWindow,origin:viewerOrigin,token,live,close:fail};
   const timeout=window.setTimeout(()=>fail('Word视觉读取超时，可重新加载Jot页面、重试或切换结构化文字查看。'),30000);
   setState({phase:'loading',message:'正在核对原文件并渲染Word…'});setFocused(officeTextFocus&&!focus?false:undefined);
   window.addEventListener('message',message);window.document.addEventListener('securitypolicyviolation',policyViolation);notify.current=probe;
@@ -147,7 +150,7 @@ function DocxAttempt({source,owner,identity,officeTextFocus}:{source:ListedFileP
    if(!live())return;
    bytes=value.buffer as ArrayBuffer;if(target)send(target);
   }).catch(error=>{if(live())fail(error instanceof Error?error.message:'原Word文件读取失败');});
-  return()=>{dispose();notify.current=()=>{};commit.current=()=>{};cancel.current=()=>{};};
+  return()=>{dispose();regionSession.current=undefined;notify.current=()=>{};commit.current=()=>{};cancel.current=()=>{};};
  },[identity,owner,viewerUrl]);
  return <section className="jot-docx-preview" aria-label="Word视觉内容">
   <p role={state.phase==='error'?'alert':'status'}>{state.message}
@@ -157,12 +160,13 @@ function DocxAttempt({source,owner,identity,officeTextFocus}:{source:ListedFileP
   {notice&&<p role="status">{notice}</p>}
   {state.phase!=='error'&&viewerUrl&&<iframe ref={frame} title="原固定版本Word视觉查看器" src={viewerUrl} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer"
    onLoad={event=>{loaded.current=event.currentTarget;notify.current(event.currentTarget);}}/>}
+  {state.phase==='ready'&&regionSession.current&&<DocxFileRegionReference source={source} owner={owner} session={regionSession.current} focus={officeRegionFocus}/>}
   {proposal&&<section className="jot-docx-selection" aria-label="待确认的Word视觉文字引用"><blockquote>{proposal.reference.reference.selectedText}</blockquote><button type="button" disabled={disabled||committing} onPointerDown={event=>event.preventDefault()} onMouseDown={event=>event.preventDefault()} onClick={()=>commit.current()}>引用Word文字到当前对话</button></section>}
  </section>;
 }
 
-export default function ActivityToolFileDocx(source:ListedFilePreviewSource&{officeTextFocus?:OfficeTextFocus}){
+export default function ActivityToolFileDocx(source:ListedFilePreviewSource&{officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
  const owner=taskDraftScope(),[revision,setRevision]=useState(0);
- const identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,source.officeTextFocus?.key,revision]);
- return <><button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取Word视觉内容</button><DocxAttempt key={identity} source={source} owner={owner} identity={identity} officeTextFocus={source.officeTextFocus}/></>;
+ const identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,source.officeTextFocus?.key,source.officeRegionFocus?.key,revision]);
+ return <><button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取Word视觉内容</button><DocxAttempt key={identity} source={source} owner={owner} identity={identity} officeTextFocus={source.officeTextFocus} officeRegionFocus={source.officeRegionFocus}/></>;
 }

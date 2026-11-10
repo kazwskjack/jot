@@ -33,17 +33,22 @@ export function generatedUpload(file,capture,scope,conversation){
  validateGenerated({file:{name:file.name,size:file.size,type:file.type},generated},conversation,scope);return generated;
 }
 
-export async function generatedUploadFile(entry,scope,conversation){
- const generated=validateGenerated(entry,conversation,scope),image=generated.capture.reference.image;
- const bytes=await generated.blob.arrayBuffer();
- const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),value=>value.toString(16).padStart(2,'0')).join('');
+export async function readGeneratedPng(bytes){
  const header=new Uint8Array(bytes,0,Math.min(24,bytes.byteLength));
- if(digest!==image.sha256||entry.sha!==undefined&&digest!==entry.sha||header.length<24
+ if(header.length<24
   ||![137,80,78,71,13,10,26,10].every((value,index)=>header[index]===value)
   ||String.fromCharCode(...header.subarray(12,16))!=='IHDR')throw Error('generated_capture_integrity_failed');
  const dimensions=new DataView(bytes);
- if(dimensions.getUint32(16)!==image.width||dimensions.getUint32(20)!==image.height)throw Error('generated_capture_integrity_failed');
- return {file:new File([generated.blob],entry.file.name,{type:entry.file.type,lastModified:0}),sha:digest};
+ const width=dimensions.getUint32(16),height=dimensions.getUint32(20);
+ if(dimensions.getUint32(8)!==13||!width||!height)throw Error('generated_capture_integrity_failed');
+ const sha256=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),value=>value.toString(16).padStart(2,'0')).join('');
+ return {width,height,sha256};
+}
+export async function generatedUploadFile(entry,scope,conversation){
+ const generated=validateGenerated(entry,conversation,scope),image=generated.capture.reference.image;
+ const metadata=await readGeneratedPng(await generated.blob.arrayBuffer());
+ if(metadata.sha256!==image.sha256||entry.sha!==undefined&&metadata.sha256!==entry.sha||metadata.width!==image.width||metadata.height!==image.height)throw Error('generated_capture_integrity_failed');
+ return {file:new File([generated.blob],entry.file.name,{type:entry.file.type,lastModified:0}),sha:metadata.sha256};
 }
 
 export function uploadRecoverySnapshot(entries){

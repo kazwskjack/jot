@@ -1,7 +1,7 @@
 import OfficeTextReferenceAction from './OfficeTextReferenceAction';
 import {officeTextView,resolveOfficeTextReference} from './office-text-reference';
 import {cellRangeCoordinates} from '../../packages/gateway/src/messages/content-reference.js';
-import {FileTextReferenceContext,type OfficeCellFocus,type OfficeTextFocus} from './FileTextReferences';
+import {FileTextReferenceContext,type OfficeCellFocus,type OfficeTextFocus,type OfficeRegionFocus} from './FileTextReferences';
 import {createCellRangeContentReference,type CellRangeSnapshot} from './vendor/pilotdeck-content-reference';
 import './activity-tool-file-office.css';
 import React,{useContext,useEffect,useMemo,useRef,useState} from 'react';
@@ -266,12 +266,12 @@ function OfficeContent({value,source,officeFocus,officeTextFocus}:{value:OfficeD
  return <OfficeDocumentContent value={value} source={source} officeTextFocus={officeTextFocus}/>;
 }
 
-export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus}){
- const {conversationId,runId,activityId,resultSha,file}=props,owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file.path,file.version,file.sha256,file.size,props.officeFocus?.key,props.officeTextFocus?.key]);
+export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
+ const {conversationId,runId,activityId,resultSha,file}=props,owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file.path,file.version,file.sha256,file.size,props.officeFocus?.key,props.officeTextFocus?.key,props.officeRegionFocus?.key]);
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;page?:Page;error?:string}>(),[revision,setRevision]=useState(0);
  const [visualState,setVisualState]=useState<{identity:string;enabled:boolean}>();
- const visual=visualState?.identity===identity?visualState.enabled:props.officeTextFocus?.value.text_view===2;
+ const visual=visualState?.identity===identity?visualState.enabled:props.officeTextFocus?.value.text_view===2||!!props.officeRegionFocus;
  useEffect(()=>{root.current?.focus();root.current?.scrollIntoView({block:'nearest'});},[identity]);
  useEffect(()=>{
   const controller=new AbortController();active.current=controller;setState({identity});
@@ -307,6 +307,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
    <p>原文件结构化内容 · {current.page.engine.name} {current.page.engine.version}</p>
    {current.page.document.truncated&&<p role="status">解析结果已截断，当前内容有未覆盖部分。可下载原固定版本查看完整文件。</p>}
    {current.page.document.kind==='docx'&&<>
+    {props.officeRegionFocus&&(!visual||current.page.docx_visual?.ready!==true)&&<p role="status">原Word区域引用按视觉分段定位，请打开Word视觉内容核对原区域。</p>}
     {props.officeTextFocus?.value.text_view===2&&(!visual||current.page.docx_visual?.ready!==true)&&<p role="status">此原引用使用Word视觉文字定位。请打开Word视觉内容核对原位置；原引用快照仍可查看。</p>}
     <nav aria-label="Word查看方式"><button type="button" aria-pressed={!visual} onClick={()=>setVisualState({identity,enabled:false})}>结构化文字与引用</button>
      <button type="button" aria-pressed={visual} disabled={current.page.docx_visual?.protocol!==1||current.page.docx_visual.ready!==true} onClick={()=>setVisualState({identity,enabled:true})}>Word视觉内容</button></nav>

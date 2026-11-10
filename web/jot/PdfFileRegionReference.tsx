@@ -6,12 +6,9 @@
 import React,{useContext,useEffect,useRef,useState,type RefObject} from 'react';
 import {createPortal} from 'react-dom';
 import {taskDraftScope} from './client';
-import {FileTextReferenceContext} from './FileTextReferences';
+import {FileTextReferenceContext,fileRegionCapture} from './FileTextReferences';
 import {createImageRegionContentReference,normalizeRect,type NormalizedRect} from './vendor/pilotdeck-content-reference';
 import type {ListedFilePreviewSource} from './activity-file-preview-client';
-
-// Native PNG encoding is allowed one in-flight bitmap across open PDF viewers.
-let captureInFlight=false;
 
 type Rect={left:number;top:number;right:number;bottom:number};
 type Target={canvas:HTMLCanvasElement;page:number;bounds:DOMRect};
@@ -48,8 +45,8 @@ export default function PdfFileRegionReference({root,source,page,rotation}:{root
  };
  const capture=async()=>{
   if(!target||!rect||capturing.current)return;
-  if(captureInFlight){setError('上一张截图仍在处理，请稍后重试。');return;}
-  captureInFlight=true;
+  if(fileRegionCapture.owner){setError('上一张截图仍在处理，请稍后重试。');return;}
+  const lease={};fileRegionCapture.owner=lease;
   const job=++sequence.current,expected=identity;capturing.current=true;setBusy(true);setError('');
   let allocated:HTMLCanvasElement|undefined;
   const check=()=>{
@@ -84,7 +81,7 @@ export default function PdfFileRegionReference({root,source,page,rotation}:{root
    const accepted=await latest.current!.onAddRegion({owner,conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,file:{path:original.path,version:original.version,sha256:original.sha256,size:original.size},reference,imageBytes:file.size,rotation},file);
    if(sourceIdentity.current===expected){if(accepted)cancel();else if(sequence.current===job)setError('截图引用未被接收，请查看当前对话的提示。');}
   }catch(error){if(sequence.current===job&&(error as DOMException)?.name!=='AbortError')setError(error instanceof Error?error.message:'区域截图失败');}
-  finally{captureInFlight=false;if(allocated){allocated.width=0;allocated.height=0;}if(sequence.current===job){capturing.current=false;setBusy(false);}}
+  finally{if(fileRegionCapture.owner===lease)fileRegionCapture.owner=undefined;if(allocated){allocated.width=0;allocated.height=0;}if(sequence.current===job){capturing.current=false;setBusy(false);}}
  };
  const norm=target&&rect?normalized(rect,target.bounds):undefined;
  const adjust=(field:keyof NormalizedRect,value:number)=>{

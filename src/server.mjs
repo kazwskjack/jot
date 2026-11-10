@@ -19,7 +19,7 @@ export function encodeSseEvent(event){return `id: ${event.seq}\ndata: ${JSON.str
 export async function buildServer(options={}){
   const demo=options.demo??false,csrf=randomBytes(24).toString('hex');
   const officeViewerHost=`jot-office-${randomBytes(16).toString('hex')}.localhost`;
-  const officeViewerFiles=new Set(['frame.html','frame.js','docx-preview.js','jszip.min.js','SOURCES.json','LICENSES.txt']);
+  const officeViewerFiles=new Set(['frame.html','frame.js','word-region.js','html2canvas.js','docx-preview.js','jszip.min.js','SOURCES.json','LICENSES.txt']);
   const officeOrigin=host=>`http://${officeViewerHost}${host.includes(':')?host.slice(host.lastIndexOf(':')):''}`;
   const flag=value=>{if(value===undefined||value==='false')return false;if(value==='true')return true;throw Error('invalid_chat_configuration');};
   const chat=demo?undefined:chatRoute(options.chat??{enabled:flag(process.env.JOT_CHAT_ENABLED),baseUrl:process.env.JOT_CHAT_MODEL_URL,model:process.env.JOT_CHAT_MODEL,key:process.env.JOT_CHAT_MODEL_KEY,thinkingDisabledSupported:flag(process.env.JOT_CHAT_THINKING_DISABLED_SUPPORTED)});
