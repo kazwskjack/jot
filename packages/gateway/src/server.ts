@@ -1,5 +1,5 @@
-import {messageReferenceSnapshotsInstalled,assertReferenceSnapshotImages} from './messages/reference-snapshots.ts';
-import {prepareReferenceSteeringText} from './messages/content-reference.js';
+import {messageReferenceSnapshotsInstalled,commandReferenceSnapshotsInstalled,captureRunCommandReferenceSnapshots,assertReferenceSnapshotImages} from './messages/reference-snapshots.ts';
+import {prepareReferenceSteeringText,type ReferenceSnapshotInput} from './messages/content-reference.js';
 import {createPinnedByteStore} from './artifacts/pinned-byte-source.ts';
 import {readActivityToolResult,searchActivityToolResults,readActivityToolResultFile,readActivityToolResultFileBytes,parseActivityFileDownloadQuery,readActivityToolResultFileDownload} from './events/activity-tool-result.ts';
 import {readActivityHistory} from './events/activity-history.ts';
@@ -999,7 +999,7 @@ export async function buildServer(config: {
       api_version: '1.0', event_schema_version: '1.0', adapter_version: '0.1.0',
       artifact_archive:archiveStatus(),
       upload_recovery:{protocol:1,status:true},
-      ...(messageReferenceSnapshotsInstalled(db)?{reference_snapshots:{protocol:1,request:true}}:{}),
+      ...(messageReferenceSnapshotsInstalled(db)&&commandReferenceSnapshotsInstalled(db)?{reference_snapshots:{protocol:1,request:true}}:{}),
       git_workbench:gitWorkbench.capability(ownerId,config.nativeGitClient!==undefined,['commit','branch','initialization','reinitialization'].includes(gitCommitExecutionSchema(db)),['branch','initialization','reinitialization'].includes(gitCommitExecutionSchema(db)),['initialization','reinitialization'].includes(gitCommitExecutionSchema(db)),gitCommitExecutionSchema(db)==='reinitialization'),
       capabilities: { search: true, fetch: true, browser_interaction: false, file_read: true,
         file_edit: true, command_execution: true, questions: true, approvals: true,
@@ -1218,20 +1218,27 @@ export async function buildServer(config: {
     return reply.code(202).send(atomicCommand(request,202, () => {
       workbench.assertRunActive(runId); persistentTasks.assertRunActive(runId);
       let input=request.body as Record<string,unknown>;
+      let referenceSnapshots:ReferenceSnapshotInput|undefined;
       if(Object.hasOwn(input,'reference_snapshots')){
         if(!messageReferenceSnapshotsInstalled(db))throw Error('content_reference_storage_unavailable');
         const prepared=prepareReferenceSteeringText(input.text,input.attachments??[],input.reference_snapshots);
         assertReferenceSnapshotImages(db,owner,String(runs.get(runId,owner).conversation_id),prepared.referenceSnapshots.items);
+        referenceSnapshots=prepared.referenceSnapshots;
         const {reference_snapshots,...original}=input;
         input={...original,text:prepared.text};
       }
-      if(input.delivery!=='original')return commands.steer(runId,owner,input,String(request.headers['idempotency-key']||''));
+      if(input.delivery!=='original'){
+        const receipt=commands.steer(runId,owner,input,String(request.headers['idempotency-key']||''));
+        if(referenceSnapshots)captureRunCommandReferenceSnapshots(db,runId,owner,receipt.command_id,referenceSnapshots.items);
+        return receipt;
+      }
       if(config.ordinarySteeringEnabled!==true)throw Error('ordinary_steering_unavailable');
       // Native source proofs retain their original exact text payload. Delivery
       // metadata remains in the HTTP request hash and never grants execution.
       const source={text:input.text,client_message_id:input.client_message_id,expected_run_version:input.expected_run_version};
       const attachmentManifest=Array.isArray(input.attachments)&&input.attachments.length?new AttachmentResolver(db,config.uploadRoot??join(dirname(config.databasePath),'general-agent-uploads')).pinForMessage(owner,String(runs.get(runId,owner).conversation_id),input.attachments as string[],`steer-source:${runId}:${input.client_message_id}`):undefined;
       const receipt=commands.steer(runId,owner,{...source,...(attachmentManifest?{content_protocol:1,attachment_manifest:attachmentManifest}:{})},String(request.headers['idempotency-key']||''));
+      if(referenceSnapshots)captureRunCommandReferenceSnapshots(db,runId,owner,receipt.command_id,referenceSnapshots.items);
       const binding=db.prepare('SELECT session_id FROM ga_run_native_sessions WHERE run_id=?').get(runId);
       const lease=db.prepare('SELECT owner,generation FROM ga_worker_leases WHERE resource_id=?').get(runId);
       if(typeof binding?.session_id!=='string'||!lease)throw Error('ordinary_steering_scope_unconfirmed');

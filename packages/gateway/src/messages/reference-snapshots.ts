@@ -1,8 +1,9 @@
+import {validateAttachmentManifest} from '../artifacts/pinned-manifest.ts';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {decodeStoredContent} from './content.ts';
-import {readLiteralMessageReferences,validateContentReference} from './content-reference.js';
+import {readLiteralMessageReferences,validateContentReference,validateReferenceSnapshotInput} from './content-reference.js';
 
 export function installMessageReferenceSnapshots(db:DatabaseSync){
  db.exec(`CREATE TABLE IF NOT EXISTS ga_message_reference_snapshots (
@@ -12,10 +13,20 @@ export function installMessageReferenceSnapshots(db:DatabaseSync){
   content_sha256 TEXT NOT NULL,references_json TEXT NOT NULL CHECK(length(references_json)<=3200000),
   references_sha256 TEXT NOT NULL,created_at TEXT NOT NULL);
  CREATE TRIGGER IF NOT EXISTS ga_message_reference_snapshot_immutable BEFORE UPDATE ON ga_message_reference_snapshots
- BEGIN SELECT RAISE(ABORT,'message_reference_snapshot_immutable'); END;`);
+ BEGIN SELECT RAISE(ABORT,'message_reference_snapshot_immutable'); END;
+ CREATE TABLE IF NOT EXISTS ga_run_command_reference_snapshots (
+  command_id TEXT PRIMARY KEY REFERENCES ga_run_commands(id) ON DELETE CASCADE,
+  run_id TEXT NOT NULL REFERENCES ga_runs(id) ON DELETE CASCADE,
+  conversation_id TEXT NOT NULL REFERENCES ga_conversations(id) ON DELETE CASCADE,
+  owner_id TEXT NOT NULL,protocol INTEGER NOT NULL CHECK(protocol=1),command_payload_sha256 TEXT NOT NULL,
+  references_json TEXT NOT NULL CHECK(length(references_json)<=3200000),references_sha256 TEXT NOT NULL,created_at TEXT NOT NULL);
+ CREATE TRIGGER IF NOT EXISTS ga_command_reference_snapshot_immutable BEFORE UPDATE ON ga_run_command_reference_snapshots
+ BEGIN SELECT RAISE(ABORT,'command_reference_snapshot_immutable'); END;`);
 }
 
 export const messageReferenceSnapshotsInstalled=(db:DatabaseSync)=>Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ga_message_reference_snapshots'").get());
+
+export const commandReferenceSnapshotsInstalled=(db:DatabaseSync)=>Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ga_run_command_reference_snapshots'").get());
 
 export function assertReferenceSnapshotImages(db:DatabaseSync,ownerId:string,conversationId:string,items:Array<Record<string,unknown>>){
  for(const value of items){
@@ -40,10 +51,11 @@ export function captureMessageReferenceSnapshots(db:DatabaseSync,conversationId:
  if(!db.isTransaction)throw Error('message_reference_transaction_required');
  if(declared!==undefined&&(!Array.isArray(declared)||!declared.length||declared.length>10000))throw Error('content_reference_request_invalid');
  if(!messageReferenceSnapshotsInstalled(db)){if(declared!==undefined)throw Error('content_reference_storage_unavailable');return false;}
- const message=db.prepare(`SELECT m.content_json,c.owner_id,m.created_at FROM ga_messages m
+ const message=db.prepare(`SELECT m.id,m.run_id,m.client_message_id,m.content_json,c.owner_id,m.created_at FROM ga_messages m
   JOIN ga_conversations c ON c.id=m.conversation_id
   WHERE m.id=? AND c.id=? AND m.role='user' AND m.status='complete'`).get(messageId,conversationId);
  if(!message||typeof message.content_json!=='string'||typeof message.owner_id!=='string'||typeof message.created_at!=='string')return false;
+ if(declared===undefined)declared=readCommandReferenceSnapshots(db,conversationId,message);
  const contentSha=sha(message.content_json);
  const existing=db.prepare('SELECT * FROM ga_message_reference_snapshots WHERE message_id=?').get(messageId);
  if(existing){
@@ -90,4 +102,65 @@ export function messageReferenceProjection(db:DatabaseSync,row:Record<string,unk
   ||record.conversation_id!==row.conversation_id||record.content_sha256!==sha(row.content_json))return unavailable;
  const items=storedReferenceItems(record);
  return items?{reference_snapshots:{protocol:1,state:'ready',items}}:unavailable;
+}
+
+
+/** The caller's original command transaction owns metadata and payload binding. */
+export function captureRunCommandReferenceSnapshots(db:DatabaseSync,runId:string,ownerId:string,commandId:string,items:Array<Record<string,unknown>>){
+ if(!db.isTransaction)throw Error('message_reference_transaction_required');
+ if(!commandReferenceSnapshotsInstalled(db))throw Error('content_reference_storage_unavailable');
+ const references=validateReferenceSnapshotInput({protocol:1,items}).items;
+ const command=db.prepare(`SELECT cmd.*,r.conversation_id,c.owner_id FROM ga_run_commands cmd
+  JOIN ga_runs r ON r.id=cmd.run_id JOIN ga_conversations c ON c.id=r.conversation_id
+  WHERE cmd.id=? AND cmd.run_id=? AND c.owner_id=?`).get(commandId,runId,ownerId);
+ if(!command||command.kind!=='steer'||!['pending','applied'].includes(String(command.status))||typeof command.payload_json!=='string'){
+  throw Error('content_reference_request_conflict');
+ }
+ let payload:Record<string,unknown>;
+ try{payload=JSON.parse(command.payload_json);}catch{throw Error('content_reference_request_conflict');}
+ const referencesJson=canonicalJson(references);
+ if(!payload||typeof payload.text!=='string'
+  ||canonicalJson(readLiteralMessageReferences([{kind:'text',text:payload.text}]))!==referencesJson){
+  throw Error('content_reference_request_conflict');
+ }
+ const existing=db.prepare('SELECT * FROM ga_run_command_reference_snapshots WHERE command_id=?').get(commandId);
+ if(existing){
+  const stored=storedReferenceItems(existing);
+  if(existing.run_id!==runId||existing.conversation_id!==command.conversation_id||existing.owner_id!==ownerId
+   ||existing.command_payload_sha256!==sha(command.payload_json)||!stored||canonicalJson(stored)!==referencesJson){
+   throw Error('content_reference_request_conflict');
+  }
+  return;
+ }
+ db.prepare(`INSERT INTO ga_run_command_reference_snapshots
+  (command_id,run_id,conversation_id,owner_id,protocol,command_payload_sha256,references_json,references_sha256,created_at)
+  VALUES(?,?,?,?,1,?,?,?,?)`).run(commandId,runId,command.conversation_id!,ownerId,sha(command.payload_json),referencesJson,sha(referencesJson),command.created_at!);
+}
+
+function readCommandReferenceSnapshots(db:DatabaseSync,conversationId:string,message:Record<string,unknown>){
+ if(typeof message.id!=='string'||!message.id.startsWith('message-')||!commandReferenceSnapshotsInstalled(db))return undefined;
+ const commandId=message.id.slice(8);
+ const record=db.prepare('SELECT * FROM ga_run_command_reference_snapshots WHERE command_id=?').get(commandId);
+ if(!record)return undefined;
+ const command=db.prepare(`SELECT cmd.*,r.conversation_id,c.owner_id FROM ga_run_commands cmd
+  JOIN ga_runs r ON r.id=cmd.run_id JOIN ga_conversations c ON c.id=r.conversation_id
+  WHERE cmd.id=? AND cmd.run_id=? AND c.id=?`).get(commandId,message.run_id!,conversationId);
+ const items=storedReferenceItems(record);
+ if(!command||command.kind!=='steer'||!['pending','applied'].includes(String(command.status))||typeof command.payload_json!=='string'
+  ||command.owner_id!==message.owner_id||record.owner_id!==message.owner_id||record.run_id!==message.run_id
+  ||record.conversation_id!==conversationId||record.command_payload_sha256!==sha(command.payload_json)||!items){
+  throw Error('command_reference_snapshot_changed');
+ }
+ let payload:Record<string,unknown>,attachments:readonly {artifact_id:string}[]=[];
+ try{
+  payload=JSON.parse(command.payload_json);
+  if(payload.content_protocol===1){
+   attachments=validateAttachmentManifest(payload.attachment_manifest,{maxCount:10,maxAggregateBytes:200*1024*1024}).attachments;
+  }
+ }catch{throw Error('command_reference_snapshot_changed');}
+ const expected=JSON.stringify({blocks:[{block_id:message.id+':text',kind:'text',text:payload.text}],attachments:attachments.map(item=>item.artifact_id)});
+ if(typeof payload.text!=='string'||!payload.text.trim()||payload.client_message_id!==message.client_message_id||message.content_json!==expected){
+  throw Error('command_reference_snapshot_changed');
+ }
+ return items;
 }
