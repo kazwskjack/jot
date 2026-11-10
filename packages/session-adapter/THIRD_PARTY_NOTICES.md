@@ -44,3 +44,12 @@ spill backend and opaque locators retain their native meaning. Jot captures a
 private bounded producer snapshot and requires the original successful linked
 Session result before returning a page. Native grep line-preview limits remain
 part of that source scope.
+
+
+`native-workspace-file-reader.js` integrates the separately installed MIT-licensed
+`@deepseek-ai/dsh-api-workspace-files` 0.2.1-rc.2 through its original Typert
+Gateway and an explicitly owned Remote Peer. Reads use the original Session
+lookup and composed filesystem policy. Canonical path, opaque native version,
+reported size and Session/profile identity constrain each bounded byte range.
+Actual chunk SHA is separate from native freshness metadata. The retained DSH
+MIT notice applies to this integration.

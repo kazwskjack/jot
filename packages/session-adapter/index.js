@@ -1,5 +1,6 @@
 import {createTerminalControl} from './terminal-control.js'
 import {createNativeSearchSource} from './native-search-source.js'
+import {createNativeWorkspaceFileReader} from './native-workspace-file-reader.js'
 import {sessionHeaderIdentity} from './session-header-identity.js'
 import {projectTerminalInventory} from '../gateway/src/terminal/inventory.js'
 import {validateHostCredentialRefs} from './host-credentials-owner-route.js'
@@ -279,7 +280,7 @@ async function createOrResumeSession({controller,request,agents,sessions,session
   return value
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,nativeCommandQueryHost,nativePlanModeHost,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,trustedModelMetadataReader,trustedModelMetadataEnabled=false,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,pluginProfileControl,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard,taskmasterInstallationReader,taskmasterRuntimeVersionReader,terminalInventoryReader,terminalControl,nativeSearchSource }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,nativeCommandQueryHost,nativePlanModeHost,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,trustedModelMetadataReader,trustedModelMetadataEnabled=false,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,pluginProfileControl,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard,taskmasterInstallationReader,taskmasterRuntimeVersionReader,terminalInventoryReader,terminalControl,nativeSearchSource,nativeWorkspaceFileReader }) {
   const allowedPresets=new Set(ALLOWED_AGENT_PRESETS)
   if(chatExecutionPolicy!==undefined){normalizeChatExecutionPolicy(chatExecutionPolicy);if(!requireOrdinaryModelPolicy||!ordinaryInputAdmissionHost)throw Error('ordinary_execution_policy_config_invalid');allowedPresets.add('jot-chat')}
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
@@ -642,6 +643,21 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(agent?.id!==sessionId||blockedWorkbenchSessions.has(sessionId)||binding?.sessionRef!==sessionId||binding?.runId!==body.run_id)return json(409,{error:'memory_extraction_binding_invalid'});
       try{return json(200,await memoryExtractionHost.run(agent,{signal}));}
       catch{return json(409,{error:'memory_extraction_not_completed'});}
+    }
+    const nativeFile=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/native-file\/range$/);
+    if(nativeFile){
+      if(method!=='POST')return json(405,{error:'method_not_allowed'});
+      const sessionId=decodeURIComponent(nativeFile[1]);
+      if(!ID.test(sessionId)||url.search||!body||typeof body!=='object'||Array.isArray(body)
+        ||Object.keys(body).sort().join(',')!=='owner_id,range'||typeof body.owner_id!=='string'||!ID.test(body.owner_id))
+        return json(422,{error:'native_file_range_invalid'});
+      if(!nativeWorkspaceFileReader)return json(503,{error:'native_file_range_unavailable'});
+      try{return json(200,await nativeWorkspaceFileReader.read(body.owner_id,sessionId,body.range,signal));}
+      catch(error){const code=error?.message;
+        return json(code==='native_file_range_unavailable'?503:code==='native_file_range_capacity'?429:code==='native_file_range_forbidden'?403:
+          code==='native_file_range_invalid'?422:code==='native_file_range_session_not_found'||error?.code==='workspace-file/not-found'?404:409,
+          {error:'native_file_range_unavailable'});
+      }
     }
     const nativeSearch=url.pathname.match(/^\/v1\/sessions\/([^/]+)\/native-search-source(?:\/search)?$/);
     if(nativeSearch){
@@ -1015,7 +1031,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
     }
     return json(404, { error: 'not_found' })
   };
-  const quietPost=(request)=>request?.method==='POST'&&(['/v1/host-admin/bootstrap/redeem','/v1/host-admin/settings/read','/v1/host-admin/settings/editor/read','/v1/host-admin/settings/attempt/read','/v1/host-admin/settings/readiness','/v1/taskmaster/installation','/v1/models','/v1/models/metadata','/v1/models/metadata/readiness','/v1/conversation-modes/readiness'].includes(request?.url?.pathname)||/^\/v1\/sessions\/[^/]+\/(?:terminals\/(?:list|options|receipts)|native-search-source(?:\/search)?)$/.test(request?.url?.pathname??''));
+  const quietPost=(request)=>request?.method==='POST'&&(['/v1/host-admin/bootstrap/redeem','/v1/host-admin/settings/read','/v1/host-admin/settings/editor/read','/v1/host-admin/settings/attempt/read','/v1/host-admin/settings/readiness','/v1/taskmaster/installation','/v1/models','/v1/models/metadata','/v1/models/metadata/readiness','/v1/conversation-modes/readiness'].includes(request?.url?.pathname)||/^\/v1\/sessions\/[^/]+\/(?:terminals\/(?:list|options|receipts)|native-search-source(?:\/search)?|native-file\/range)$/.test(request?.url?.pathname??''));
   return async request=>{
     if(!hostAdmissionGuard||quietPost(request)||!authorized(request?.headers?.authorization,token))return dispatch(request);
     let admission;
@@ -1329,6 +1345,14 @@ export function apply(ctx, config = {}) {
       agents:ctx.agents,sessions:ctx.sessions,persistence:()=>ctx.sessionPersistence});
     ctx.provide('jotNativeSearchSourceObserver',nativeSearchSource);
     ctx.effect(()=>()=>nativeSearchSource.dispose());
+    const nativeWorkspaceFileReader=createNativeWorkspaceFileReader({readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext')),
+      readState:()=>({gateway:ctx.get('typertGateway',false),files:ctx.get('workspaceFiles',false),filesystem:ctx.get('fs',false),
+        sessions:ctx.sessions,persistence:ctx.sessionPersistence}),createPeer:()=>{
+        const connection=ctx.get('connection',false);
+        if(typeof connection?.createPeer!=='function')throw Error('native_file_range_unavailable');
+        return connection.createPeer({principal:{kind:'owner'},interactions:'none'});
+      }});
+    ctx.effect(()=>()=>nativeWorkspaceFileReader.dispose());
     const terminalControl=createTerminalControl({readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext')),
       terminalController:()=>ctx.get('terminalController',false),sessionController:()=>ctx.sessionController,sessionNotFoundError:ApiSessionNotFound,agents:ctx.agents,sessions:ctx.sessions,
       gateway:()=>ctx.get('typertGateway',false),createPeer:()=>{
@@ -1342,7 +1366,7 @@ export function apply(ctx, config = {}) {
     const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
       sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
       speechController, voiceEnabled, token, workbenchBridge, skillContentCommand, skillCatalogCommand, skillResourceCommand, nativeCommandQueryHost, nativePlanModeHost,
-      terminalControl,nativeSearchSource,
+      terminalControl,nativeSearchSource,nativeWorkspaceFileReader,
       terminalInventoryReader:(ownerId,sessionId,signal)=>{
         signal?.throwIfAborted();
         const identity=resolveOwnerBoundDshProfileContext(ctx.get('profileContext'));
@@ -1364,7 +1388,7 @@ export function apply(ctx, config = {}) {
       try {
         const url = new URL(req.url, `http://${host}:${port}`)
         const isFileUpload = /^\/v1\/sessions\/[^/]+\/files$/.test(url.pathname)
-        const bodyLimit = url.pathname.startsWith('/v1/host-admin/') || /^\/v1\/sessions\/[^/]+\/native-search-source(?:\/search)?$/.test(url.pathname) ? 4096 : url.pathname.startsWith('/v1/voice/') ? 4 * 1024 * 1024 : 32 * 1024 * 1024
+        const bodyLimit = url.pathname.startsWith('/v1/host-admin/') || /^\/v1\/sessions\/[^/]+\/native-search-source(?:\/search)?$/.test(url.pathname) ? 4096 : /^\/v1\/sessions\/[^/]+\/native-file\/range$/.test(url.pathname) ? 1024 * 1024 : url.pathname.startsWith('/v1/voice/') ? 4 * 1024 * 1024 : 32 * 1024 * 1024
         const result = await handler({ method: req.method, url, headers: req.headers,
           body: isFileUpload ? req : await readJson(req, bodyLimit), signal: abort.signal })
         if (result.stream) {

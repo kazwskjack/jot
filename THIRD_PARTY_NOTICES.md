@@ -257,3 +257,12 @@ Native retained-source search reuses the original owned history boundary and
 source proof above. It scans bounded retained chunks once, verifies the complete
 source digest, and reopens first-hit text under the same historical activity
 snapshot. Original native grep line-preview scope is preserved in coverage.
+
+
+`native-workspace-file-reader.js` integrates the separately installed MIT-licensed
+`@deepseek-ai/dsh-api-workspace-files` 0.2.1-rc.2 through its original Typert
+Gateway and an explicitly owned Remote Peer. Reads use the original Session
+lookup and composed filesystem policy. Canonical path, opaque native version,
+reported size and Session/profile identity constrain each bounded byte range.
+Actual chunk SHA is separate from native freshness metadata. The retained DSH
+MIT notice applies to this integration.

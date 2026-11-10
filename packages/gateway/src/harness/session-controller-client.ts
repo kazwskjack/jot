@@ -1,4 +1,5 @@
 import {validateHostSettingsProductCommand,validateHostSettingsProductResult,validateHostSettingsEditor,validateHostSettingsApprovalRequest,type HostSettingsProductCommand,type HostSettingsApprovalRequest} from '../host-admin/settings-product-contract.ts';
+import {validateNativeFileRangeRequest,validateNativeFileRange,type NativeFileRangeRequest,type NativeFileRange} from './native-file-range.js';
 import type {NativeSearchSourceRequest,NativeSearchSourceSearchRequest} from '../events/native-search-source.ts';
 import type {PinnedByteSource} from '../artifacts/pinned-byte-source.ts';
 import {normalizeExecutionLease,type ExecutionLease} from '../workbench/execution-lease.ts'
@@ -462,6 +463,13 @@ export class SessionControllerClient {
     validateTerminalAttachment({host_instance:packet.host_instance,attachment_id:attachmentId});
     const value=await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/terminals/${encodeURIComponent(terminalId)}/attachments/${encodeURIComponent(attachmentId)}/input`,{owner_id:ownerId,packet},signal);
     return validateTerminalQueued(value,attachmentId,packet.command.sequence);
+  }
+
+  async readNativeFileRange(ownerId:string,sessionId:string,input:NativeFileRangeRequest,signal?:AbortSignal):Promise<NativeFileRange>{
+    if(![ownerId,sessionId].every(value=>typeof value==='string'&&DRIVER_ID.test(value)))throw Error('native_file_range_invalid');
+    const range=validateNativeFileRangeRequest(input);
+    return validateNativeFileRange(await this.post(`/v1/sessions/${encodeURIComponent(sessionId)}/native-file/range`,
+      {owner_id:ownerId,range},signal),sessionId,range);
   }
 
   async readNativeSearchSource(ownerId:string,sessionId:string,input:NativeSearchSourceRequest,signal?:AbortSignal):Promise<unknown>{
