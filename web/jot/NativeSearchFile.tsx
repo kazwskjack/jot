@@ -1,3 +1,4 @@
+import {officePreviewFormat} from '../../packages/gateway/src/artifacts/office-preview-format.js';
 import React,{useEffect,useRef,useState,lazy,Suspense} from 'react';
 import {taskDraftScope} from './client';
 import {listedFileImageType} from './ActivityToolFileImage';
@@ -5,6 +6,7 @@ import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
 import {readNativeMemberPreviewBytes,type NativeMemberPreviewSource,type NativeMemberOpenedBytes} from './activity-file-preview-client';
 
+const NativeSearchFileOffice=lazy(()=>import('./NativeSearchFileOffice'));
 const NativeSearchFilePdf=lazy(()=>import('./NativeSearchFilePdf'));
 type Opened=NativeMemberOpenedBytes&{downloadUrl:string;imageUrl?:string;text?:string};
 
@@ -14,7 +16,7 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
  const [state,setState]=useState<{identity:string;opened?:Opened;error?:string}>(),[revision,setRevision]=useState(0);
  const [raw,setRaw]=useState(false),[byteOffset,setByteOffset]=useState(0);
  const [cursor,setCursor]=useState<{sha:string;offset:number;previous:number[]}>();
- const imageType=listedFileImageType(source.member.path),pdf=source.member.path.toLowerCase().endsWith('.pdf');
+ const imageType=listedFileImageType(source.member.path),pdf=source.member.path.toLowerCase().endsWith('.pdf'),office=officePreviewFormat(source.member.path);
  useEffect(()=>{root.current?.focus();root.current?.scrollIntoView({block:'nearest'});},[identity]);
  useEffect(()=>{
   const controller=new AbortController(),urls:string[]=[];
@@ -28,7 +30,7 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
    urls.push(downloadUrl);
    let imageUrl:string|undefined,text:string|undefined;
    if(imageType){imageUrl=URL.createObjectURL(new Blob([value.bytes.slice()],{type:imageType}));urls.push(imageUrl);}
-   else if(!pdf){
+   else if(!pdf&&!office?.native){
     try{const decoded=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(value.bytes);if(!decoded.includes('\0'))text=decoded;}catch{}
    }
    setByteOffset(0);
@@ -47,7 +49,7 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
  if(text&&end<text.length&&/[\uD800-\uDBFF]/.test(text[end-1]!)&&/[\uDC00-\uDFFF]/.test(text[end]!))end--;
  const bytes=opened?.bytes.subarray(byteOffset,byteOffset+256);
  const hex=bytes?Array.from(bytes,byte=>byte.toString(16).padStart(2,'0')).join(' '):'';
- const showBytes=raw||opened&&!opened.imageUrl&&!pdf&&text===undefined;
+ const showBytes=raw||opened&&!opened.imageUrl&&!pdf&&!office?.native&&text===undefined;
  return <section ref={root} tabIndex={-1} className="jot-activity-content" aria-label="原生成员打开内容预览">
   <h4>{source.member.path}</h4>
   {(!current||!opened&&!current.error)&&<p role="status">正在读取并核对完整打开内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'本次读取已取消。'});}}>取消读取</button></p>}
@@ -65,7 +67,8 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
      <span>{Math.min(byteOffset+1,opened.size)}–{byteOffset+(bytes?.length??0)} / {opened.size} 字节</span>
      <button type="button" disabled={byteOffset+256>=opened.size} onClick={()=>setByteOffset(byteOffset+256)}>下一页字节</button>
     </nav>
-   </>:opened.imageUrl?<img src={opened.imageUrl} alt={source.member.path} style={{maxWidth:'100%',height:'auto'}} onError={()=>{setRaw(true);setState({identity,opened,error:'浏览器无法显示此图片格式，当前显示原始字节。'});}}/>
+   </>:office?.native?<ConversationDisplayBoundary key={opened.openSha} label="原生Office预览"><Suspense fallback={<p role="status">正在载入Office查看器…</p>}><NativeSearchFileOffice key={JSON.stringify([opened.openSha,office.kind])} kind={office.kind} bytes={opened.bytes}/></Suspense></ConversationDisplayBoundary>
+    :opened.imageUrl?<img src={opened.imageUrl} alt={source.member.path} style={{maxWidth:'100%',height:'auto'}} onError={()=>{setRaw(true);setState({identity,opened,error:'浏览器无法显示此图片格式，当前显示原始字节。'});}}/>
     :pdf?<ConversationDisplayBoundary key={opened.openSha} label="原生PDF预览"><Suspense fallback={<p role="status">正在载入PDF查看器…</p>}><NativeSearchFilePdf key={opened.openSha} bytes={opened.bytes}/></Suspense></ConversationDisplayBoundary>
     :text!==undefined?<>
      <pre data-chat-search-content={JSON.stringify(['native-opened-file',identity,opened.openSha,offset])}>{text.slice(offset,end)}</pre>

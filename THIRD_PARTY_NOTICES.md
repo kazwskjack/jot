@@ -304,3 +304,10 @@ original activity/member digests and UTF8 display-path digest. They reuse Jot's
 complete byte verifier, image format helper, PDF page renderer, and PilotDeck-
 derived PDF outline/search modules. Existing retained DSH MIT and PilotDeck
 AGPL notices apply. Preview and its local download use the same opened bytes.
+
+Native member Office visual previews reuse Jot's separately originated, pinned
+DOCX/XLSX/PPTX frames and their existing boot/init/ready/work/close protocols.
+Only a copy of the verified32MiB-bounded opened source is transferred to the
+validated frame origin. The original same-open byte source remains available
+for download and raw inspection. Existing retained viewer-library and PilotDeck
+notices continue to apply. Native versions remain opaque in their source proof.

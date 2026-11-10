@@ -88,12 +88,13 @@ export type NativeMemberOpenedBytes={bytes:Uint8Array;sha256:string;size:number;
 export async function readNativeMemberPreviewBytes(source:NativeMemberPreviewSource,owner:string,signal:AbortSignal):Promise<NativeMemberOpenedBytes>{
  const check=()=>{signal.throwIfAborted();if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');};
  check();
- const limit=20*1024*1024,url=new URL(nativeMemberDownloadUrl(source),window.location.href);
+ const nativeOffice=officePreviewFormat(source.member.path)?.native===true;
+ const limit=nativeOffice?OFFICE_NATIVE_SOURCE_MAX_BYTES:20*1024*1024,url=new URL(nativeMemberDownloadUrl(source),window.location.href);
  url.searchParams.set('max_bytes',String(limit));
  const response=await fetch(url,{credentials:'same-origin',cache:'no-store',redirect:'error',signal});
  try{
   check();
-  if(!response.ok)throw new ApiError(response.status,response.status===422?'文件超过20 MiB预览范围，可下载打开时内容查看。'
+  if(!response.ok)throw new ApiError(response.status,response.status===422?(nativeOffice?'Office文件超过32 MiB视觉预览范围，可下载打开时内容查看。':'文件超过20 MiB预览范围，可下载打开时内容查看。')
    :response.status===409?'原成员或文件版本已变化，请重新打开。':response.status===404?'原文件内容暂不可用。':'文件预览暂不可用。');
   const sha256=response.headers.get('x-activity-file-sha256'),openSha=response.headers.get('x-activity-native-open-sha256');
   const sizeValue=response.headers.get('x-activity-file-size'),size=Number(sizeValue);
