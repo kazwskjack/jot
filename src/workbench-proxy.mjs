@@ -206,7 +206,7 @@ export function registerWorkbenchProxy(app,config,localCsrf){
   if(req.headers['idempotency-key'])headers['idempotency-key']=req.headers['idempotency-key'];
   if(req.headers['last-event-id'])headers['last-event-id']=req.headers['last-event-id'];
    const binary=req.method==='PUT'&&(/^\/v1\/uploads\/[^/]+\/content$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/files\/binary$/.test(suffix));
-   const listedFileDownload=req.method==='GET'&&/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result\/file\/(?:download|print)$/.test(suffix);
+   const listedFileDownload=req.method==='GET'&&/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result\/(?:file\/(?:download|print)|members\/(?:0|[1-9][0-9]{0,7})\/download)$/.test(suffix);
    const officePrintPreview=listedFileDownload&&suffix.endsWith('/print');
    const binaryDownload=listedFileDownload||req.method==='GET'&&(/^\/v1\/workspaces\/[^/]+\/files\/binary$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/checkpoints\/[^/]+\/restore-reviews\/[^/]+\/target$/.test(suffix));
   if(binary&&!Buffer.isBuffer(req.body))return reply.code(415).send({error:{code:'BINARY_UPLOAD_REQUIRED'}});
@@ -222,6 +222,7 @@ export function registerWorkbenchProxy(app,config,localCsrf){
     for(const name of ['content-disposition','etag','x-workspace-file-sha256','x-workspace-file-size']){const value=response.headers.get(name);if(value)reply.header(name,value);}
    if(listedFileDownload){
     for(const name of ['content-length','x-content-type-options','x-activity-file-sha256','x-activity-file-size','x-activity-file-version','x-activity-tool-result-sha256',
+     'x-activity-search-members-sha256','x-activity-native-open-sha256','x-activity-native-member-index',
      'x-jot-preview-proof','x-jot-preview-protocol','x-jot-preview-renderer','x-jot-preview-media-type','x-jot-preview-sha256','x-jot-preview-size','x-jot-preview-pages','x-jot-execution-authorized']){
      const value=response.headers.get(name);if(value)reply.header(name,value);
     }

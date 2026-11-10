@@ -290,3 +290,11 @@ The retained DSH MIT notice applies.
 The native member list extends the existing Jot result viewer and the reviewed
 PilotDeck FileListContent integration. The retained PilotDeck AGPL notice and
 pinned source provenance apply to that UI integration.
+
+Native search member downloads use the original owned activity/member proof and
+separately installed DSH owner file API. Complete opened-time bytes are sealed
+into the existing private unlinked Jot spool and streamed with a complete content
+digest and an activity/member/native-freshness binding digest. Original native
+file policy and opaque version semantics remain authoritative. The existing DSH
+MIT notice and PilotDeck file-list integration notice apply. This request-scoped
+spool is disposed after download and does not provide persistent reopen.

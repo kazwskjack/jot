@@ -650,7 +650,7 @@ export async function buildServer(config: {
   app.addHook('onSend', async (request, reply, payload) => {
     const registeredRoute=request.routeOptions.url;
     if(request.method==='GET'&&reply.statusCode<400&&String(reply.getHeader('content-type')??'').startsWith('application/octet-stream')
-      &&['/v1/workspaces/:workspaceId/files/binary','/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore-reviews/:reviewId/target','/v1/conversations/:conversationId/activities/:activityId/tool-result/file/print'].includes(registeredRoute??''))return payload;
+      &&['/v1/workspaces/:workspaceId/files/binary','/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore-reviews/:reviewId/target','/v1/conversations/:conversationId/activities/:activityId/tool-result/file/print','/v1/conversations/:conversationId/activities/:activityId/tool-result/members/:memberIndex/download'].includes(registeredRoute??''))return payload;
     const operationId=typeof registeredRoute==='string'?contracts.operationFor(request.method,registeredRoute):null;
     let responseValue: unknown = null;
     if (typeof payload === 'string' && payload.length) {
@@ -1065,7 +1065,7 @@ export async function buildServer(config: {
 
   registerDiscoveryPolicyRoutes(app,{policies:new DiscoveryPolicies(db,{onChange:(owner,receipt,event)=>persistentTasks.synchronizeDiscoveryPolicy(owner,receipt.policy_id,event)}),actor,role:(owner,id)=>workbench.getAgent(owner,id),atomic:atomicCommand});
   registerDiscoveryHistoryRoutes(app,{history:new DiscoveryHistory(db),actor,role:(owner,id)=>workbench.getAgent(owner,id)});
-  registerNativeSearchSourceRoutes(app,{db,actor,client:config.nativeSearchSourceClient});
+  registerNativeSearchSourceRoutes(app,{db,actor,client:config.nativeSearchSourceClient,snapshotRoot:join(dirname(resolve(config.databasePath)),'.jot-downloads')});
   registerTerminalInventoryRoutes(app,{db,actor,client:config.terminalInventoryClient});
   registerTerminalControlRoutes(app,{db,actor,client:config.terminalControlClient});
   registerTerminalReceiptRoutes(app,{db,actor,client:config.terminalControlClient});

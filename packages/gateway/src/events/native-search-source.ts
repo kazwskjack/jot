@@ -1,4 +1,7 @@
-import {validateNativeSearchMembers,type NativeSearchMembersRequest} from '../harness/native-search-members.js';
+import {validateNativeFileRange,type NativeFileRangeRequest} from '../harness/native-file-range.js';
+import {createPinnedByteStore} from '../artifacts/pinned-byte-source.ts';
+import {Readable} from 'node:stream';
+import {validateNativeSearchMembers,validateNativeSearchMemberRange,type NativeSearchMembersRequest,type NativeSearchMembers,type NativeSearchMemberRangeRequest} from '../harness/native-search-members.js';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import type {FastifyInstance} from 'fastify';
@@ -19,6 +22,8 @@ type Input = Record<string,unknown>;
 export type NativeSearchSourceRequest = {call_seq:number;tool_name:'glob'|'grep';offset_chars:number;source_sha256?:string};
 export type NativeSearchSourceSearchRequest = Omit<NativeSearchSourceRequest,'offset_chars'>&{q:string};
 export interface NativeSearchSourceClient {
+  readNativeSearchMemberFileRange?(ownerId:string,sessionId:string,input:NativeSearchMemberRangeRequest,signal?:AbortSignal):Promise<unknown>;
+  readNativeFileRange?(ownerId:string,sessionId:string,input:NativeFileRangeRequest,signal?:AbortSignal):Promise<unknown>;
   readNativeSearchMembers?(ownerId:string,sessionId:string,input:NativeSearchMembersRequest,signal?:AbortSignal):Promise<unknown>;
   readNativeSearchSource(ownerId:string,sessionId:string,input:NativeSearchSourceRequest,signal?:AbortSignal):Promise<unknown>;
   searchNativeSearchSource?(ownerId:string,sessionId:string,input:NativeSearchSourceSearchRequest,signal?:AbortSignal):Promise<unknown>;
@@ -73,6 +78,22 @@ function source(db:DatabaseSync,owner:string,conversationId:string,runId:string,
     return {sessionId,activity,tool:tool as 'glob'|'grep',callSeq:Number(callSeq),resultSeq:Number(resultSeq),callSha,resultSha,
       identity:hash({owner,conversationId,runId,sessionId,activity,callSha:callSha??null,resultSha:resultSha??null,...(asOfSeq?{asOfSeq}:{})})};
   });
+}
+
+function memberResultHash(original:ReturnType<typeof source>,response:NativeSearchMembers) {
+  return hash({activity:original.identity,call:response.call_sha256,result:response.result_sha256,
+    members:response.members_sha256,workdir:response.workdir,total:response.total_members,originalTotal:response.original_total});
+}
+
+async function readMembers(client:NativeSearchSourceClient,owner:string,original:ReturnType<typeof source>,input:NativeSearchMembersRequest,signal:AbortSignal) {
+  if (!client.readNativeSearchMembers) throw Error('activity_tool_result_source_invalid');
+  const response = validateNativeSearchMembers(await client.readNativeSearchMembers(owner,original.sessionId,input,signal),original.sessionId,input);
+  signal.throwIfAborted();
+  if (response.result_seq !== original.resultSeq || sessionProjectionId(response.tool_call_id,'') !== original.activity.tool_call_id
+    || original.callSha !== undefined && response.call_sha256 !== original.callSha
+    || original.resultSha !== undefined && response.result_sha256 !== original.resultSha)
+    throw Error('activity_tool_result_source_changed');
+  return response;
 }
 
 function resultHash(original:ReturnType<typeof source>,response:Input) {
@@ -157,9 +178,102 @@ export async function searchNativeActivitySources(db:DatabaseSync,owner:string,b
   return {...base,items,unsearched_results:unsearched};
 }
 
-export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,client}:{
-  db:DatabaseSync;actor(request:{headers:Record<string,unknown>}):string;client?:NativeSearchSourceClient|undefined;
+export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,client,snapshotRoot}:{
+  db:DatabaseSync;actor(request:{headers:Record<string,unknown>}):string;client?:NativeSearchSourceClient|undefined;snapshotRoot?:string;
 }) {
+  const downloads = new Set<{bytes:number}>(), downloadBudget = 512*1024*1024;
+  app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/members/:memberIndex/download',async(request,reply)=>{
+    reply.header('cache-control','private, no-store');
+    const abort = new AbortController(), signal = AbortSignal.any([abort.signal,AbortSignal.timeout(120000)]);
+    let stream:Readable|undefined, store:ReturnType<typeof createPinnedByteStore>|undefined;
+    const reservation = {bytes:0};
+    const disconnected = () => {abort.abort();stream?.destroy();};
+    request.raw.once('aborted',disconnected);
+    reply.raw.once('close',disconnected);
+    if (request.raw.aborted || reply.raw.destroyed) disconnected();
+    let cleanupPromise:Promise<void>|undefined;
+    const cleanup = () => cleanupPromise ??= (async()=>{
+      request.raw.off('aborted',disconnected);
+      reply.raw.off('close',disconnected);
+      await store?.dispose();
+      downloads.delete(reservation);
+    })();
+    try {
+      const owner = actor(request), {conversationId,activityId,memberIndex} = request.params as {conversationId:string;activityId:string;memberIndex:string};
+      const query = request.query as Input, runId = query.run_id, asOfSeq = query.as_of_seq;
+      if (!ID.test(conversationId) || !ID.test(activityId) || typeof runId !== 'string' || !ID.test(runId)
+        || !/^(0|[1-9]\d{0,7})$/.test(memberIndex) || Number(memberIndex) > MAX_CHARS
+        || Object.keys(query).some(key=>!['run_id','result_sha256','members_sha256','as_of_seq'].includes(key))
+        || asOfSeq !== undefined && (typeof asOfSeq !== 'string' || !/^(0|[1-9]\d{0,18})$/.test(asOfSeq) || BigInt(asOfSeq)>9223372036854775807n)
+        || ['result_sha256','members_sha256'].some(key=>typeof query[key] !== 'string' || !SHA.test(query[key] as string)))
+        throw Error('invalid_activity_tool_result_query');
+      if (!snapshotRoot || !client?.readNativeSearchMemberFileRange || !client.readNativeFileRange)
+        throw Error('activity_tool_result_source_invalid');
+      if (downloads.size >= 4) return reply.code(429).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_CAPACITY'}});
+      downloads.add(reservation);
+      const original = source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined);
+      const memberInput:NativeSearchMembersRequest = {call_seq:original.callSeq,tool_name:original.tool,
+        offset_members:Number(memberIndex),members_sha256:query.members_sha256 as string};
+      const membership = await readMembers(client,owner,original,memberInput,signal);
+      if (memberResultHash(original,membership) !== query.result_sha256 || membership.items[0]?.index !== Number(memberIndex))
+        throw Error('activity_tool_result_source_changed');
+      const input:NativeSearchMemberRangeRequest = {member:{call_seq:original.callSeq,tool_name:original.tool,index:Number(memberIndex),
+        members_sha256:membership.members_sha256,call_sha256:membership.call_sha256,result_sha256:membership.result_sha256},
+        range:{offset_bytes:0,length_bytes:65536}};
+      const first = validateNativeSearchMemberRange(await client.readNativeSearchMemberFileRange(owner,original.sessionId,input,signal),original.sessionId,input).range;
+      signal.throwIfAborted();
+      const limit = first.file_size_bytes ?? downloadBudget;
+      if (limit > downloadBudget) throw Error('activity_tool_result_file_unsupported');
+      if ([...downloads].reduce((sum,value)=>sum+value.bytes,0)+limit > downloadBudget)
+        return reply.code(429).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_CAPACITY'}});
+      reservation.bytes = limit;
+      store = createPinnedByteStore(snapshotRoot);
+      const writer = await store.beginStream(limit,signal);
+      let range = first, offset = 0;
+      for (;;) {
+        signal.throwIfAborted();
+        const data = Buffer.from(range.data_base64,'base64');
+        if (offset+data.length > limit) throw Error('activity_tool_result_file_unsupported');
+        await writer.append(data);
+        offset += data.length;
+        if (range.eof) break;
+        const next:NativeFileRangeRequest = {path:first.absolute_path,offset_bytes:offset,length_bytes:Math.min(65536,limit-offset+1),
+          absolute_path:first.absolute_path,version:first.version,session_sha256:first.session_sha256,file_size_bytes:first.file_size_bytes};
+        range = validateNativeFileRange(await client.readNativeFileRange(owner,original.sessionId,next,signal),original.sessionId,next);
+        if (range.profile_id !== first.profile_id) throw Error('activity_tool_result_source_changed');
+      }
+      await writer.seal();
+      const current = await readMembers(client,owner,original,memberInput,signal);
+      if (hash(current) !== hash(membership)
+        || source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined).identity !== original.identity)
+        throw Error('activity_tool_result_source_changed');
+      signal.throwIfAborted();
+      const openedSha = hash({activity:query.result_sha256,members:membership.members_sha256,index:Number(memberIndex),
+        profile:first.profile_id,session:first.session_sha256,path:first.absolute_path,version:first.version,
+        reportedSize:first.file_size_bytes,size:writer.source.sizeBytes,content:writer.source.sha256});
+      const name = Buffer.from((membership.items[0]!.path.split(/[\\/]/).at(-1) || 'file').slice(0,200)).toString('utf8');
+      async function* content(){try{yield* writer.source.stream(signal);}finally{await cleanup();}}
+      stream = Readable.from(content());
+      stream.once('close',()=>{void cleanup().catch(error=>app.log.error({err:error},'Native member download cleanup failed'));});
+      reply.type('application/octet-stream').header('content-length',String(writer.source.sizeBytes))
+        .header('content-disposition',`attachment; filename*=UTF-8''${encodeURIComponent(name).replace(/['()*]/g,char=>'%'+char.charCodeAt(0).toString(16))}`)
+        .header('x-content-type-options','nosniff').header('x-activity-file-sha256',writer.source.sha256)
+        .header('x-activity-file-size',String(writer.source.sizeBytes)).header('x-activity-tool-result-sha256',query.result_sha256)
+        .header('x-activity-search-members-sha256',membership.members_sha256).header('x-activity-native-open-sha256',openedSha)
+        .header('x-activity-native-member-index',memberIndex).header('x-jot-execution-authorized','false');
+      return reply.send(stream);
+    } catch (error) {
+      if (stream) {stream.destroy();await cleanup();}
+      if (error instanceof SessionAdapterError) return reply.code(error.status === 404 ? 404 : error.status === 429 ? 429 : error.status === 409 ? 409 : 503)
+        .send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_UNAVAILABLE'}});
+      if (error instanceof Error && (['AbortError','TimeoutError'].includes(error.name)
+        || ['native_search_source_invalid','native_file_range_source_invalid'].includes(error.message)))
+        return reply.code(503).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_UNAVAILABLE'}});
+      throw error;
+    } finally {
+      if (!stream) await cleanup();
+    }
+  });
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/members',async(request,reply)=>{
     reply.header('cache-control','private, no-store');
     const abort = new AbortController(), disconnected = () => abort.abort();
@@ -183,16 +297,10 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
       const signal = AbortSignal.any([abort.signal,AbortSignal.timeout(20000)]);
       const input:NativeSearchMembersRequest = {call_seq:original.callSeq,tool_name:original.tool,offset_members:offset,
         ...(query.members_sha256 ? {members_sha256:query.members_sha256 as string} : {})};
-      const response = validateNativeSearchMembers(await client.readNativeSearchMembers(owner,original.sessionId,input,signal),original.sessionId,input);
-      signal.throwIfAborted();
-      if (response.result_seq !== original.resultSeq || sessionProjectionId(response.tool_call_id,'') !== original.activity.tool_call_id
-        || original.callSha !== undefined && response.call_sha256 !== original.callSha
-        || original.resultSha !== undefined && response.result_sha256 !== original.resultSha)
-        throw Error('activity_tool_result_source_changed');
+      const response = await readMembers(client,owner,original,input,signal);
       if (source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined).identity !== original.identity)
         throw Error('activity_tool_result_source_changed');
-      const resultSha = hash({activity:original.identity,call:response.call_sha256,result:response.result_sha256,
-        members:response.members_sha256,workdir:response.workdir,total:response.total_members,originalTotal:response.original_total});
+      const resultSha = memberResultHash(original,response);
       if (query.result_sha256 !== undefined && query.result_sha256 !== resultSha) throw Error('activity_tool_result_source_changed');
       const result:ActivityNativeSearchMembersPage = {conversation_id:conversationId,run_id:runId,activity_id:activityId,
         tool_name:original.tool,result_sha256:resultSha,members_sha256:response.members_sha256,offset_members:offset,

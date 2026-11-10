@@ -1,5 +1,5 @@
 import React,{useEffect,useState} from 'react';
-import {ApiError,request,taskDraftScope} from './client';
+import {ApiError,base,request,taskDraftScope} from './client';
 import type {ActivityNativeSearchMembersPage} from './types';
 
 type Target={runId:string;activityId:string;toolName:'glob'|'grep';asOfSeq?:string};
@@ -42,13 +42,20 @@ export default function NativeSearchMembers({conversationId,target}:{conversatio
   return()=>controller.abort();
  },[identity,offset,resultSha,membersSha,revision]);
  const current=state?.identity===identity&&state.offset===offset?state:undefined,page=current?.page;
+ const downloadUrl=(index:number)=>{
+  const query=new URLSearchParams({run_id:target.runId,result_sha256:page!.result_sha256,members_sha256:page!.members_sha256,
+   ...(target.asOfSeq?{as_of_seq:target.asOfSeq}:{})});
+  return `${base}/v1/conversations/${encodeURIComponent(conversationId)}/activities/${encodeURIComponent(target.activityId)}/tool-result/members/${index}/download?${query}`;
+ };
  return <section aria-label="原生搜索文件成员" data-chat-search-ignore>
   <h4>原生搜索文件成员</h4>
   {(!current||!page&&!current.error)&&<p role="status">正在读取原搜索成员…</p>}
   {page&&<>
    <p>按原结果顺序保留路径，合并连续重复路径。原结果共 {page.original_total} {target.toolName==='grep'?'条命中':'条路径'}，保留 {page.total_members} 个成员。</p>
+   <p>下载前按原生权限读取并固定打开时的完整内容。原生成员下载共享 512 MiB 临时内容预算，最多同时处理 4 个。</p>
    {page.total_members===0?<p role="status">原搜索没有文件成员。</p>:<ol start={offset+1} style={{maxHeight:'24rem',overflow:'auto'}}>
-    {page.items.map(item=><li key={item.index}><code style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{item.path}</code></li>)}
+    {page.items.map(item=><li key={item.index}><code style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{item.path}</code> <a href={downloadUrl(item.index)} download={item.path.split(/[\\/]/).at(-1)||'file'}
+     onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载打开时内容</a></li>)}
    </ol>}
    <nav aria-label="原搜索成员翻页">
     <button type="button" disabled={!currentCursor.previous.length} onClick={()=>setCursor({identity,offset:currentCursor.previous.at(-1)!,previous:currentCursor.previous.slice(0,-1),resultSha:page.result_sha256,membersSha:page.members_sha256})}>上一页成员</button>
