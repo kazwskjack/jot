@@ -58,3 +58,5 @@ web/public/pptx-preview/1.2.4/LICENSES.txt -whitespace
 /web/public/xlsx-preview/0.25.1/ui-zh.js -whitespace
 /web/public/xlsx-preview/0.25.1/ui.css -whitespace
 /web/public/xlsx-preview/0.25.1/ui.js -whitespace
+
+/web/public/terminal-preview/** -text

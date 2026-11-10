@@ -173,3 +173,20 @@ and original `terminal/attach` APIs. The Peer is created by trusted Host code
 only after its original bound owner and exact resident Session are verified.
 Native input ownership, screen recovery, provider acknowledgements and process
 lifetime remain with DSH. The retained DSH MIT license above applies.
+
+## Browser terminal distributions and upstream interaction design
+
+`web/public/terminal-preview/` retains xterm.js 5.5.0, addon-fit 0.11.0,
+addon-web-links 0.11.0 and addon-webgl 0.19.0 from the existing upstream-installed
+distributions. Each package's full MIT license is included alongside its assets.
+`SOURCES.json` records the exact versions, source paths and SHA-256 digests.
+
+`web/jot/NativeTerminalView.tsx` adapts the terminal rendering, selection,
+clipboard, fit, link and mobile-key interactions from PilotDeck's
+`ui/src/components/shell/hooks/useShellTerminal.ts`,
+`ui/src/components/shell/constants/constants.ts` and
+`ui/src/components/shell/view/subcomponents/TerminalShortcutsPanel.tsx` at
+revision `783499ffdb2d501bf590b2e035acd027a882df10`.
+These adapted portions retain GNU AGPL v3 terms under the complete license at
+`packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt`.
+Jot binds the browser view to its native Session stream and authoritative screen.

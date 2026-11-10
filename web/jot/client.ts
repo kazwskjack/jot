@@ -30,6 +30,18 @@ export async function requestBytes(path:string,signal?:AbortSignal):Promise<Uint
  }finally{timed.dispose()}
 }
 
+/** The caller owns the opening deadline and the complete streaming lifetime. */
+export async function requestTerminalStream(path:string,packet:{attachment_id:string;host_instance:string},signal:AbortSignal):Promise<ReadableStream<Uint8Array>> {
+ const response=await fetch(base+'/v1'+path,{method:'POST',headers:{Accept:'application/x-ndjson',
+  'Content-Type':'application/json','Idempotency-Key':packet.attachment_id,'X-jot-Actor':'web','X-CSRF-Token':csrfToken},
+  credentials:'same-origin',cache:'no-store',signal,body:JSON.stringify(packet)});
+ if(!response.ok){const data=await response.json().catch(()=>({}));throw new ApiError(response.status,data.error?.message??data.error?.code??`终端连接失败 (${response.status})`);}
+ if(!response.body||!response.headers.get('content-type')?.toLowerCase().startsWith('application/x-ndjson')){
+  await response.body?.cancel().catch(()=>{});throw Error('终端流格式不兼容');
+ }
+ return response.body;
+}
+
 export async function hostBootstrapRequest(action:'challenge'|'redeem'|'credentials',body:Record<string,string>|undefined,signal?:AbortSignal):Promise<unknown>{
  const timed=deadline(signal,30000);
  try{

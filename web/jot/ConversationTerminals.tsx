@@ -4,12 +4,18 @@ import {useMutationReceipt} from '../workbench/useMutationReceipt';
 import {TerminalCommandStore,pendingTerminalRuns} from './terminal-command-store.mjs';
 import {validateTerminalInventory,type TerminalInventory} from '../../packages/gateway/src/terminal/inventory.js';
 import {validateTerminalOptions,validateTerminalCommand,validateTerminalReceipt,type TerminalOptions,type TerminalCommand,type TerminalReceipt} from '../../packages/gateway/src/terminal/control.js';
+import NativeTerminalView from './NativeTerminalView';
 
 const states={running:'运行中',exited:'已退出',failed:'失败'} as const;
 
 /** Native user terminals retain their original Session ownership and command receipts. */
-export default function ConversationTerminals({conversationId,runId}:{conversationId:string;runId:string}) {
+export default function ConversationTerminals({conversationId,runId,onInputPendingChange}:{conversationId:string;runId:string;onInputPendingChange?:(value:boolean)=>void}) {
   const [revision,setRevision]=useState(0),[notice,setNotice]=useState(''),scope=taskDraftScope();
+  const [activeRuns,setActiveRuns]=useState<Set<string>>(()=>new Set()),[inputRuns,setInputRuns]=useState<Set<string>>(()=>new Set());
+  const activeChanged=useCallback((id:string,value:boolean)=>setActiveRuns(previous=>{const next=new Set(previous);if(value)next.add(id);else next.delete(id);return next;}),[]);
+  const inputChanged=useCallback((id:string,value:boolean)=>setInputRuns(previous=>{const next=new Set(previous);if(value)next.add(id);else next.delete(id);return next;}),[]);
+  useEffect(()=>{onInputPendingChange?.(inputRuns.size>0);},[inputRuns,onInputPendingChange]);
+  useEffect(()=>()=>onInputPendingChange?.(false),[onInputPendingChange]);
   const refresh=useCallback((message?:string)=>{if(message)setNotice(message);setRevision(value=>value+1);},[]);
   const history=useMemo(()=>{
     try {
@@ -20,19 +26,21 @@ export default function ConversationTerminals({conversationId,runId}:{conversati
   },[scope,conversationId,runId,revision]);
   useEffect(()=>{const changed=()=>refresh();window.addEventListener('storage',changed);return()=>window.removeEventListener('storage',changed);},[refresh]);
   return <>
-    <TerminalPanel key={runId} conversationId={conversationId} runId={runId} onSettled={refresh}/>
+    {[...new Set([runId,...history.runs,...activeRuns])].map(id=><TerminalPanel key={id} conversationId={conversationId} runId={id}
+      historical={id!==runId} onSettled={refresh} onActiveChange={activeChanged} onInputPendingChange={inputChanged}/>)}
     {history.error&&<p role="alert">{history.error}</p>}
     {notice&&<p role="status">{notice}</p>}
-    {history.runs.length>0&&<details><summary>历史运行的未结终端请求</summary>
-      {history.runs.map(id=><TerminalPanel key={id} conversationId={conversationId} runId={id} historical onSettled={refresh}/>)}
-    </details>}
   </>;
 }
 
-function TerminalPanel({conversationId,runId,historical=false,onSettled}:{conversationId:string;runId:string;historical?:boolean;onSettled:(message?:string)=>void}) {
+function TerminalPanel({conversationId,runId,historical=false,onSettled,onActiveChange,onInputPendingChange}:{conversationId:string;runId:string;historical?:boolean;onSettled:(message?:string)=>void;
+  onActiveChange:(runId:string,value:boolean)=>void;onInputPendingChange:(runId:string,value:boolean)=>void}) {
   const [open,setOpen]=useState(false),[revision,setRevision]=useState(0);
   const [inventory,setInventory]=useState<TerminalInventory>(),[loading,setLoading]=useState(false),[error,setError]=useState('');
   const [options,setOptions]=useState<TerminalOptions>(),[optionsError,setOptionsError]=useState('');
+  const [selected,setSelected]=useState('');
+  const activeChanged=useCallback((value:boolean)=>onActiveChange(runId,value),[runId,onActiveChange]);
+  const inputChanged=useCallback((value:boolean)=>onInputPendingChange(runId,value),[runId,onInputPendingChange]);
   const [shell,setShell]=useState(''),[cols,setCols]=useState(80),[rows,setRows]=useState(24),[busy,setBusy]=useState(false),[commandError,setCommandError]=useState('');
   const [journal]=useState(()=>{
     try {
@@ -120,7 +128,7 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled}:{conver
   const dimensionsValid=Boolean(options&&Number.isSafeInteger(cols)&&cols>=2&&cols<=options.environment.maxCols
     &&Number.isSafeInteger(rows)&&rows>0&&rows<=options.environment.maxRows);
   return <details onToggle={event=>setOpen(event.currentTarget.open)}>
-    <summary>{historical?`历史运行终端请求 · ${runId}`:'会话终端'}</summary>
+    <summary>{historical?`历史运行终端 · ${runId}`:'会话终端'}</summary>
     <button type="button" disabled={loading} onClick={()=>setRevision(value=>value+1)}>刷新终端清单</button>
     {loading&&<p role="status">正在读取原生终端…</p>}
     {error&&<p role="alert">{error}</p>}
@@ -153,6 +161,7 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled}:{conver
       <ul>{inventory.terminals.map(terminal=><li key={terminal.id}>
         <strong>{terminal.title}</strong> · {states[terminal.state]}
         {terminal.exitCode!==null&&<> · 退出码 {terminal.exitCode}</>}
+        {options&&<button type="button" disabled={loading||selected===terminal.id} onClick={()=>setSelected(terminal.id)}>连接 {terminal.title}</button>}
         {options&&<button type="button" disabled={busy||writer.pending||loading||Boolean(journal.error)} onClick={()=>void submit({action:'close',request_id:crypto.randomUUID(),
           terminal_id:terminal.id,host_instance:options.host_instance})}>关闭 {terminal.title}</button>}
         <dl>
@@ -164,5 +173,8 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled}:{conver
         </dl>
       </li>)}</ul>
     </>}
+    {open&&options&&inventory?.terminals.filter(item=>item.id===selected).map(item=><NativeTerminalView key={item.id}
+      conversationId={conversationId} runId={runId} terminal={item} options={options} onClose={()=>setSelected('')}
+      onNotice={onSettled} onPendingChange={inputChanged} onActiveChange={activeChanged}/>)}
   </details>;
 }

@@ -1,0 +1,70 @@
+{
+  "upstream_revision": "783499ffdb2d501bf590b2e035acd027a882df10",
+  "source": "Existing upstream-installed distributions; static copy only",
+  "license": "MIT",
+  "files": [
+    {
+      "package": "@xterm/xterm",
+      "version": "5.5.0",
+      "source": "E:\\codex\\yunticket\\third_party\\pilotdeck-reference\\ui\\node_modules\\@xterm\\xterm\\lib\\xterm.js",
+      "path": "xterm/5.5.0/xterm.js",
+      "sha256": "1f991ac3b4b283ebf96e60ae23a00a52765dd3a2e46fa6fdda9f1aab032f7495"
+    },
+    {
+      "package": "@xterm/xterm",
+      "version": "5.5.0",
+      "source": "E:\\codex\\yunticket\\third_party\\pilotdeck-reference\\ui\\node_modules\\@xterm\\xterm\\LICENSE",
+      "path": "xterm/5.5.0/LICENSE",
+      "sha256": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd"
+    },
+    {
+      "package": "@xterm/xterm",
+      "version": "5.5.0",
+      "source": "E:\\codex\\yunticket\\third_party\\pilotdeck-reference\\ui\\node_modules\\@xterm\\xterm\\css\\xterm.css",
+      "path": "xterm/5.5.0/xterm.css",
+      "sha256": "ba8e6985669488981ccf40c0cefe3aba80722cb6c92de7ad628b0bd717faf2b6"
+    },
+    {
+      "package": "@xterm/addon-fit",
+      "version": "0.11.0",
+      "source": "E:\\codex\\yunticket\\third_party\\pilotdeck-reference\\ui\\node_modules\\@xterm\\addon-fit\\lib\\addon-fit.js",
+      "path": "addon-fit/0.11.0/addon-fit.js",
+      "sha256": "ba3ea256ce0620a0992a197d6c9baea64823fc93d8da07a9e366ca9943c18527"
+    },
+    {
+      "package": "@xterm/addon-fit",
+      "version": "0.11.0",
+      "source": "E:\\codex\\yunticket\\third_party\\pilotdeck-reference\\ui\\node_modules\\@xterm\\addon-fit\\LICENSE",
+      "path": "addon-fit/0.11.0/LICENSE",
+      "sha256": "e256f01188af527e4d06d21d06fbf785ae9c50d4b328bf03cbe0ba7f0aa4228f"
+    },
+    {
+      "package": "@xterm/addon-web-links",
+      "version": "0.11.0",
+      "source": "E:\\codex\\yunticket\\third_party\\pilotdeck-reference\\ui\\node_modules\\@xterm\\addon-web-links\\lib\\addon-web-links.js",
+      "path": "addon-web-links/0.11.0/addon-web-links.js",
+      "sha256": "f230a6c8211ce4614dda5441f27b603c7c1ca95151a655bc0efac6377ee643f0"
+    },
+    {
+      "package": "@xterm/addon-web-links",
+      "version": "0.11.0",
+      "source": "E:\\codex\\yunticket\\third_party\\pilotdeck-reference\\ui\\node_modules\\@xterm\\addon-web-links\\LICENSE",
+      "path": "addon-web-links/0.11.0/LICENSE",
+      "sha256": "689ceb10716bd7a87a804c14951d7c2b818cbd60aab83d540902470ce3b13444"
+    },
+    {
+      "package": "@xterm/addon-webgl",
+      "version": "0.19.0",
+      "source": "E:\\codex\\yunticket\\third_party\\pilotdeck-reference\\ui\\node_modules\\@xterm\\addon-webgl\\lib\\addon-webgl.js",
+      "path": "addon-webgl/0.19.0/addon-webgl.js",
+      "sha256": "b85f8d4b3e9756bebb757e3fe47134d70f03ea3d6b187624426d2e2b65dec06c"
+    },
+    {
+      "package": "@xterm/addon-webgl",
+      "version": "0.19.0",
+      "source": "E:\\codex\\yunticket\\third_party\\pilotdeck-reference\\ui\\node_modules\\@xterm\\addon-webgl\\LICENSE",
+      "path": "addon-webgl/0.19.0/LICENSE",
+      "sha256": "21b975c39532001d431dc3b2c29fbff691d83f370833a66b54698bda290fde0e"
+    }
+  ]
+}
