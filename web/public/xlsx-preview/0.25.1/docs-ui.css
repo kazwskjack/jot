@@ -1,0 +1,704 @@
+.univer-pointer-events-none {
+  pointer-events: none;
+}
+
+.univer-fixed {
+  position: fixed;
+}
+
+.univer-absolute {
+  position: absolute;
+}
+
+.univer-relative {
+  position: relative;
+}
+
+.univer-bottom-0 {
+  bottom: 0;
+}
+
+.univer-left-0 {
+  left: 0;
+}
+
+.univer-left-5 {
+  left: 1.25rem;
+}
+
+.univer-left-\[5px\] {
+  left: 5px;
+}
+
+.univer-top-0 {
+  top: 0;
+}
+
+.univer-top-4 {
+  top: 1rem;
+}
+
+.univer-top-\[5px\] {
+  top: 5px;
+}
+
+.univer-z-\[10000\] {
+  z-index: 10000;
+}
+
+.univer-z-\[100\] {
+  z-index: 100;
+}
+
+.univer-mb-1 {
+  margin-bottom: .25rem;
+}
+
+.univer-mb-2 {
+  margin-bottom: .5rem;
+}
+
+.univer-mr-1 {
+  margin-right: .25rem;
+}
+
+.univer-mt-1\.5 {
+  margin-top: .375rem;
+}
+
+.univer-mt-12 {
+  margin-top: 3rem;
+}
+
+.univer-mt-3 {
+  margin-top: .75rem;
+}
+
+.univer-mt-5 {
+  margin-top: 1.25rem;
+}
+
+.univer-box-border {
+  box-sizing: border-box;
+}
+
+.univer-block {
+  display: block;
+}
+
+.univer-flex {
+  display: flex;
+}
+
+.univer-inline-flex {
+  display: inline-flex;
+}
+
+.univer-grid {
+  display: grid;
+}
+
+.univer-size-0\.5 {
+  width: .125rem;
+  height: .125rem;
+}
+
+.univer-size-3 {
+  width: .75rem;
+  height: .75rem;
+}
+
+.univer-size-4 {
+  width: 1rem;
+  height: 1rem;
+}
+
+.univer-size-5 {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.univer-size-8 {
+  width: 2rem;
+  height: 2rem;
+}
+
+.univer-size-full {
+  width: 100%;
+  height: 100%;
+}
+
+.univer-h-0\.5 {
+  height: .125rem;
+}
+
+.univer-h-10 {
+  height: 2.5rem;
+}
+
+.univer-h-16 {
+  height: 4rem;
+}
+
+.univer-h-20 {
+  height: 5rem;
+}
+
+.univer-h-3\.5 {
+  height: .875rem;
+}
+
+.univer-h-4 {
+  height: 1rem;
+}
+
+.univer-h-8 {
+  height: 2rem;
+}
+
+.univer-h-\[24px\] {
+  height: 24px;
+}
+
+.univer-h-full {
+  height: 100%;
+}
+
+.univer-min-h-8 {
+  min-height: 2rem;
+}
+
+.univer-w-2 {
+  width: .5rem;
+}
+
+.univer-w-2\.5 {
+  width: .625rem;
+}
+
+.univer-w-28 {
+  width: 7rem;
+}
+
+.univer-w-4\/5 {
+  width: 80%;
+}
+
+.univer-w-\[0px\] {
+  width: 0;
+}
+
+.univer-w-\[212px\] {
+  width: 212px;
+}
+
+.univer-w-\[72px\] {
+  width: 72px;
+}
+
+.univer-w-full {
+  width: 100%;
+}
+
+.univer-min-w-0 {
+  min-width: 0;
+}
+
+.univer-min-w-\[180px\] {
+  min-width: 180px;
+}
+
+.univer-flex-1 {
+  flex: 1;
+}
+
+.univer-flex-shrink-0 {
+  flex-shrink: 0;
+}
+
+.univer-cursor-grab {
+  cursor: grab;
+}
+
+.univer-cursor-pointer {
+  cursor: pointer;
+}
+
+.univer-grid-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.univer-grid-cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.univer-grid-cols-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.univer-flex-col {
+  flex-direction: column;
+}
+
+.univer-flex-nowrap {
+  flex-wrap: nowrap;
+}
+
+.univer-place-items-center {
+  place-items: center;
+}
+
+.univer-items-center {
+  align-items: center;
+}
+
+.univer-items-stretch {
+  align-items: stretch;
+}
+
+.univer-justify-end {
+  justify-content: flex-end;
+}
+
+.univer-justify-center {
+  justify-content: center;
+}
+
+.univer-justify-between {
+  justify-content: space-between;
+}
+
+.univer-justify-around {
+  justify-content: space-around;
+}
+
+.univer-gap-1 {
+  gap: .25rem;
+}
+
+.univer-gap-1\.5 {
+  gap: .375rem;
+}
+
+.univer-gap-2 {
+  gap: .5rem;
+}
+
+.univer-gap-2\.5 {
+  gap: .625rem;
+}
+
+.univer-gap-3 {
+  gap: .75rem;
+}
+
+.univer-gap-4 {
+  gap: 1rem;
+}
+
+.univer-gap-x-0\.5 {
+  -moz-column-gap: .125rem;
+  column-gap: .125rem;
+}
+
+.univer-gap-y-px {
+  row-gap: 1px;
+}
+
+.univer-overflow-hidden {
+  overflow: hidden;
+}
+
+.univer-overflow-y-auto {
+  overflow-y: auto;
+}
+
+.univer-overflow-x-hidden {
+  overflow-x: hidden;
+}
+
+.univer-truncate {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.univer-rounded {
+  border-radius: .25rem;
+}
+
+.univer-rounded-full {
+  border-radius: 9999px;
+}
+
+.univer-rounded-lg {
+  border-radius: .5rem;
+}
+
+.univer-rounded-md {
+  border-radius: .375rem;
+}
+
+.univer-rounded-r-2xl {
+  border-top-right-radius: 1rem;
+  border-bottom-right-radius: 1rem;
+}
+
+.univer-border {
+  border-width: 1px;
+}
+
+.univer-border-solid {
+  border-style: solid;
+}
+
+.univer-border-none {
+  border-style: none;
+}
+
+.\!univer-border-primary-500 {
+  border-color: var(--univer-primary-500) !important;
+}
+
+.univer-border-gray-200 {
+  border-color: var(--univer-gray-200);
+}
+
+.univer-border-primary-500 {
+  border-color: var(--univer-primary-500);
+}
+
+.\!univer-bg-gray-700 {
+  background-color: var(--univer-gray-700) !important;
+}
+
+.\!univer-bg-gray-800 {
+  background-color: var(--univer-gray-800) !important;
+}
+
+.\!univer-bg-gray-900 {
+  background-color: var(--univer-gray-900) !important;
+}
+
+.\!univer-bg-primary-50 {
+  background-color: var(--univer-primary-50) !important;
+}
+
+.\!univer-bg-primary-900 {
+  background-color: var(--univer-primary-900) !important;
+}
+
+.univer-bg-gray-100 {
+  background-color: var(--univer-gray-100);
+}
+
+.univer-bg-gray-200 {
+  background-color: var(--univer-gray-200);
+}
+
+.univer-bg-gray-400 {
+  background-color: var(--univer-gray-400);
+}
+
+.univer-bg-primary-600 {
+  background-color: var(--univer-primary-600);
+}
+
+.univer-bg-transparent {
+  background-color: #0000;
+}
+
+.univer-bg-white {
+  background-color: var(--univer-white);
+}
+
+.univer-p-0 {
+  padding: 0;
+}
+
+.univer-p-1 {
+  padding: .25rem;
+}
+
+.univer-p-1\.5 {
+  padding: .375rem;
+}
+
+.univer-px-2 {
+  padding-left: .5rem;
+  padding-right: .5rem;
+}
+
+.univer-px-2\.5 {
+  padding-left: .625rem;
+  padding-right: .625rem;
+}
+
+.univer-px-4 {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.univer-px-5 {
+  padding-left: 1.25rem;
+  padding-right: 1.25rem;
+}
+
+.univer-py-0 {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.univer-py-1\.5 {
+  padding-top: .375rem;
+  padding-bottom: .375rem;
+}
+
+.univer-pb-0\.5 {
+  padding-bottom: .125rem;
+}
+
+.univer-pb-4 {
+  padding-bottom: 1rem;
+}
+
+.univer-pl-1\.5 {
+  padding-left: .375rem;
+}
+
+.univer-pr-1 {
+  padding-right: .25rem;
+}
+
+.univer-pr-2 {
+  padding-right: .5rem;
+}
+
+.univer-pt-1\.5 {
+  padding-top: .375rem;
+}
+
+.univer-pt-14 {
+  padding-top: 3.5rem;
+}
+
+.univer-text-base {
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+
+.univer-text-lg {
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+}
+
+.univer-text-sm {
+  font-size: .875rem;
+  line-height: 1.25rem;
+}
+
+.univer-text-xs {
+  font-size: .75rem;
+  line-height: 1rem;
+}
+
+.univer-font-\[500\], .univer-font-medium {
+  font-weight: 500;
+}
+
+.univer-font-normal {
+  font-weight: 400;
+}
+
+.univer-font-semibold {
+  font-weight: 600;
+}
+
+.univer-leading-5 {
+  line-height: 1.25rem;
+}
+
+.univer-leading-\[24px\] {
+  line-height: 24px;
+}
+
+.\!univer-text-gray-200 {
+  color: var(--univer-gray-200) !important;
+}
+
+.\!univer-text-gray-400 {
+  color: var(--univer-gray-400) !important;
+}
+
+.\!univer-text-primary-600 {
+  color: var(--univer-primary-600) !important;
+}
+
+.\!univer-text-white {
+  color: var(--univer-white) !important;
+}
+
+.univer-text-gray-400 {
+  color: var(--univer-gray-400);
+}
+
+.univer-text-gray-500 {
+  color: var(--univer-gray-500);
+}
+
+.univer-text-gray-600 {
+  color: var(--univer-gray-600);
+}
+
+.univer-text-gray-700 {
+  color: var(--univer-gray-700);
+}
+
+.univer-text-gray-800 {
+  color: var(--univer-gray-800);
+}
+
+.univer-text-gray-900 {
+  color: var(--univer-gray-900);
+}
+
+.univer-shadow {
+  --univer-tw-shadow: 0 1px 3px 0 #0000001a, 0 1px 2px -1px #0000001a;
+  --univer-tw-shadow-colored: 0 1px 3px 0 var(--univer-tw-shadow-color), 0 1px 2px -1px var(--univer-tw-shadow-color);
+  box-shadow: 0 0 #0000, 0 0 #0000, 0 1px 3px #0000001a, 0 1px 2px -1px #0000001a;
+  box-shadow: var(--univer-tw-ring-offset-shadow, 0 0 #0000), var(--univer-tw-ring-shadow, 0 0 #0000), var(--univer-tw-shadow);
+}
+
+.univer-shadow-md {
+  --univer-tw-shadow: 0px 1px 6px -2px #1e284d14, 0px 2px 6px -1px #1e284d1a;
+  --univer-tw-shadow-colored: 0px 1px 6px -2px var(--univer-tw-shadow-color), 0px 2px 6px -1px var(--univer-tw-shadow-color);
+  box-shadow: 0 0 #0000, 0 0 #0000, 0 1px 6px -2px #1e284d14, 0 2px 6px -1px #1e284d1a;
+  box-shadow: var(--univer-tw-ring-offset-shadow, 0 0 #0000), var(--univer-tw-ring-shadow, 0 0 #0000), var(--univer-tw-shadow);
+}
+
+.univer-shadow-sm {
+  --univer-tw-shadow: 0px 1px 2px 0px #1e284d14;
+  --univer-tw-shadow-colored: 0px 1px 2px 0px var(--univer-tw-shadow-color);
+  box-shadow: 0 0 #0000, 0 0 #0000, 0 1px 2px #1e284d14;
+  box-shadow: var(--univer-tw-ring-offset-shadow, 0 0 #0000), var(--univer-tw-ring-shadow, 0 0 #0000), var(--univer-tw-shadow);
+}
+
+.univer-backdrop-blur-\[10px\] {
+  --univer-tw-backdrop-blur: blur(10px);
+  backdrop-filter: var(--univer-tw-backdrop-blur) var(--univer-tw-backdrop-brightness) var(--univer-tw-backdrop-contrast) var(--univer-tw-backdrop-grayscale) var(--univer-tw-backdrop-hue-rotate) var(--univer-tw-backdrop-invert) var(--univer-tw-backdrop-opacity) var(--univer-tw-backdrop-saturate) var(--univer-tw-backdrop-sepia);
+}
+
+.univer-transition-all {
+  transition-property: all;
+  transition-duration: .15s;
+  transition-timing-function: cubic-bezier(.4, 0, .2, 1);
+}
+
+.univer-transition-colors {
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+  transition-duration: .15s;
+  transition-timing-function: cubic-bezier(.4, 0, .2, 1);
+}
+
+.univer-duration-300 {
+  transition-duration: .3s;
+}
+
+.univer-group:hover .group-hover\:univer-bg-gray-500 {
+  background-color: var(--univer-gray-500);
+}
+
+.hover\:univer-border-primary-500:hover {
+  border-color: var(--univer-primary-500);
+}
+
+.hover\:univer-bg-gray-100:hover {
+  background-color: var(--univer-gray-100);
+}
+
+.hover\:univer-bg-gray-50:hover {
+  background-color: var(--univer-gray-50);
+}
+
+.hover\:univer-bg-white:hover {
+  background-color: var(--univer-white);
+}
+
+.hover\:univer-text-gray-900:hover {
+  color: var(--univer-gray-900);
+}
+
+.hover\:univer-text-primary-600:hover {
+  color: var(--univer-primary-600);
+}
+
+.hover\:univer-shadow-md:hover {
+  --univer-tw-shadow: 0px 1px 6px -2px #1e284d14, 0px 2px 6px -1px #1e284d1a;
+  --univer-tw-shadow-colored: 0px 1px 6px -2px var(--univer-tw-shadow-color), 0px 2px 6px -1px var(--univer-tw-shadow-color);
+  box-shadow: 0 0 #0000, 0 0 #0000, 0 1px 6px -2px #1e284d14, 0 2px 6px -1px #1e284d1a;
+  box-shadow: var(--univer-tw-ring-offset-shadow, 0 0 #0000), var(--univer-tw-ring-shadow, 0 0 #0000), var(--univer-tw-shadow);
+}
+
+.active\:univer-cursor-grabbing:active {
+  cursor: grabbing;
+}
+
+.dark\:\!univer-border-gray-600:where(.univer-dark, .univer-dark *) {
+  border-color: var(--univer-gray-600) !important;
+}
+
+.dark\:\!univer-border-gray-700:where(.univer-dark, .univer-dark *) {
+  border-color: var(--univer-gray-700) !important;
+}
+
+.dark\:\!univer-bg-gray-500:where(.univer-dark, .univer-dark *) {
+  background-color: var(--univer-gray-500) !important;
+}
+
+.dark\:\!univer-bg-gray-600:where(.univer-dark, .univer-dark *) {
+  background-color: var(--univer-gray-600) !important;
+}
+
+.dark\:\!univer-bg-gray-700:where(.univer-dark, .univer-dark *) {
+  background-color: var(--univer-gray-700) !important;
+}
+
+.dark\:\!univer-bg-gray-800:where(.univer-dark, .univer-dark *) {
+  background-color: var(--univer-gray-800) !important;
+}
+
+.dark\:\!univer-bg-gray-900:where(.univer-dark, .univer-dark *) {
+  background-color: var(--univer-gray-900) !important;
+}
+
+.dark\:\!univer-bg-primary-900:where(.univer-dark, .univer-dark *) {
+  background-color: var(--univer-primary-900) !important;
+}
+
+.dark\:\!univer-text-gray-100:where(.univer-dark, .univer-dark *) {
+  color: var(--univer-gray-100) !important;
+}
+
+.dark\:\!univer-text-gray-200:where(.univer-dark, .univer-dark *) {
+  color: var(--univer-gray-200) !important;
+}
+
+.dark\:\!univer-text-gray-400:where(.univer-dark, .univer-dark *) {
+  color: var(--univer-gray-400) !important;
+}
+
+.dark\:\!univer-text-white:where(.univer-dark, .univer-dark *) {
+  color: var(--univer-white) !important;
+}
+
+.univer-group:hover .dark\:group-hover\:\!univer-bg-gray-300:where(.univer-dark, .univer-dark *) {
+  background-color: var(--univer-gray-300) !important;
+}
+
+.dark\:hover\:\!univer-bg-gray-700:hover:where(.univer-dark, .univer-dark *) {
+  background-color: var(--univer-gray-700) !important;
+}
+
+.dark\:hover\:\!univer-bg-gray-800:hover:where(.univer-dark, .univer-dark *) {
+  background-color: var(--univer-gray-800) !important;
+}

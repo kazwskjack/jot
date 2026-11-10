@@ -3,8 +3,8 @@ import {readVerifiedPreviewBytes} from './artifact-preview-bytes.mjs';
 import type {ActivityToolResultFile} from './types';
 
 export type ListedFilePreviewSource={conversationId:string;runId:string;activityId:string;resultSha:string;file:Pick<ActivityToolResultFile,'path'|'version'|'sha256'|'size'>};
-export async function readOfficeViewerUrl(kind:'docx'|'pptx',signal:AbortSignal){
- const path=kind==='docx'?'/docx-preview/0.4.0/':'/pptx-preview/1.2.4/';
+export async function readOfficeViewerUrl(kind:'docx'|'pptx'|'xlsx',signal:AbortSignal){
+ const path=kind==='docx'?'/docx-preview/0.4.0/':kind==='pptx'?'/pptx-preview/1.2.4/':'/xlsx-preview/0.25.1/';
  const response=await fetch(path+'viewer',{credentials:'same-origin',cache:'no-store',redirect:'error',signal});
  if(!response.ok||response.headers.get('content-type')?.split(';')[0]!=='application/json')throw Error('独立Office查看器配置暂不可用。');
  const text=await response.text();signal.throwIfAborted();

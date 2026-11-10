@@ -22,6 +22,7 @@ export async function buildServer(options={}){
   const officeViewerFiles=new Set([
     ...['frame.html','frame.js','word-region.js','html2canvas.js','docx-preview.js','jszip.min.js','SOURCES.json','LICENSES.txt'].map(name=>'/docx-preview/0.4.0/'+name),
     ...['frame.html','frame.js','pptx-region.js','pptx-renderer.js','SOURCES.json','LICENSES.txt'].map(name=>'/pptx-preview/1.2.4/'+name),
+    ...["LICENSES.txt", "SOURCES.json", "assets.js", "core-facade.js", "core.js", "design-zh.js", "design.css", "design.js", "docs-ui-zh.js", "docs-ui.css", "docs-ui.js", "docs.js", "drawing.js", "engine-formula-facade.js", "engine-formula.js", "engine-render.js", "exceljs.js", "frame.html", "frame.js", "protocol.js", "react-dom.js", "react-jsx.js", "react.js", "redi-react.js", "redi.js", "rpc.js", "rxjs.js", "sheets-facade.js", "sheets-formula-facade.js", "sheets-formula-ui-zh.js", "sheets-formula-ui.css", "sheets-formula-ui.js", "sheets-formula.js", "sheets-numfmt-facade.js", "sheets-numfmt-ui-zh.js", "sheets-numfmt-ui.css", "sheets-numfmt-ui.js", "sheets-numfmt.js", "sheets-ui-facade.js", "sheets-ui-zh.js", "sheets-ui.css", "sheets-ui.js", "sheets-zh.js", "sheets.js", "telemetry.js", "themes.js", "ui-facade.js", "ui-zh.js", "ui.css", "ui.js", "workbook.js"].map(name=>'/xlsx-preview/0.25.1/'+name),
   ]);
   const officeOrigin=host=>`http://${officeViewerHost}${host.includes(':')?host.slice(host.lastIndexOf(':')):''}`;
   const flag=value=>{if(value===undefined||value==='false')return false;if(value==='true')return true;throw Error('invalid_chat_configuration');};
@@ -100,8 +101,8 @@ export async function buildServer(options={}){
   app.get('/*',async(req,reply)=>{
     const pathname=new URL(req.url,'http://localhost').pathname;const path=resolve(staticRoot,pathname==='/'?'index.html':'.'+pathname);
     const host=req.headers.host??'localhost',viewer=host.split(':')[0]===officeViewerHost;
-    const viewerBase=pathname==='/docx-preview/0.4.0/viewer'?'/docx-preview/0.4.0/':pathname==='/pptx-preview/1.2.4/viewer'?'/pptx-preview/1.2.4/':undefined;
-    const officeFrame=['/docx-preview/0.4.0/frame.html','/pptx-preview/1.2.4/frame.html'].includes(pathname);
+    const viewerBase=pathname==='/docx-preview/0.4.0/viewer'?'/docx-preview/0.4.0/':pathname==='/pptx-preview/1.2.4/viewer'?'/pptx-preview/1.2.4/':pathname==='/xlsx-preview/0.25.1/viewer'?'/xlsx-preview/0.25.1/':undefined;
+    const officeFrame=['/docx-preview/0.4.0/frame.html','/pptx-preview/1.2.4/frame.html','/xlsx-preview/0.25.1/frame.html'].includes(pathname);
     if(viewerBase&&!viewer){
       const url=new URL(viewerBase+'frame.html',officeOrigin(host));url.searchParams.set('parent',host);
       return {protocol:1,url:url.href};
@@ -115,7 +116,7 @@ export async function buildServer(options={}){
         if(!parent||!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(parent)||officeOrigin(parent)!==`http://${host}`)return reply.code(403).send({error:'invalid_parent_origin'});
         const nonce=randomBytes(18).toString('base64');
         return reply.header('Content-Type','text/html; charset=utf-8').header('Content-Security-Policy',
-          `default-src 'none'; script-src 'nonce-${nonce}'${pathname.startsWith('/pptx-preview/')?" 'self'":''}; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; media-src data: blob:; connect-src 'none'; frame-src about:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors http://${parent} http://${host}`)
+          `default-src 'none'; script-src 'nonce-${nonce}'${pathname.startsWith('/pptx-preview/')||pathname.startsWith('/xlsx-preview/')?" 'self'":''}; style-src 'unsafe-inline'${pathname.startsWith('/xlsx-preview/')?" 'self'":''}; img-src data: blob:; font-src data: blob:; media-src data: blob:; connect-src 'none'; frame-src about:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors http://${parent} http://${host}`)
           .send(data.toString('utf8').replaceAll('__JOT_DOCX_NONCE__',nonce).replaceAll('__JOT_OFFICE_NONCE__',nonce));
       }
       const ext=path.split('.').pop(),types={html:'text/html',js:'application/javascript',css:'text/css',svg:'image/svg+xml'};

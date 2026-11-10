@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>原生工作簿查看器</title>
+<style>
+ html,body { margin: 0; height: 100%; font: 14px system-ui,sans-serif; color: #222; background: white; }
+ body { display: flex; flex-direction: column; }
+ header { padding: 0.5rem; border-bottom: 1px solid #ccc; }
+ nav { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+ input,select { min-height: 2rem; } input { width: 4rem; }
+ #cell { display: block; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 5rem; overflow: auto; }
+ #status { margin: 0.3rem 0; } #content { flex: 1; min-height: 24rem; position: relative; overflow: hidden; }
+</style></head><body>
+<header><nav aria-label="原生工作表导航"><label>工作表 <select id="sheet" disabled></select></label><label>缩放 % <input id="zoom" type="number" min="25" max="300" step="10" value="100" disabled></label></nav><output id="cell" aria-label="当前单元格及公式或显示值"></output><p id="status" role="status">等待读取原工作簿</p></header>
+<main id="content" aria-label="原生工作簿视觉内容"></main>
+<script type="module" nonce="__JOT_OFFICE_NONCE__" src="./frame.js"></script></body></html>

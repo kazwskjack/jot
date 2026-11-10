@@ -632,7 +632,7 @@ def execute(req: dict) -> dict:
         content = document_preview(input_path, media_type, req.get("request", {}).get("include_xlsx_raw") is True) if operation == "document.inspect" else inspect(input_path, media_type)
         engine = "pypdf" if media_type == "application/pdf" else "python_ooxml"
         result = {"ok": True, "engine": {"name": engine, "version": sys.version.split()[0]}, "content": content, "warnings": []}
-        visual_kind = "docx" if "wordprocessingml" in media_type else "pptx" if "presentationml" in media_type else None
+        visual_kind = "docx" if "wordprocessingml" in media_type else "pptx" if "presentationml" in media_type else "xlsx" if "spreadsheetml" in media_type else None
         if operation == "document.inspect" and visual_kind and req.get("request", {}).get(f"verify_{visual_kind}_visual") is True:
             try:
                 verify_ooxml_visual_source(input_path)
