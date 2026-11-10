@@ -249,7 +249,13 @@ export class HarnessWorker {
     try{
       input=goalControl?{text:'',attachmentIds:[],ownerId:goalControl.owner_id,receivedAt:0}:this.messageInput(lease.run_id,!originalRecovery);
       if(input.attachmentManifest){
-        if(!this.ordinaryInputRecoveryEnabled||!this.runner.recoverInput||this.runner.pinnedInputProtocol!==1||lease.generation>1&&!originalRecovery)throw Error('channel_attachment_input_consumer_unavailable');
+        const ordinaryConsumer=!workbenchContext&&!hasWorkbenchBinding&&this.ordinaryInputRecoveryEnabled
+          &&!!this.runner.recoverInput&&(lease.generation===1||originalRecovery);
+        const workbenchReferenceConsumer=input.referenceAttachmentInputSha256!==undefined&&!!workbenchContext
+          &&!backgroundTask&&!requiresWorkWorkspace&&lease.generation===1;
+        if(this.runner.pinnedInputProtocol!==1||!ordinaryConsumer&&!workbenchReferenceConsumer){
+          throw Error('channel_attachment_input_consumer_unavailable');
+        }
         if(!originalRecovery){
           if(!this.attachmentResolver?.snapshotInputForMessage)throw Error('attachment_resolver_unavailable');
           pinnedSnapshot=await this.attachmentResolver.snapshotInputForMessage(input.ownerId,lease.conversation_id,input.attachmentManifest,lease.run_id);

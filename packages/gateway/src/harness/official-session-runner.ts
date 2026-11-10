@@ -1,3 +1,4 @@
+import {normalizeExecutionLease} from '../workbench/execution-lease.ts';
 import {PreparationTiming,type PreparationTimingReporter} from './preparation-timing.ts';
 import {assistantText,assistantBlocks,collectArtifactRefs,presentedFiles} from './session-output.ts'
 import {createHash} from 'node:crypto'
@@ -157,7 +158,13 @@ export class OfficialSessionRunner implements DshRunner {
   async run(input:DshRunInput):Promise<DshRunResult>{
     if(input.pinnedAttachments){
       if(!this.client.stageVerifiedFile)throw Error('session_file_upload_unavailable');
-      if(!input.originalAdmission||input.attachments?.length||typeof input.beforeInputDispatch!=='function')throw Error('channel_attachment_input_consumer_unavailable');
+      const workbenchInput=input.workbenchRunId===input.taskRequestId&&input.workbenchExecutionLease!==undefined
+        &&!input.checkpointTask&&!input.requiresWorkWorkspace;
+      if((!input.originalAdmission&&!workbenchInput)||input.attachments?.length||typeof input.beforeInputDispatch!=='function'
+        ||Object.hasOwn(input,'goalControl')||Object.hasOwn(input,'originalInput')){
+        throw Error('channel_attachment_input_consumer_unavailable');
+      }
+      if(workbenchInput)normalizeExecutionLease(input.workbenchExecutionLease);
       const pins=validateAttachmentManifest(input.pinnedAttachments.manifest,{maxCount:10,maxAggregateBytes:200*1024*1024});
       if(pins.attachments.length!==input.pinnedAttachments.sources.length||pins.attachments.some((pin,index)=>pin.sha256!==input.pinnedAttachments!.sources[index]?.sha256||pin.size_bytes!==input.pinnedAttachments!.sources[index]?.sizeBytes))throw Error('attachment_source_integrity_failed');
       input.beforeInputDispatch();
