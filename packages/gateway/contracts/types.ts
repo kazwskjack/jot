@@ -834,7 +834,7 @@ export type OfficePreviewStatus = {
   configuredBinaryPath: string;
   rendererSignature: string;
   checkedAt: string;
-  supportedServices: ['builtin'];
+  supportedServices: ['builtin', 'libreoffice'];
   libreOffice: {binaryPath: string} & (
     {available: true; version: string} |
     {available: false; reason: 'probe_failed' | 'version_unconfirmed'}

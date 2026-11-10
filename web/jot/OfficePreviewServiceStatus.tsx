@@ -16,7 +16,7 @@ export default function OfficePreviewServiceStatus({owner,onRendererChange}:{own
     ||typeof value.configuredBinaryPath!=='string'||value.configuredBinaryPath.length>4096
     ||value.rendererSignature!==JSON.stringify(['builtin',value.configuredBinaryPath])
     ||typeof value.checkedAt!=='string'||!Number.isFinite(Date.parse(value.checkedAt))
-    ||!Array.isArray(value.supportedServices)||value.supportedServices.length!==1||value.supportedServices[0]!=='builtin'
+    ||!Array.isArray(value.supportedServices)||value.supportedServices.length!==2||value.supportedServices[0]!=='builtin'||value.supportedServices[1]!=='libreoffice'
     ||value.execution_authorized!==false||!office||typeof office!=='object'||Array.isArray(office)||Object.keys(office).length!==3
     ||typeof office.binaryPath!=='string'||office.binaryPath.length>4096
     ||!(office.available===true&&typeof office.version==='string'&&office.version.length<=200
@@ -34,7 +34,7 @@ export default function OfficePreviewServiceStatus({owner,onRendererChange}:{own
   {state.loading&&<p role="status">正在读取预览服务状态…</p>}
   {state.error&&<p role="alert">{state.error}</p>}
   {state.value&&<>
-   <p>当前预览服务为内置查看器。</p>
+   <p>默认预览服务为内置查看器。</p>
    <p role="status">{state.value.libreOffice.available?state.value.libreOffice.version:'当前文档引擎的LibreOffice版本尚未确认。'}</p>
    <p>文档引擎路径 <code>{state.value.libreOffice.binaryPath}</code></p>
    <p>检查时间 <time dateTime={state.value.checkedAt}>{state.value.checkedAt}</time></p>

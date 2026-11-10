@@ -32,3 +32,29 @@ export async function readListedFilePreviewBytes({conversationId,runId,activityI
   const bytes=await readVerifiedPreviewBytes(response,{size_bytes:file.size,sha256:file.sha256},signal);check();return bytes;
  }catch(error){await response.body?.cancel().catch(()=>{});throw error;}
 }
+
+export type OfficePrintPreview={bytes:Uint8Array;sha256:string;size:number;pageCount:number};
+export async function readOfficePrintPreviewBytes({conversationId,runId,activityId,resultSha,file}:ListedFilePreviewSource,owner:string,signal:AbortSignal):Promise<OfficePrintPreview>{
+ const check=()=>{signal.throwIfAborted();if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');};
+ check();
+ if(file.size>20*1024*1024)throw Error('文件超过20 MiB转换预览范围。');
+ const params=new URLSearchParams({run_id:runId,result_sha256:resultSha,path:file.path,version:String(file.version),sha256:file.sha256,size_bytes:String(file.size)});
+ const response=await fetch(`${base}/v1/conversations/${encodeURIComponent(conversationId)}/activities/${encodeURIComponent(activityId)}/tool-result/file/print?${params}`,{credentials:'same-origin',cache:'no-store',redirect:'error',signal});
+ try{
+  check();
+  if(response.status===429)throw Error('文档引擎正在处理另一个文件，请稍后重试转换。');
+  if(!response.ok||!response.body||response.headers.get('content-type')?.split(';')[0]!=='application/octet-stream'
+   ||response.headers.get('x-activity-file-sha256')!==file.sha256||response.headers.get('x-activity-file-size')!==String(file.size)
+   ||response.headers.get('x-activity-file-version')!==String(file.version)||response.headers.get('x-activity-tool-result-sha256')!==resultSha
+   ||response.headers.get('x-jot-preview-protocol')!=='1'||response.headers.get('x-jot-preview-renderer')!=='libreoffice'
+   ||response.headers.get('x-jot-preview-media-type')!=='application/pdf'||response.headers.get('x-jot-execution-authorized')!=='false')throw Error('原Office来源或转换PDF尚未确认。');
+  const sha256=response.headers.get('x-jot-preview-sha256')??'',sizeText=response.headers.get('x-jot-preview-size'),pagesText=response.headers.get('x-jot-preview-pages');
+  const size=Number(sizeText),pageCount=Number(pagesText);
+  if(!/^[a-f0-9]{64}$/.test(sha256)||!Number.isSafeInteger(size)||String(size)!==sizeText||size<100||size>20*1024*1024
+   ||!Number.isSafeInteger(pageCount)||String(pageCount)!==pagesText||pageCount<1||pageCount>50000
+   ||response.headers.has('content-length')&&response.headers.get('content-length')!==String(size))throw Error('转换PDF摘要、大小或页数尚未确认。');
+  const bytes=await readVerifiedPreviewBytes(response,{size_bytes:size,sha256},signal);check();
+  if(new TextDecoder('ascii').decode(bytes.subarray(0,5))!=='%PDF-')throw Error('转换PDF文件头尚未确认。');
+  return Object.freeze({bytes,sha256,size,pageCount});
+ }catch(error){await response.body?.cancel().catch(()=>{});throw error;}
+}

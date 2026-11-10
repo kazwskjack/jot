@@ -31,7 +31,7 @@ export function createOfficePreviewStatusReader(){
        :{binaryPath,available:false,reason:'version_unconfirmed'};
      resolve({protocol:1,service:'builtin',configuredBinaryPath,
       rendererSignature:JSON.stringify(['builtin',configuredBinaryPath]),checkedAt:new Date().toISOString(),
-      supportedServices:['builtin'],libreOffice,execution_authorized:false});
+      supportedServices:['builtin','libreoffice'],libreOffice,execution_authorized:false});
     });
    });
    pending={key,promise,controller};

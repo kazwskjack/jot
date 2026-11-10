@@ -1,3 +1,4 @@
+import OfficeFilePrintPreview from './OfficeFilePrintPreview';
 import OfficePreviewServiceStatus from './OfficePreviewServiceStatus';
 // Selection context bounds adapted from PilotDeck 783499ff SpreadsheetInteractivePreview.tsx.
 // AGPL-3.0 terms retained at packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt.
@@ -307,6 +308,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;page?:Page;error?:string}>(),[revision,setRevision]=useState(0);
  const [visualState,setVisualState]=useState<{identity:string;enabled:boolean}>();
+ const [printSource,setPrintSource]=useState<string>();const print=printSource===identity;
  const [fullscreen,setFullscreen]=useState(false),[displayError,setDisplayError]=useState('');
  const [fullscreenPending,setFullscreenPending]=useState(false),fullscreenRequest=useRef(false);
  const visual=visualState?.identity===identity?visualState.enabled:props.officeFocus?.value.cell_view===2||props.officeTextFocus?.value.text_view===2||!!props.officeRegionFocus;
@@ -317,6 +319,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
  },[]);
  useEffect(()=>{setDisplayError('');root.current?.focus();root.current?.scrollIntoView({block:'nearest'});},[identity]);
  useEffect(()=>{
+  if(print)return;
   const controller=new AbortController();active.current=controller;setState({identity});
   const load=async()=>{
    const format=officePreviewFormat(file.path);
@@ -340,9 +343,9 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
    setState({identity,error:message});
   });
   return()=>{controller.abort();if(active.current===controller)active.current=null;};
- },[identity,revision]);
+ },[identity,revision,print]);
  const current=state?.identity===identity?state:undefined;
- const loading=!current||!current.page&&!current.error;
+ const loading=!print&&(!current||!current.page&&!current.error);
  const refresh=()=>{
   if(taskDraftScope()!==owner)return;
   active.current?.abort();setState({identity});setRevision(value=>value+1);
@@ -355,17 +358,20 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
   }catch{if(root.current===element&&taskDraftScope()===owner)setDisplayError('Office全屏暂不可用，请重试。');}
   finally{fullscreenRequest.current=false;if(root.current===element)setFullscreenPending(false);}
  };
- return <section ref={root} tabIndex={-1} className="jot-activity-content jot-office-preview" aria-label="原Office文件结构化内容">
+ return <section ref={root} tabIndex={-1} className="jot-activity-content jot-office-preview" aria-label="原Office文件预览">
   <h4>{file.path} · 版本 {file.version}</h4>
   <nav aria-label="Office查看器工具栏" data-chat-search-ignore>
    <button type="button" aria-pressed={fullscreen} disabled={fullscreenPending} onClick={()=>void toggleFullscreen()}>{fullscreen?'退出全屏':'全屏查看Office文件'}</button>
    <button type="button" disabled={loading} onClick={refresh}>重新读取固定版本</button>
+   <button type="button" aria-pressed={!print} onClick={()=>setPrintSource(undefined)}>内置Office查看器</button>
+   <button type="button" aria-pressed={print} disabled={loading} onClick={()=>setPrintSource(identity)}>LibreOffice转换PDF</button>
   </nav>
   {displayError&&<p role="alert">{displayError}</p>}
   <OfficePreviewServiceStatus key={identity} owner={owner} onRendererChange={refresh}/>
   <ActivityToolFileBytes {...props}/>
+  {print&&<OfficeFilePrintPreview key={identity+':print:'+revision} {...props}/>}
   {loading&&<p role="status">正在核对原版本并解析Office内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'Office读取已取消'});}}>取消读取</button></p>}
-  {current?.page&&<>
+  {!print&&current?.page&&<>
    <p>原文件结构化内容 · {current.page.engine.name} {current.page.engine.version}</p>
    {current.page.document.truncated&&<p role="status">结构化解析结果已截断，文字与单元格引用入口有未覆盖部分。可下载原固定版本查看完整文件。</p>}
    {current.page.document.kind==='xlsx'&&<>
@@ -397,6 +403,6 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
     ?<ActivityToolFilePptx key={identity+':'+revision} {...props}/>
     :<section className="jot-office-content" data-chat-search-content={JSON.stringify(['listed-office',identity])}><OfficeContent key={identity+':'+revision} value={current.page.document} source={props} officeFocus={props.officeFocus?.value.cell_view===2?undefined:props.officeFocus} officeTextFocus={props.officeTextFocus?.value.text_view===2?undefined:props.officeTextFocus}/></section>}
   </>}
-  {current?.error&&<p role="alert">{current.error} <button type="button" onClick={refresh}>重试读取</button></p>}
+  {!print&&current?.error&&<p role="alert">{current.error} <button type="button" onClick={refresh}>重试读取</button></p>}
  </section>;
 }

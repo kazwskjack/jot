@@ -12,15 +12,17 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import {taskDraftScope} from './client';
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
-import {readListedFilePreviewBytes,type ListedFilePreviewSource} from './activity-file-preview-client';
+import {readListedFilePreviewBytes,type ListedFilePreviewSource,type OfficePrintPreview} from './activity-file-preview-client';
 import ActivityToolFileBytes from './ActivityToolFileBytes';
 
 pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const assets=new URL('pdfjs/6.1.200/',new URL(workerUrl,document.baseURI)).href;
 
-export default function ActivityToolFilePdf(props:ListedFilePreviewSource&{focus?:PdfReferenceFocus}){
- const {conversationId,runId,activityId,resultSha,file}=props,owner=taskDraftScope(),identity=pdfViewIdentity(props,owner);
- const focus=useRef(props.focus);focus.current=props.focus;
+export default function ActivityToolFilePdf(props:ListedFilePreviewSource&{focus?:PdfReferenceFocus;officePrint?:OfficePrintPreview&{onRetry:()=>void}}){
+ const {conversationId,runId,activityId,resultSha,file,officePrint}=props,owner=taskDraftScope();
+ const identity=pdfViewIdentity(props,owner,officePrint);
+ const sourceFocus=officePrint?undefined:props.focus;
+ const focus=useRef(sourceFocus);focus.current=sourceFocus;
  const referenceJump=useRef<{key:string;page:number}|undefined>(undefined);
  const root=useRef<HTMLElement>(null),viewport=useRef<HTMLDivElement>(null),scale=useRef(1);
  const [state,setState]=useState<{identity:string;document?:pdfjs.PDFDocumentProxy;error?:string}>(),[revision,setRevision]=useState(0);
@@ -82,10 +84,12 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource&{focus
   ready.current=false;searchJump.current=null;restoreSelection.current=null;referenceJump.current=undefined;
   setState({identity});setChallenge(undefined);setPassword('');setActionError('');
   const load=async()=>{
-   const bytes=await readListedFilePreviewBytes(props,owner,controller.signal);controller.signal.throwIfAborted();
+   const bytes=officePrint?officePrint.bytes.slice():await readListedFilePreviewBytes(props,owner,controller.signal);controller.signal.throwIfAborted();
+   if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');
    loading=pdfjs.getDocument({data:bytes,cMapUrl:assets+'cmaps/',cMapPacked:true,standardFontDataUrl:assets+'standard_fonts/',wasmUrl:assets+'wasm/'});
    loading.onPassword=(update,reason)=>{if(!cancelled){setPassword('');setChallenge({identity,update,invalid:reason===pdfjs.PasswordResponses.INCORRECT_PASSWORD});}};
    const document=await loading.promise;
+   if(officePrint&&document.numPages!==officePrint.pageCount){await document.destroy();throw Error('转换PDF页数与已核对结果不一致。');}
    if(!cancelled&&taskDraftScope()===owner){
     const pending=pendingRestore.current;
     if(pending?.identity===identity){
@@ -127,9 +131,9 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource&{focus
   change({page:selected.page,continuous:false,position:target.rotation!==undefined?selected.rect?.y??0:0,left:0,...(target.rotation!==undefined?{rotation:target.rotation}:{})});
   referenceJump.current={key:target.key,page:selected.page};
   setNavigationRevision(value=>value+1);
- },[document,owner,identity,props.focus?.key,change]);
- useEffect(()=>{if(document&&props.focus)locateReference();},[document,props.focus?.key,locateReference]);
- const referencePages=props.focus?.rotation!==undefined&&props.focus.rotation===currentView.rotation?props.focus.pages:undefined;
+ },[document,owner,identity,sourceFocus?.key,change]);
+ useEffect(()=>{if(document&&sourceFocus)locateReference();},[document,sourceFocus?.key,locateReference]);
+ const referencePages=sourceFocus?.rotation!==undefined&&sourceFocus.rotation===currentView.rotation?sourceFocus.pages:undefined;
  const reportVisiblePage=useCallback((page:number)=>{
   if(pendingRestore.current||latestView.current.identity!==identity||latestView.current.page===page)return;
   const next={...latestView.current,page};latestView.current=next;setView(next);
@@ -140,20 +144,21 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource&{focus
   try{if(window.document.fullscreenElement===root.current)await window.document.exitFullscreen();else await root.current?.requestFullscreen();}
   catch(error){setActionError(error instanceof Error?error.message:'暂时无法切换全屏');}
  };
- return <section ref={root} tabIndex={-1} className="jot-activity-content" aria-label="原列表固定PDF版本" data-chat-search-scope="" style={{background:'var(--jot-background,white)',overflow:'auto'}} onKeyDown={event=>{
+ return <section ref={root} tabIndex={-1} className="jot-activity-content" aria-label={officePrint?"原Office固定版本的转换PDF":"原列表固定PDF版本"} data-chat-search-scope="" style={{background:'var(--jot-background,white)',overflow:'auto'}} onKeyDown={event=>{
    if(document&&!event.defaultPrevented&&!event.nativeEvent.isComposing&&event.keyCode!==229&&(event.ctrlKey||event.metaKey)&&!event.altKey&&event.key.toLowerCase()==='f'){
     event.preventDefault();event.stopPropagation();const input=root.current?.querySelector<HTMLInputElement>('[data-pdf-file-search]');input?.focus();input?.select();
    }
   }}>
   <h4>{file.path} · 版本 {file.version}</h4>
-  {document&&<><PdfFileTextReferenceAction root={root} source={props} rotation={currentView.rotation}/><PdfFileRegionReference root={viewport} source={props} page={page} rotation={currentView.rotation}/></>}
+  {officePrint&&<p role="status">LibreOffice转换PDF · {officePrint.pageCount}页 · 摘要 <code>{officePrint.sha256}</code>。转换引用的来源协议继续接入中。</p>}
+  {document&&!officePrint&&<><PdfFileTextReferenceAction root={root} source={props} rotation={currentView.rotation}/><PdfFileRegionReference root={viewport} source={props} page={page} rotation={currentView.rotation}/></>}
   <ActivityToolFileBytes key={identity} conversationId={conversationId} runId={runId} activityId={activityId} resultSha={resultSha} file={file}/>
   {challenge?.identity===identity&&<form onSubmit={event=>{event.preventDefault();challenge.update(password);setPassword('');setChallenge(undefined);}}>
    <label>PDF密码<input type="password" autoComplete="current-password" value={password} onChange={event=>setPassword(event.target.value)}/></label>
    <button type="submit">解锁PDF</button>{challenge.invalid&&<p role="alert">密码未匹配，请重试。</p>}
   </form>}
-  {(!current||!document&&!current.error)&&<p role="status">正在核对并载入原PDF…</p>}
-  {document&&props.focus&&<p role="status">原引用页码 · {props.focus.pages.map(value=>value.page).join('、')} {props.focus.rotation===undefined?'此引用未记录选区旋转，当前仅定位原页。':''} <button type="button" onClick={()=>locateReference()}>定位原引用</button> {props.focus.pages.length>1&&props.focus.pages.map(value=><button key={value.page} type="button" onClick={()=>locateReference(value.page)}>定位引用第 {value.page} 页</button>)}</p>}
+  {(!current||!document&&!current.error)&&<p role="status">{officePrint?'正在载入已核对的转换PDF…':'正在核对并载入原PDF…'}</p>}
+  {document&&sourceFocus&&<p role="status">原引用页码 · {sourceFocus.pages.map(value=>value.page).join('、')} {sourceFocus.rotation===undefined?'此引用未记录选区旋转，当前仅定位原页。':''} <button type="button" onClick={()=>locateReference()}>定位原引用</button> {sourceFocus.pages.length>1&&sourceFocus.pages.map(value=><button key={value.page} type="button" onClick={()=>locateReference(value.page)}>定位引用第 {value.page} 页</button>)}</p>}
   {document&&<nav aria-label="PDF页面控制" data-chat-search-ignore>
    <label><input type="checkbox" checked={continuous} onChange={event=>change({continuous:event.target.checked,position:0,left:0})}/>连续显示PDF页面</label>
    <button type="button" disabled={page<=1} onClick={()=>navigate(page-1)}>上一页PDF</button>
@@ -173,7 +178,7 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource&{focus
   <div ref={viewport} style={{width:'100%',minWidth:0,overflow:'auto',maxHeight:'80vh'}}>
    {document&&continuous?<PdfFilePages key={identity+revision} document={document} root={viewport} page={page} navigationRevision={navigationRevision} zoom={currentView.zoom} rotation={currentView.rotation} width={width} onScale={reportScale} onReady={restoreView} onVisiblePage={reportVisiblePage} matches={activeSearch?.matches??[]} selected={activeSearch?.selected??null} referencePages={referencePages}/>:document&&<PdfFilePage key={JSON.stringify([identity,revision,page,currentView.zoom,currentView.rotation,width])} document={document} pageNumber={page} zoom={currentView.zoom} rotation={currentView.rotation} width={width} onScale={reportScale} onReady={restoreView} matches={activeSearch?.matches.filter(match=>match.pageNumber===page)??[]} selected={activeSearch?.selected??null} referenceRect={referencePages?.find(target=>target.page===page)?.rect}/>}
   </div>
-  {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试PDF</button></p>}
+  {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>officePrint?officePrint.onRetry():setRevision(value=>value+1)}>重试PDF</button></p>}
   {actionError&&<p role="alert">{actionError}</p>}
  </section>;
 }
