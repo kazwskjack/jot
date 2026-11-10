@@ -1,4 +1,4 @@
-import {validateTextReferenceSource} from '../../packages/gateway/src/messages/content-reference.js';
+import {validateTextReferenceSource,validateCellReferenceSource} from '../../packages/gateway/src/messages/content-reference.js';
 const exact=(value,required,optional=[])=>!!value&&typeof value==='object'&&!Array.isArray(value)
  &&required.every(key=>Object.hasOwn(value,key))&&Object.keys(value).every(key=>required.includes(key)||optional.includes(key));
 const id=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/.test(value);
@@ -11,7 +11,7 @@ export const emptyComposerDraft=()=>({text:'',replyQuotes:[],textReferences:[],g
 export function validateTextReference(value,conversation,scope){
  if(!value||!sha(value.owner)||scope!==undefined&&value.owner!==scope)throw invalid();
  const {owner,...source}=value;
- try{validateTextReferenceSource(source,conversation);}catch{throw invalid();}
+ try{if(source.reference?.selectionMode==='cells')validateCellReferenceSource(source,conversation);else validateTextReferenceSource(source,conversation);}catch{throw invalid();}
 }
 
 export function validateComposerDraft(value,conversation,scope){

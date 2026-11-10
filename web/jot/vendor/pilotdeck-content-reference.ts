@@ -1,8 +1,8 @@
 // Adapted from PilotDeck revision 783499ffdb2d501bf590b2e035acd027a882df10.
-// Original source ui/src/types/contentReference.ts, text/region-reference types and creation.
+// Original source ui/src/types/contentReference.ts, text/cell/region-reference types and creation.
 // Upstream GNU Affero General Public License v3.0 terms apply.
 // Complete license retained at packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt
-// Jot extracts the used text/region-reference branches and retains the original schema and rect normalization.
+// Jot extracts the used text/cell/region-reference branches and retains the original schema and rect normalization.
 export const CONTENT_REFERENCE_ATTACHMENT_KIND = 'content-reference';
 export const CONTENT_REFERENCE_PROMPT_MARKER = '[Content references selected by user:]';
 
@@ -105,7 +105,23 @@ export type ImageRegionContentReference = ContentReferenceBase & {
   nearbyText?: string;
 };
 
-type ContentReference=TextContentReference|ImageRegionContentReference;
+export type CellRangeSnapshot={
+ range:string;
+ displayValues:string[][];
+ rawValues?:unknown[][];
+ formulas?:string[][];
+ rowCount?:number;
+ columnCount?:number;
+ truncated?:boolean;
+};
+export type CellRangeContentReference=ContentReferenceBase&{
+ selectionMode:'cells';locator:{surface:'sheet';sheetId:string;sheetName:string;ranges:string[];activeRange:string};
+ cells:CellRangeSnapshot[];headers?:string[][];surroundingValues?:string[][];
+};
+type ContentReference=TextContentReference|ImageRegionContentReference|CellRangeContentReference;
+export function createCellRangeContentReference(input:CreateContentReferenceInput<CellRangeContentReference>):CellRangeContentReference{
+ return createContentReference<CellRangeContentReference>(input);
+}
 
 type CreateContentReferenceInput<T extends ContentReference> = Omit<
   T,

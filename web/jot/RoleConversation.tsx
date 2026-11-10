@@ -1,4 +1,5 @@
-import {FileTextReferenceContext,FileTextReferences,fileReferenceMessage,fileReferenceSnapshots,isFileRegion,resolveRegionArtifact,type FileReference,type FileSourceReference,type FileRegionDraft,type FileTextReference} from './FileTextReferences';
+import {validateTextReference} from './composer-draft-recovery.mjs';
+import {FileTextReferenceContext,FileTextReferences,fileReferenceMessage,fileReferenceSnapshots,isFileRegion,resolveRegionArtifact,type FileReference,type FileSourceReference,type FileRegionDraft,type FileSelectionReference} from './FileTextReferences';
 import FileReferenceSource from './FileReferenceSource';
 import MessageFileReferences from './MessageFileReferences';
 import type {TaskSourceSelection} from '../workbench/types';
@@ -144,7 +145,7 @@ function ConversationMessageBody({message,onOpenReference}:{message:Message;onOp
   <MessageFileReferences message={message} onOpen={onOpenReference}/>
  </div>;
 }
-type ComposerDraft={text:string;replyQuotes:AssistantReplyQuote[];textReferences:FileTextReference[];goalMode:boolean};
+type ComposerDraft={text:string;replyQuotes:AssistantReplyQuote[];textReferences:FileSelectionReference[];goalMode:boolean};
 function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinary=false}:ConversationProps){
  const [,render]=useState(0),[draft,setDraft]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[expanded,setExpanded]=useState<Record<string,boolean>>({}),[maxBytes,setMaxBytes]=useState<number>(),[preview,setPreview]=useState<{name:string;text?:string;url?:string;unsupported?:boolean;truncated?:boolean;loading?:boolean}>(),[forkStates,setForkStates]=useState<Record<string,{state:string;retryable:boolean;error:string}>>({});
  const [voice,setVoice]=useState<Capabilities['voice']>(),[voiceBusy,setVoiceBusy]=useState(false),draftRef=useRef(draft),conversationRegion=useRef<HTMLElement>(null),previewRequest=useRef<AbortController|undefined>(undefined);
@@ -197,7 +198,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const [goalMode,setGoalMode]=useState(false),[goalPending,setGoalPending]=useState(false);
  const [recoveryRunId,setRecoveryRunId]=useState('');
  useEffect(()=>{setGoalMode(false);},[id,ordinary]);
- const composerDraft:ComposerDraft={text:draft,replyQuotes,textReferences:fileReferences.filter((value):value is FileTextReference=>!isFileRegion(value)),goalMode};
+ const composerDraft:ComposerDraft={text:draft,replyQuotes,textReferences:fileReferences.filter((value):value is FileSelectionReference=>!isFileRegion(value)),goalMode};
  const draftSnapshot=JSON.stringify(composerDraft);
  const applyComposerDraft=(value:ComposerDraft)=>{
   draftRef.current=value.text;setDraft(value.text);setReplyQuotes(value.replyQuotes);setGoalMode(value.goalMode);
@@ -321,16 +322,11 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   conversationRegion.current?.querySelector<HTMLTextAreaElement>('.jot-prompt-composer textarea')?.focus();
   return true;
  };
- const addFileReference=(value:FileTextReference)=>{
+ const addFileReference=(value:FileSelectionReference)=>{
   if(quoteLocked||taskDraftScope()!==fileOwner||value.owner!==fileOwner||value.conversationId!==id)return false;
-  const {reference,file}=value;
-  if(reference.schemaVersion!==1||reference.kind!=='content-reference'||reference.selectionMode!=='text'||reference.renderer.id!=='pdf'||reference.renderer.backend!=='builtin'||reference.locator.surface!=='page'
-   ||reference.source.relativePath!==file.path||reference.source.revision?.sha256!==file.sha256||reference.source.revision?.size!==file.size||reference.source.revision?.id!==String(file.version)
-   ||reference.locator.quote.exact!==reference.selectedText||!reference.selectedText.trim()
-   ||!reference.locator.pageNumbers?.length||reference.locator.pageNumbers.some(page=>!Number.isSafeInteger(page)||page<1)
-   ||!Number.isSafeInteger(file.version)||file.version<0||!Number.isSafeInteger(file.size)||file.size<0
-   ||!/^[a-f0-9]{64}$/.test(file.sha256)||!/^[a-f0-9]{64}$/.test(value.resultSha))return false;
-  const fingerprint=(item:FileTextReference)=>JSON.stringify([item.runId,item.activityId,item.resultSha,item.file.path,item.file.version,item.file.sha256,item.file.size,item.reference.selectedText,item.reference.locator.pageNumbers]);
+  try{validateTextReference(value,id,fileOwner);}catch{return false;}
+  const fingerprint=(item:FileSelectionReference)=>JSON.stringify([item.runId,item.activityId,item.resultSha,item.file.path,item.file.version,item.file.sha256,item.file.size,
+   item.reference.selectionMode==='text'?[item.reference.selectedText,item.reference.locator.pageNumbers]:[item.reference.locator,item.reference.cells]]);
   if(fileReferences.some(item=>!isFileRegion(item)&&fingerprint(item)===fingerprint(value)))return true;
   const next=[...fileReferences,value];
   if(goalPrompt(replyQuoteMessage(fileReferenceMessage(draft,next),replyQuotes),ordinary&&!chatMode&&!run&&goalMode).length>100000){setError('引用与消息过长，请减少引用或缩短消息');return false;}

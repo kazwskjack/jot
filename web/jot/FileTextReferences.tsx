@@ -2,17 +2,21 @@
 // Adapted portions retain GNU AGPL v3 terms.
 // Complete license retained at packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt
 import React,{createContext,useEffect,useState} from 'react';
-import {CONTENT_REFERENCE_PROMPT_MARKER,type TextContentReference,type ImageRegionContentReference} from './vendor/pilotdeck-content-reference';
+import {CONTENT_REFERENCE_PROMPT_MARKER,type TextContentReference,type ImageRegionContentReference,type CellRangeContentReference} from './vendor/pilotdeck-content-reference';
 import type {Artifact,ActivityToolResultFile} from './types';
 import './assistant-reply-quote.css';
 
 export type FileTextReference={rotation?:number;owner:string;conversationId:string;runId:string;activityId:string;resultSha:string;file:Pick<ActivityToolResultFile,'path'|'version'|'sha256'|'size'>;reference:TextContentReference};
+export type FileCellReference=Omit<FileTextReference,'reference'|'rotation'>&{reference:CellRangeContentReference};
+export type FileSelectionReference=FileTextReference|FileCellReference;
+export type OfficeCellFocus={key:string;value:FileCellReference};
 export type FileRegionDraft=Omit<FileTextReference,'reference'>&{reference:ImageRegionContentReference;imageBytes:number;rotation:number};
 export type FileRegionReference=FileRegionDraft&{uploadEntryId:string};
-export type FileReference=FileTextReference|FileRegionReference;
-export type FileSourceReference=FileTextReference|FileRegionDraft;
+export type FileReference=FileSelectionReference|FileRegionReference;
+export type FileSourceReference=FileSelectionReference|FileRegionDraft;
 export function isFileRegion<T extends FileSourceReference>(value:T):value is Extract<T,FileRegionDraft>{return value.reference.selectionMode==='region';}
-export const FileTextReferenceContext=createContext<{owner:string;conversationId:string;disabled:boolean;regionDisabled:boolean;onAdd:(reference:FileTextReference)=>boolean;onAddRegion:(reference:FileRegionDraft,file:File)=>Promise<boolean>}|null>(null);
+export function isFileCells<T extends FileSourceReference>(value:T):value is Extract<T,FileCellReference>{return value.reference.selectionMode==='cells';}
+export const FileTextReferenceContext=createContext<{owner:string;conversationId:string;disabled:boolean;regionDisabled:boolean;onAdd:(reference:FileSelectionReference)=>boolean;onAddRegion:(reference:FileRegionDraft,file:File)=>Promise<boolean>}|null>(null);
 export function resolveRegionArtifact(value:FileRegionReference,resolve:(entryId:string)=>Artifact|undefined){
  const artifact=resolve(value.uploadEntryId);
  return artifact&&artifact.conversation_id===value.conversationId&&artifact.origin==='upload'&&artifact.status==='ready'&&artifact.version===1
@@ -39,12 +43,14 @@ function RegionPreview({file}:{file:File}){
 }
 export function FileReferenceDetails({value,file,ready}:{value:FileSourceReference;file?:File;ready?:boolean}){
  const [open,setOpen]=useState(false);
- return <details onToggle={event=>setOpen(event.currentTarget.open)}><summary>{value.file.path} · 第 {isFileRegion(value)?value.reference.locator.pageNumber:value.reference.locator.pageNumbers?.join('、')} 页</summary>
+ const location=isFileCells(value)?`${value.reference.locator.sheetName} · ${value.reference.locator.ranges.join('、')}`
+  :`第 ${isFileRegion(value)?value.reference.locator.pageNumber:value.reference.locator.pageNumbers?.join('、')} 页`;
+ return <details onToggle={event=>setOpen(event.currentTarget.open)}><summary>{value.file.path} · {location}</summary>
   <p>原版本 {value.file.version} · SHA-256 <code>{value.file.sha256}</code></p>
   {isFileRegion(value)?<>
    <p>图片区域 · {value.reference.image.name} · {value.reference.image.width} × {value.reference.image.height} · 图片摘要 <code>{value.reference.image.sha256}</code></p>
    {open&&file&&<RegionPreview file={file}/>}{ready===false&&<p role="status">截图附件尚未完成核对，请在附件区处理，或移除此引用。</p>}
-  </>:<pre>{value.reference.selectedText}</pre>}
+  </>:isFileCells(value)?<pre>{JSON.stringify(value.reference.cells,null,2)}</pre>:<pre>{value.reference.selectedText}</pre>}
  </details>;
 }
 export function FileTextReferences({references,disabled,onChange,imageFile,resolveImage,onOpen}:{references:FileReference[];disabled:boolean;onChange:(references:FileReference[])=>void;imageFile:(entryId:string)=>File|undefined;resolveImage:(entryId:string)=>Artifact|undefined;onOpen:(value:FileReference)=>void}){

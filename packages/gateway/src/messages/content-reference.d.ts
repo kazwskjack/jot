@@ -6,3 +6,5 @@ export type ReferenceSnapshotInput={protocol:1;items:Array<Record<string,unknown
 export function validateReferenceSnapshotInput(value:unknown):ReferenceSnapshotInput;
 export function prepareReferenceContent(content:unknown,value:unknown):{content:Array<Record<string,unknown>>;referenceSnapshots:ReferenceSnapshotInput};
 export function prepareReferenceSteeringText(text:unknown,attachments:unknown,value:unknown):{text:string;referenceSnapshots:ReferenceSnapshotInput};
+export function validateCellReferenceSource(value:unknown,conversation:string):void;
+export function cellRangeCoordinates(value:unknown):{rows:number;columns:number;left:number;top:number;right:number;bottom:number};
