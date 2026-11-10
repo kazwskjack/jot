@@ -1,3 +1,4 @@
+import {validateNativeFileRangeRequest,validateNativeFileRange} from './native-file-range.js';
 import {posix,win32} from 'node:path';
 
 const SHA = /^[a-f0-9]{64}$/;
@@ -40,4 +41,27 @@ export function validateNativeSearchMembers(value,sessionId,input) {
   if (end < value.total_members ? value.next_offset_members !== end : value.next_offset_members !== undefined)
     throw Error('native_search_source_invalid');
   return Object.freeze({...value,items:Object.freeze(value.items.map(item => Object.freeze({...item})))});
+}
+
+/** A member selection pins provenance. Native file range pins independently bind opened bytes. */
+export function validateNativeSearchMemberRangeRequest(value) {
+  const fields = ['call_seq','tool_name','index','members_sha256','call_sha256','result_sha256'];
+  if (!record(value) || Object.keys(value).sort().join(',') !== 'member,range' || !record(value.member)
+    || Object.keys(value.member).sort().join(',') !== fields.sort().join(',')
+    || !['call_sha256','result_sha256','members_sha256'].every(key => typeof value.member[key] === 'string' && SHA.test(value.member[key]))
+    || !record(value.range) || Object.hasOwn(value.range,'path')) throw Error('native_search_source_invalid');
+  const member = value.member;
+  validateNativeSearchMembersRequest({call_seq:member.call_seq,tool_name:member.tool_name,
+    offset_members:member.index,members_sha256:member.members_sha256});
+  const {path,...range} = validateNativeFileRangeRequest({...value.range,path:'native-search-member'});
+  return Object.freeze({member:Object.freeze({...member}),range:Object.freeze(range)});
+}
+
+export function validateNativeSearchMemberRange(value,sessionId,input) {
+  const request = validateNativeSearchMemberRangeRequest(input), member = request.member;
+  if (!record(value) || Object.keys(value).sort().join(',') !== 'call_sha256,member_index,members_sha256,range,result_sha256'
+    || value.member_index !== member.index || value.members_sha256 !== member.members_sha256
+    || value.call_sha256 !== member.call_sha256 || value.result_sha256 !== member.result_sha256)
+    throw Error('native_search_source_invalid');
+  return Object.freeze({...value,range:validateNativeFileRange(value.range,sessionId,{...request.range,path:'native-search-member'})});
 }

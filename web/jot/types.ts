@@ -182,3 +182,5 @@ export type ActivityToolFilePage={text_protocol?:2;conversation_id:string;run_id
 export type ActivityToolFileBytes=Pick<ActivityToolFilePage,'conversation_id'|'run_id'|'activity_id'|'result_sha256'|'path'|'version'|'sha256'|'size'|'source'|'execution_authorized'>&{offset_bytes:number;length_bytes:number;content_base64:string;chunk_sha256:string;next_offset_bytes?:number};
 
 export type NativeFileSearch={shape:'paths';paths:string[];total:number;truncated:boolean}|{shape:'matches';files:{path:string;matches:{lineNumber:number;line:string}[]}[];total:number;truncated:boolean}|{shape:'source_limit'};
+
+export type ActivityNativeSearchMembersPage=import('../../packages/gateway/contracts/types').ActivityNativeSearchMembersPage;

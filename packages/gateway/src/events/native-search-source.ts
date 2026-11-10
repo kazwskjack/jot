@@ -1,7 +1,8 @@
+import {validateNativeSearchMembers,type NativeSearchMembersRequest} from '../harness/native-search-members.js';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import type {FastifyInstance} from 'fastify';
-import type {ActivityToolResultPage,ActivityToolResultSearchPage,ActivityToolResultMatch} from '../../contracts/types.ts';
+import type {ActivityToolResultPage,ActivityToolResultSearchPage,ActivityToolResultMatch,ActivityNativeSearchMembersPage} from '../../contracts/types.ts';
 import {withReadTransaction} from '../db/database.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {readOriginalActivity,type NativeSearchCandidate} from './activity-tool-result.ts';
@@ -18,6 +19,7 @@ type Input = Record<string,unknown>;
 export type NativeSearchSourceRequest = {call_seq:number;tool_name:'glob'|'grep';offset_chars:number;source_sha256?:string};
 export type NativeSearchSourceSearchRequest = Omit<NativeSearchSourceRequest,'offset_chars'>&{q:string};
 export interface NativeSearchSourceClient {
+  readNativeSearchMembers?(ownerId:string,sessionId:string,input:NativeSearchMembersRequest,signal?:AbortSignal):Promise<unknown>;
   readNativeSearchSource(ownerId:string,sessionId:string,input:NativeSearchSourceRequest,signal?:AbortSignal):Promise<unknown>;
   searchNativeSearchSource?(ownerId:string,sessionId:string,input:NativeSearchSourceSearchRequest,signal?:AbortSignal):Promise<unknown>;
 }
@@ -158,6 +160,58 @@ export async function searchNativeActivitySources(db:DatabaseSync,owner:string,b
 export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,client}:{
   db:DatabaseSync;actor(request:{headers:Record<string,unknown>}):string;client?:NativeSearchSourceClient|undefined;
 }) {
+  app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/members',async(request,reply)=>{
+    reply.header('cache-control','private, no-store');
+    const abort = new AbortController(), disconnected = () => abort.abort();
+    request.raw.once('aborted',disconnected);
+    reply.raw.once('close',disconnected);
+    if (request.raw.aborted || reply.raw.destroyed) disconnected();
+    try {
+      const owner = actor(request), {conversationId,activityId} = request.params as {conversationId:string;activityId:string};
+      const query = request.query as Input, runId = query.run_id, offsetValue = query.offset_members ?? '0', asOfSeq = query.as_of_seq;
+      if (!ID.test(conversationId) || !ID.test(activityId) || typeof runId !== 'string' || !ID.test(runId)
+        || Object.keys(query).some(key=>!['run_id','offset_members','result_sha256','members_sha256','as_of_seq'].includes(key))
+        || asOfSeq !== undefined && (typeof asOfSeq !== 'string' || !/^(0|[1-9]\d{0,18})$/.test(asOfSeq) || BigInt(asOfSeq)>9223372036854775807n)
+        || typeof offsetValue !== 'string' || !/^(0|[1-9]\d{0,7})$/.test(offsetValue)
+        || ['result_sha256','members_sha256'].some(key=>query[key] !== undefined && (typeof query[key] !== 'string' || !SHA.test(query[key] as string))))
+        throw Error('invalid_activity_tool_result_query');
+      const offset = Number(offsetValue);
+      if (offset > MAX_CHARS || offset > 0 && (query.result_sha256 === undefined || query.members_sha256 === undefined))
+        throw Error('invalid_activity_tool_result_query');
+      const original = source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined);
+      if (!client?.readNativeSearchMembers) throw Error('activity_tool_result_source_invalid');
+      const signal = AbortSignal.any([abort.signal,AbortSignal.timeout(20000)]);
+      const input:NativeSearchMembersRequest = {call_seq:original.callSeq,tool_name:original.tool,offset_members:offset,
+        ...(query.members_sha256 ? {members_sha256:query.members_sha256 as string} : {})};
+      const response = validateNativeSearchMembers(await client.readNativeSearchMembers(owner,original.sessionId,input,signal),original.sessionId,input);
+      signal.throwIfAborted();
+      if (response.result_seq !== original.resultSeq || sessionProjectionId(response.tool_call_id,'') !== original.activity.tool_call_id
+        || original.callSha !== undefined && response.call_sha256 !== original.callSha
+        || original.resultSha !== undefined && response.result_sha256 !== original.resultSha)
+        throw Error('activity_tool_result_source_changed');
+      if (source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined).identity !== original.identity)
+        throw Error('activity_tool_result_source_changed');
+      const resultSha = hash({activity:original.identity,call:response.call_sha256,result:response.result_sha256,
+        members:response.members_sha256,workdir:response.workdir,total:response.total_members,originalTotal:response.original_total});
+      if (query.result_sha256 !== undefined && query.result_sha256 !== resultSha) throw Error('activity_tool_result_source_changed');
+      const result:ActivityNativeSearchMembersPage = {conversation_id:conversationId,run_id:runId,activity_id:activityId,
+        tool_name:original.tool,result_sha256:resultSha,members_sha256:response.members_sha256,offset_members:offset,
+        total_members:response.total_members,original_total:response.original_total,items:response.items,
+        ...(asOfSeq !== undefined ? {as_of_seq:asOfSeq as string} : {}),
+        ...(response.next_offset_members !== undefined ? {next_offset_members:response.next_offset_members} : {}),execution_authorized:false};
+      return result;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'native_search_source_invalid') throw Error('activity_tool_result_source_invalid');
+      if (error instanceof SessionAdapterError) return reply.code(error.status === 404 ? 404 : error.status === 429 ? 429 : error.status === 409 ? 409 : 503)
+        .send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_UNAVAILABLE'}});
+      if (error instanceof Error && ['AbortError','TimeoutError'].includes(error.name))
+        return reply.code(503).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_UNAVAILABLE'}});
+      throw error;
+    } finally {
+      request.raw.off('aborted',disconnected);
+      reply.raw.off('close',disconnected);
+    }
+  });
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/source',async(request,reply)=>{
     reply.header('cache-control','private, no-store');
     const abort = new AbortController(), disconnected = () => abort.abort();

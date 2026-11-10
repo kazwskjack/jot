@@ -63,3 +63,13 @@ Session result, its complete rendered-content digest and original result total.
 Paths remain data and confer no filesystem authority. Consecutive duplicate
 paths are coalesced, with no promise of globally unique files. The retained DSH
 MIT notice applies to this integration.
+
+
+Public typed native search member pages reuse original owned activity/run/Session
+bindings and immutable child call/result receipts. Their digests include the
+original activity snapshot, native events, typed member source and actual run
+directory. Member-selected byte ranges resolve on the Host from that exact typed
+member and recheck source provenance around the original owner file reader.
+Opaque native file versions and canonical paths remain independent freshness
+pins. Whole opened-file retention and public file opening are subsequent work.
+The retained DSH MIT notice applies.

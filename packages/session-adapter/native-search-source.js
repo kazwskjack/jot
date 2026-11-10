@@ -1,7 +1,7 @@
-import {validateNativeSearchMembersRequest,validateNativeSearchMembers} from '../gateway/src/harness/native-search-members.js';
+import {validateNativeSearchMembersRequest,validateNativeSearchMembers,validateNativeSearchMemberRangeRequest,validateNativeSearchMemberRange} from '../gateway/src/harness/native-search-members.js';
 import {createHash} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
-import {isAbsolute} from 'node:path';
+import {isAbsolute,resolve} from 'node:path';
 import {createNativeSearchSourceStore} from './native-search-source-store.js';
 import {sessionHeaderIdentity} from './session-header-identity.js';
 import {publicNativeFileSearch, publicNativeToolResult, sessionToolCallId} from './native-tool-result.js';
@@ -257,6 +257,28 @@ export function createNativeSearchSource({readIdentity, agents, sessions, persis
       reads++;
       try{return await readSource(ownerId,sessionId,input,AbortSignal.any([signal,lifetime.signal]),'members');}
       finally{reads--;}
+    },
+    async fileRange(ownerId,sessionId,value,files,signal) {
+      if (reads >= 4) throw Error('native_search_source_capacity');
+      reads++;
+      try {
+        const active = AbortSignal.any([signal,lifetime.signal]), identity = readIdentity();
+        const input = validateNativeSearchMemberRangeRequest(value), member = input.member;
+        const query = {call_seq:member.call_seq,tool_name:member.tool_name,
+          offset_members:member.index,members_sha256:member.members_sha256};
+        const original = await readSource(ownerId,sessionId,query,active,'members');
+        check(identity,active);
+        if (original.call_sha256 !== member.call_sha256 || original.result_sha256 !== member.result_sha256
+          || original.items[0]?.index !== member.index) throw Error('native_search_source_changed');
+        const path = resolve(original.workdir,original.items[0].path);
+        const range = await files.read(ownerId,sessionId,{...input.range,path},active);
+        check(identity,active);
+        const current = await readSource(ownerId,sessionId,query,active,'members');
+        check(identity,active);
+        if (!isDeepStrictEqual(current,original)) throw Error('native_search_source_changed');
+        return validateNativeSearchMemberRange({member_index:member.index,members_sha256:member.members_sha256,
+          call_sha256:member.call_sha256,result_sha256:member.result_sha256,range},sessionId,input);
+      } finally { reads--; }
     },
     dispose() { disposed = true; lifetime.abort(); store.dispose(); },
   });

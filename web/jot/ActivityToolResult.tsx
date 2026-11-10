@@ -1,3 +1,4 @@
+import NativeSearchMembers from './NativeSearchMembers';
 import ActivityToolFile from './ActivityToolFile';
 import React,{useEffect,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
@@ -12,6 +13,7 @@ export default function ActivityToolResult({conversationId,target}:{conversation
  const [cursor,setCursor]=useState<{identity:string;offset:number;previous:number[];sha?:string;textSha?:string}>({identity,offset:target.offset??0,previous:[],sha:target.resultSha,textSha:target.textSha});
  const [state,setState]=useState<{identity:string;offset:number;page?:ActivityToolResultPage;error?:string}>();
  const [revision,setRevision]=useState(0);
+ const [membersIdentity,setMembersIdentity]=useState<string>();
  const [selected,setSelected]=useState<{identity:string;resultSha:string;file:ActivityToolResultFile}>();
  const currentCursor:typeof cursor=cursor.identity===identity?cursor:{identity,offset:target.offset??0,previous:[],sha:target.resultSha,textSha:target.textSha};
  const {offset,sha:expected,textSha:expectedText}=currentCursor;
@@ -65,6 +67,10 @@ export default function ActivityToolResult({conversationId,target}:{conversation
   &&page.text.slice(target.match.offset-offset,target.match.offset-offset+target.match.text.length)===target.match.text?target.match:undefined;
  return <div ref={region} tabIndex={-1} className="jot-activity-content" aria-label={target.nativeSource?"原生大结果来源":"工具结果正文"}>
   <h4>{target.nativeSource?"原生大结果来源":"工具结果正文"}</h4>
+  {(target.toolName==='glob'||target.toolName==='grep')&&<>
+   <button type="button" data-chat-search-ignore aria-expanded={membersIdentity===identity} onClick={()=>setMembersIdentity(membersIdentity===identity?undefined:identity)}>{membersIdentity===identity?'关闭文件成员':'查看文件成员'}</button>
+   {membersIdentity===identity&&<NativeSearchMembers key={identity} conversationId={conversationId} target={{runId:target.runId,activityId:target.activityId,toolName:target.toolName,...(target.asOfSeq?{asOfSeq:target.asOfSeq}:{})}}/>}
+  </>}
   {(!current||!page&&!current.error)&&<p role="status">正在读取原工具结果…</p>}
   {page&&<>
    <section data-chat-search-content={JSON.stringify(['tool-result',identity,page.result_sha256,offset])}>

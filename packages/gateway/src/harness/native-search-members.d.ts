@@ -1,3 +1,4 @@
+import type {NativeFileRangeRequest,NativeFileRange} from './native-file-range.js';
 export interface NativeSearchMembersRequest {
   readonly call_seq:number;
   readonly tool_name:'glob'|'grep';
@@ -24,3 +25,17 @@ export interface NativeSearchMembers {
 }
 export function validateNativeSearchMembersRequest(value:unknown):NativeSearchMembersRequest;
 export function validateNativeSearchMembers(value:unknown,sessionId:string,input:NativeSearchMembersRequest):NativeSearchMembers;
+
+export interface NativeSearchMemberRangeRequest {
+  readonly member:Readonly<{call_seq:number;tool_name:'glob'|'grep';index:number;members_sha256:string;call_sha256:string;result_sha256:string}>;
+  readonly range:Omit<NativeFileRangeRequest,'path'>;
+}
+export interface NativeSearchMemberRange {
+  readonly member_index:number;
+  readonly members_sha256:string;
+  readonly call_sha256:string;
+  readonly result_sha256:string;
+  readonly range:NativeFileRange;
+}
+export function validateNativeSearchMemberRangeRequest(value:unknown):NativeSearchMemberRangeRequest;
+export function validateNativeSearchMemberRange(value:unknown,sessionId:string,input:NativeSearchMemberRangeRequest):NativeSearchMemberRange;

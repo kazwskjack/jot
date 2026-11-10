@@ -860,3 +860,9 @@ export type {TerminalReceipt} from '../src/terminal/control.js';
 export type {TerminalAttachment,TerminalInput,TerminalInputPacket,TerminalAttached,TerminalQueued,TerminalFrame} from '../src/terminal/stream.js';
 
 export type NativeFileSearch={shape:'paths';paths:string[];total:number;truncated:boolean}|{shape:'matches';files:{path:string;matches:{lineNumber:number;line:string}[]}[];total:number;truncated:boolean}|{shape:'source_limit'};
+
+export type ActivityNativeSearchMembersPage={
+  conversation_id:string;run_id:string;activity_id:string;tool_name:'glob'|'grep';as_of_seq?:string;
+  result_sha256:string;members_sha256:string;offset_members:number;total_members:number;original_total:number;
+  items:readonly Readonly<{index:number;path:string}>[];next_offset_members?:number;execution_authorized:false;
+};
