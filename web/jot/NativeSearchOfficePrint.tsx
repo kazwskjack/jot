@@ -6,21 +6,21 @@ import {readNativeOfficePdf,type NativeOfficePrintPin,type NativeOfficePrintPrev
 import type {NativeMemberPreviewSource} from './activity-file-preview-client';
 const PdfViewer=lazy(()=>import('./NativeSearchFilePdf'));
 
-export default function NativeSearchOfficePrint({source,expectedOpenSha,onOpened}:{source:NativeMemberPreviewSource;expectedOpenSha?:string|undefined;onOpened?:(sha:string)=>boolean}){
+export default function NativeSearchOfficePrint({source,expectedOpenSha,expectedOpenProof,onOpened}:{source:NativeMemberPreviewSource;expectedOpenSha?:string|undefined;expectedOpenProof?:string|undefined;onOpened?:(sha:string,proof?:string)=>boolean}){
  const owner=taskDraftScope(),identity=JSON.stringify([owner,source]);
  const pin=useRef<{identity:string;value:NativeOfficePrintPin;revision:number}>(),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;preview?:NativeOfficePrintPreview;error?:string}>(),[revision,setRevision]=useState(0);
  const [download,setDownload]=useState<{preview:NativeOfficePrintPreview;url:string}>();
  useEffect(()=>{
-  if(expectedOpenSha&&pin.current?.identity===identity&&pin.current.value.openSha===expectedOpenSha&&pin.current.revision===revision&&state?.identity===identity&&state.preview)return;
+  if(expectedOpenSha&&pin.current?.identity===identity&&pin.current.value.openSha===expectedOpenSha&&pin.current.value.openProof===expectedOpenProof&&pin.current.revision===revision&&state?.identity===identity&&state.preview)return;
   const controller=new AbortController();active.current=controller;setState({identity});
   const timer=window.setTimeout(()=>{controller.abort();if(taskDraftScope()===owner)setState({identity,error:'转换PDF读取超时，请稍后重试。'});},180000);
   const load=async()=>{
    const expected=pin.current?.identity===identity?pin.current.value:undefined;
-   const preview=await readNativeOfficePdf(source,owner,controller.signal,expectedOpenSha,expected);
+   const preview=await readNativeOfficePdf(source,owner,controller.signal,expectedOpenSha,expected,expectedOpenProof);
    controller.signal.throwIfAborted();
-   if(taskDraftScope()!==owner||onOpened&&!onOpened(preview.openSha))throw Error('原打开来源已变化，请重新打开文件');
-   const value={openSha:preview.openSha,sourceSha:preview.sourceSha,sourceSize:preview.sourceSize,sha256:preview.sha256,size:preview.size,pageCount:preview.pageCount};pin.current={identity,value,revision};
+   if(taskDraftScope()!==owner||onOpened&&!onOpened(preview.openSha,preview.openProof))throw Error('原打开来源已变化，请重新打开文件');
+   const value={openSha:preview.openSha,sourceSha:preview.sourceSha,sourceSize:preview.sourceSize,sha256:preview.sha256,size:preview.size,pageCount:preview.pageCount,...(preview.openProof?{openProof:preview.openProof}:{}),...(preview.pdfProof?{pdfProof:preview.pdfProof}:{})};pin.current={identity,value,revision};
    setState({identity,preview});
   };
   void load().catch(error=>{
@@ -30,7 +30,7 @@ export default function NativeSearchOfficePrint({source,expectedOpenSha,onOpened
    setState({identity,error:message});
   }).finally(()=>window.clearTimeout(timer));
   return()=>{controller.abort();window.clearTimeout(timer);if(active.current===controller)active.current=null;};
- },[identity,revision,expectedOpenSha]);
+ },[identity,revision,expectedOpenSha,expectedOpenProof]);
  const current=state?.identity===identity?state:undefined,preview=current?.preview;
  useEffect(()=>{
   if(!preview){setDownload(undefined);return;}

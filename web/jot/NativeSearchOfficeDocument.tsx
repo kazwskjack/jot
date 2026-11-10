@@ -6,31 +6,34 @@ import type {NativeMemberOfficeDocumentPage} from '../../packages/gateway/contra
 import {nativeMemberDownloadUrl,type NativeMemberPreviewSource} from './activity-file-preview-client';
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
 
-export default function NativeSearchOfficeDocument({source,expectedOpenSha,onOpened}:{source:NativeMemberPreviewSource;expectedOpenSha?:string|undefined;onOpened?:(sha:string)=>boolean}){
+export default function NativeSearchOfficeDocument({source,expectedOpenSha,expectedOpenProof,onOpened}:{source:NativeMemberPreviewSource;expectedOpenSha?:string|undefined;expectedOpenProof?:string|undefined;onOpened?:(sha:string,proof?:string)=>boolean}){
  const owner=taskDraftScope(),identity=JSON.stringify([owner,source]);
- const held=useRef<{identity:string;sha:string;revision:number}>();
+ const held=useRef<{identity:string;sha:string;proof?:string;revision:number}>();
  const [state,setState]=useState<{identity:string;page?:NativeMemberOfficeDocumentPage;error?:string}>(),[revision,setRevision]=useState(0);
  useEffect(()=>{
-  if(expectedOpenSha&&held.current?.identity===identity&&held.current.sha===expectedOpenSha&&held.current.revision===revision&&state?.identity===identity&&state.page)return;
+  if(expectedOpenSha&&held.current?.identity===identity&&held.current.sha===expectedOpenSha&&held.current.proof===expectedOpenProof&&held.current.revision===revision&&state?.identity===identity&&state.page)return;
   const controller=new AbortController();setState({identity});
   const load=async()=>{
    const format=officePreviewFormat(source.member.path);
    if(!format?.native)throw Error('此格式的原生结构化解析尚未确认');
    const pin=expectedOpenSha??(held.current?.identity===identity?held.current.sha:undefined);
+   const proof=expectedOpenProof??(held.current?.identity===identity?held.current.proof:undefined);
    const query=new URLSearchParams({run_id:source.runId,result_sha256:source.resultSha,members_sha256:source.membersSha,
-    ...(source.asOfSeq?{as_of_seq:source.asOfSeq}:{}),...(pin?{open_sha256:pin}:{})});
+    ...(source.asOfSeq?{as_of_seq:source.asOfSeq}:{}),...(pin?{open_sha256:pin}:{}),...(proof?{open_proof:proof}:{})});
    const page=await request<NativeMemberOfficeDocumentPage>(`/conversations/${encodeURIComponent(source.conversationId)}/activities/${encodeURIComponent(source.activityId)}/tool-result/members/${source.member.index}/document?${query}`,'GET',undefined,undefined,controller.signal,120000);
    controller.signal.throwIfAborted();
    if(taskDraftScope()!==owner||!page||page.document_protocol!==1||page.conversation_id!==source.conversationId||page.run_id!==source.runId
     ||page.activity_id!==source.activityId||page.member_index!==source.member.index||page.path!==source.member.path||page.as_of_seq!==source.asOfSeq
     ||page.result_sha256!==source.resultSha||page.members_sha256!==source.membersSha||page.execution_authorized!==false
     ||typeof page.open_sha256!=='string'||!/^[a-f0-9]{64}$/.test(page.open_sha256)||pin!==undefined&&page.open_sha256!==pin
+    ||page.open_proof!==undefined&&(typeof page.open_proof!=='string'||page.open_proof.length!==43||!/^[A-Za-z0-9_-]{43}$/.test(page.open_proof))
+    ||proof!==undefined&&page.open_proof!==proof
     ||typeof page.sha256!=='string'||!/^[a-f0-9]{64}$/.test(page.sha256)||!Number.isSafeInteger(page.size_bytes)||page.size_bytes<0||page.size_bytes>100*1024*1024
     ||page.media_type!==format.mediaType||page.document?.kind!==format.kind||!page.engine||typeof page.engine.name!=='string'||page.engine.name.length>200
     ||typeof page.engine.version!=='string'||page.engine.version.length>200)throw Error('原生Office结构化来源尚未确认');
    const document=normalizeOfficePreviewContent(page.media_type,page.document);
-   if(onOpened&&!onOpened(page.open_sha256))throw Error('原打开来源已变化，请重新打开文件');
-   held.current={identity,sha:page.open_sha256,revision};
+   if(onOpened&&!onOpened(page.open_sha256,page.open_proof))throw Error('原打开来源已变化，请重新打开文件');
+   held.current={identity,sha:page.open_sha256,revision,...(page.open_proof?{proof:page.open_proof}:{})};
    setState({identity,page:{...page,document}});
   };
   void load().catch(error=>{
@@ -42,7 +45,7 @@ export default function NativeSearchOfficeDocument({source,expectedOpenSha,onOpe
    setState({identity,error:message});
   });
   return()=>controller.abort();
- },[identity,revision,expectedOpenSha]);
+ },[identity,revision,expectedOpenSha,expectedOpenProof]);
  const current=state?.identity===identity?state:undefined,page=current?.page;
  return <section aria-label="原生Office结构化内容">
   <h5>Office结构化内容</h5>
@@ -50,7 +53,7 @@ export default function NativeSearchOfficeDocument({source,expectedOpenSha,onOpe
   {(!current||!page&&!current.error)&&<p role="status">正在核对打开来源并解析Office…</p>}
   {page&&<>
    <p>{page.size_bytes} 字节 · SHA-256 <code>{page.sha256}</code></p>
-   <a href={nativeMemberDownloadUrl(source)+'&open_sha256='+page.open_sha256} download={source.member.path.split(/[\\/]/).at(-1)||'file'} onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载此结构化来源</a>
+   <a href={nativeMemberDownloadUrl(source)+'&open_sha256='+page.open_sha256+(page.open_proof?'&open_proof='+page.open_proof:'')} download={source.member.path.split(/[\\/]/).at(-1)||'file'} onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载此结构化来源</a>
    {page.document.truncated&&<p role="status">当前解析结果存在截断，请对照完整打开文件。</p>}
    <section className="jot-office-content" data-chat-search-content={JSON.stringify(['native-office',identity,page.open_sha256])}><OfficeContent key={page.open_sha256} value={page.document}/></section>
   </>}

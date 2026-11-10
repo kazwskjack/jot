@@ -1,3 +1,4 @@
+import type {NativeFileProofSource,NativeFileProofPdf} from '../messages/native-file-proof.ts';
 import {OFFICE_SOURCE_MAX_BYTES,officePreviewFormat} from '../artifacts/office-preview-format.js';
 import type {PinnedByteSource} from '../artifacts/pinned-byte-source.ts';
 import type {OfficeDocumentPreview} from '../artifacts/document-preview-content.ts';
@@ -181,8 +182,10 @@ export async function searchNativeActivitySources(db:DatabaseSync,owner:string,b
   return {...base,items,unsearched_results:unsearched};
 }
 
-export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,client,snapshotRoot,inspectOffice,renderOffice}:{
+export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,client,snapshotRoot,inspectOffice,renderOffice,nativeProofs}:{
   db:DatabaseSync;actor(request:{headers:Record<string,unknown>}):string;client?:NativeSearchSourceClient|undefined;snapshotRoot?:string;
+  nativeProofs?:{sign:(owner:string,source:NativeFileProofSource,pdf?:NativeFileProofPdf)=>string;
+    assert:(owner:string,source:NativeFileProofSource,proof:string,pdf?:NativeFileProofPdf)=>void};
   renderOffice?:(source:PinnedByteSource,name:string,binding:string,signal:AbortSignal,expected?:{sha256:string;size:number;pageCount:number})=>Promise<{pdf:{bytes:Buffer;sha256:string;size:number;page_count:number};engine:{name:string;version:string}}>;
   inspectOffice?:(source:PinnedByteSource,name:string,signal:AbortSignal)=>Promise<{media_type:string;document:OfficeDocumentPreview;engine:{name:string;version:string}}>;
 
@@ -212,7 +215,7 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
       const query = request.query as Input, runId = query.run_id, asOfSeq = query.as_of_seq;
       if (!ID.test(conversationId) || !ID.test(activityId) || typeof runId !== 'string' || !ID.test(runId)
         || !/^(0|[1-9]\d{0,7})$/.test(memberIndex) || Number(memberIndex) > MAX_CHARS
-        || Object.keys(query).some(key=>!['run_id','result_sha256','members_sha256','as_of_seq','max_bytes','open_sha256',...(operation==='print'?['preview_sha256','preview_size_bytes','preview_page_count']:[])].includes(key))
+        || Object.keys(query).some(key=>!['run_id','result_sha256','members_sha256','as_of_seq','max_bytes','open_sha256','open_proof',...(operation==='print'?['preview_sha256','preview_size_bytes','preview_page_count','preview_proof']:[])].includes(key))
         || asOfSeq !== undefined && (typeof asOfSeq !== 'string' || !/^(0|[1-9]\d{0,18})$/.test(asOfSeq) || BigInt(asOfSeq)>9223372036854775807n)
         || ['result_sha256','members_sha256'].some(key=>typeof query[key] !== 'string' || !SHA.test(query[key] as string)))
         throw Error('invalid_activity_tool_result_query');
@@ -225,6 +228,10 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
           ||typeof query.preview_page_count!=='string'||String(pageCount)!==query.preview_page_count||!Number.isSafeInteger(pageCount)||pageCount<1||pageCount>50000)
           throw Error('invalid_activity_tool_result_query');
         expectedPdf={sha256:query.preview_sha256,size,pageCount};
+      }
+      for(const field of ['open_proof','preview_proof']){
+        if(query[field]!==undefined&&(typeof query[field]!=='string'||(query[field] as string).length!==43||!/^[A-Za-z0-9_-]{43}$/.test(query[field] as string)
+          ||query.open_sha256===undefined||field==='preview_proof'&&!expectedPdf))throw Error('invalid_activity_tool_result_query');
       }
       const operationLimit=operation==='download'?downloadBudget:OFFICE_SOURCE_MAX_BYTES;
       const requestedLimit = query.max_bytes === undefined ? operationLimit : Number(query.max_bytes);
@@ -279,6 +286,14 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
         profile:first.profile_id,session:first.session_sha256,path:first.absolute_path,version:first.version,
         reportedSize:first.file_size_bytes,size:writer.source.sizeBytes,content:writer.source.sha256});
       if(query.open_sha256!==undefined&&query.open_sha256!==openedSha)throw Error('activity_tool_result_source_changed');
+      const proofSource:NativeFileProofSource={conversationId,runId,activityId,resultSha:query.result_sha256 as string,
+        membersSha:membership.members_sha256,memberIndex:Number(memberIndex),path:membership.items[0]!.path,
+        openSha:openedSha,sha256:writer.source.sha256,size:writer.source.sizeBytes,...(asOfSeq!==undefined?{asOfSeq:asOfSeq as string}:{})};
+      if(query.open_proof!==undefined){
+        if(!nativeProofs)throw Error('native_file_reference_unproven');
+        nativeProofs.assert(owner,proofSource,query.open_proof as string);
+      }
+      const openProof=nativeProofs?.sign(owner,proofSource);
       const verifyPreviewAuthority=async()=>{
         signal.throwIfAborted();
         const final=await readMembers(client,owner,original,memberInput,signal);
@@ -291,6 +306,7 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
         const result:NativeMemberOfficeDocumentPage={document_protocol:1,conversation_id:conversationId,run_id:runId,activity_id:activityId,
           member_index:Number(memberIndex),path:membership.items[0]!.path,result_sha256:query.result_sha256 as string,
           members_sha256:membership.members_sha256,open_sha256:openedSha,sha256:writer.source.sha256,size_bytes:writer.source.sizeBytes,
+          ...(openProof?{open_proof:openProof}:{}),
           ...(asOfSeq!==undefined?{as_of_seq:asOfSeq as string}:{}),media_type:value.media_type,document:value.document,engine:value.engine,execution_authorized:false};
         return reply.header('x-content-type-options','nosniff').send(result);
       }
@@ -298,6 +314,14 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
         const binding=hash({protocol:'jot-native-office-print/v1',owner,activity:original.identity,opened:openedSha});
         const value=await renderOffice!(writer.source,membership.items[0]!.path,binding,signal,expectedPdf);
         await verifyPreviewAuthority();
+        const derived={sha256:value.pdf.sha256,size:value.pdf.size,pageCount:value.pdf.page_count};
+        if(query.preview_proof!==undefined){
+          if(!nativeProofs)throw Error('native_file_reference_unproven');
+          nativeProofs.assert(owner,proofSource,query.preview_proof as string,derived);
+        }
+        const previewProof=nativeProofs?.sign(owner,proofSource,derived);
+        if(openProof)reply.header('x-activity-native-open-proof',openProof);
+        if(previewProof)reply.header('x-jot-native-preview-proof',previewProof);
         stream=Readable.from([value.pdf.bytes]);
         stream.once('close',()=>{void cleanup().catch(error=>app.log.error({err:error},'Native Office PDF cleanup failed'));});
         return reply.type('application/octet-stream').header('content-length',String(value.pdf.size))
@@ -310,6 +334,7 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
           .header('x-jot-preview-sha256',value.pdf.sha256).header('x-jot-preview-size',String(value.pdf.size))
           .header('x-jot-preview-pages',String(value.pdf.page_count)).header('x-jot-execution-authorized','false').send(stream);
       }
+      if(openProof)reply.header('x-activity-native-open-proof',openProof);
       const name = Buffer.from((membership.items[0]!.path.split(/[\\/]/).at(-1) || 'file').slice(0,200)).toString('utf8');
       async function* content(){try{yield* writer.source.stream(signal);}finally{await cleanup();}}
       stream = Readable.from(content());
@@ -324,6 +349,7 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
       return reply.send(stream);
     } catch (error) {
       if (stream) {stream.destroy();await cleanup();}
+      if(error instanceof Error&&error.message==='native_file_reference_unproven')return reply.code(409).send({error:{code:'NATIVE_FILE_REFERENCE_UNPROVEN'}});
       if(error instanceof Error&&error.message==='DOCUMENT_PREVIEW_BUSY')return reply.code(429).header('retry-after','1').send({error:{code:'DOCUMENT_PREVIEW_BUSY'}});
       if (error instanceof SessionAdapterError) return reply.code(error.status === 404 ? 404 : error.status === 429 ? 429 : error.status === 409 ? 409 : 503)
         .send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_UNAVAILABLE'}});

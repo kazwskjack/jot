@@ -16,11 +16,11 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
  const owner=taskDraftScope(),identity=JSON.stringify([owner,source]);
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;opened?:Opened;error?:string}>(),[revision,setRevision]=useState(0);
- const openPin=useRef<{identity:string;sha:string}>();
+ const openPin=useRef<{identity:string;sha:string;proof?:string}>();
  const [printMode,setPrintMode]=useState(false),[structured,setStructured]=useState(false);
- const captureOpen=(sha:string)=>{
-  if(taskDraftScope()!==owner||openPin.current?.identity===identity&&openPin.current.sha!==sha)return false;
-  openPin.current={identity,sha};return true;
+ const captureOpen=(sha:string,proof?:string)=>{
+  if(taskDraftScope()!==owner||openPin.current?.identity===identity&&(openPin.current.sha!==sha||openPin.current.proof!==undefined&&openPin.current.proof!==proof))return false;
+  openPin.current={identity,sha,...(proof?{proof}:{})};return true;
  };
  const [raw,setRaw]=useState(false),[byteOffset,setByteOffset]=useState(0);
  const [cursor,setCursor]=useState<{sha:string;offset:number;previous:number[]}>();
@@ -31,9 +31,10 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
   active.current=controller;
   setState({identity});
   const load=async()=>{
-   const value=await readNativeMemberPreviewBytes(source,owner,controller.signal);
+   const expected=openPin.current?.identity===identity?{openSha:openPin.current.sha,...(openPin.current.proof?{proof:openPin.current.proof}:{})}:undefined;
+   const value=await readNativeMemberPreviewBytes(source,owner,controller.signal,expected);
    controller.signal.throwIfAborted();
-   if(!captureOpen(value.openSha))throw Error('原打开来源已变化，请重新打开文件');
+   if(!captureOpen(value.openSha,value.proof))throw Error('原打开来源已变化，请重新打开文件');
    const downloadUrl=URL.createObjectURL(new Blob([value.bytes.slice()],{type:'application/octet-stream'}));
    urls.push(downloadUrl);
    let imageUrl:string|undefined,text:string|undefined;
@@ -53,6 +54,7 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
  const current=state?.identity===identity?state:undefined,opened=current?.opened;
  const currentCursor=opened&&cursor?.sha===opened.openSha?cursor:undefined,offset=currentCursor?.offset??0;
  const sourceOpenSha=opened?.openSha??(openPin.current?.identity===identity?openPin.current.sha:undefined);
+ const sourceOpenProof=opened?.proof??(openPin.current?.identity===identity?openPin.current.proof:undefined);
  const text=opened?.text;
  let end=Math.min(offset+16384,text?.length??0);
  if(text&&end<text.length&&/[\uD800-\uDBFF]/.test(text[end-1]!)&&/[\uDC00-\uDFFF]/.test(text[end]!))end--;
@@ -63,8 +65,8 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
   <h4>{source.member.path}</h4>
   {office?.native&&<button type="button" onClick={()=>{setPrintMode(false);setStructured(!structured);}}>{structured?'关闭结构化内容':'查看Office结构化内容'}</button>}
   {office&&<button type="button" onClick={()=>{setStructured(false);setPrintMode(!printMode);}}>{printMode?'关闭转换PDF':'查看Office转换PDF'}</button>}
-  {printMode&&office&&<ConversationDisplayBoundary label="原生Office转换预览"><Suspense fallback={<p role="status">正在载入转换PDF查看器…</p>}><NativeSearchOfficePrint source={source} expectedOpenSha={sourceOpenSha} onOpened={captureOpen}/></Suspense></ConversationDisplayBoundary>}
-  {structured&&office?.native&&<ConversationDisplayBoundary label="原生Office结构化预览"><Suspense fallback={<p role="status">正在载入Office结构化查看器…</p>}><NativeSearchOfficeDocument source={source} expectedOpenSha={sourceOpenSha} onOpened={captureOpen}/></Suspense></ConversationDisplayBoundary>}
+  {printMode&&office&&<ConversationDisplayBoundary label="原生Office转换预览"><Suspense fallback={<p role="status">正在载入转换PDF查看器…</p>}><NativeSearchOfficePrint source={source} expectedOpenSha={sourceOpenSha} expectedOpenProof={sourceOpenProof} onOpened={captureOpen}/></Suspense></ConversationDisplayBoundary>}
+  {structured&&office?.native&&<ConversationDisplayBoundary label="原生Office结构化预览"><Suspense fallback={<p role="status">正在载入Office结构化查看器…</p>}><NativeSearchOfficeDocument source={source} expectedOpenSha={sourceOpenSha} expectedOpenProof={sourceOpenProof} onOpened={captureOpen}/></Suspense></ConversationDisplayBoundary>}
   {!structured&&!printMode&&(!current||!opened&&!current.error)&&<p role="status">正在读取并核对完整打开内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'本次读取已取消。'});}}>取消读取</button></p>}
   {opened&&<>
    <p>打开时内容 · {opened.size} 字节 · SHA-256 <code>{opened.sha256}</code></p>

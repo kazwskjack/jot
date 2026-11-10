@@ -1,3 +1,4 @@
+import {signNativeFileProof,assertNativeFileProof,type NativeFileProofSource,type NativeFileProofPdf} from './messages/native-file-proof.ts';
 import {OFFICE_PRINT_SOURCE_MAX_BYTES} from './artifacts/office-preview-format.js';
 import {createOfficePreviewCandidatePager} from './file-engine/office-preview-candidate-pages.ts';
 import {OfficePreviewConfigurationStore} from './file-engine/office-preview-configuration.ts';
@@ -1068,6 +1069,10 @@ export async function buildServer(config: {
   const officePrintRoot=join(dirname(resolve(config.databasePath)),'.jot-office-print-'+createHash('sha256').update(resolve(config.databasePath)).digest('hex').slice(0,16));
   let documentPreviewBusy=false;
   registerNativeSearchSourceRoutes(app,{db,actor,client:config.nativeSearchSourceClient,snapshotRoot:join(dirname(resolve(config.databasePath)),'.jot-downloads'),
+    ...(officePrintReferencesReady?{nativeProofs:{
+      sign:(owner:string,source:NativeFileProofSource,pdf?:NativeFileProofPdf)=>signNativeFileProof(config.internalChannelToken!,owner,source,pdf),
+      assert:(owner:string,source:NativeFileProofSource,proof:string,pdf?:NativeFileProofPdf)=>assertNativeFileProof(config.internalChannelToken,owner,source,proof,pdf),
+    }}:{}),
     renderOffice:async(source,name,binding,signal,expected)=>{
       if(!officePrintReferencesReady)throw Error('office_print_reference_unproven');
       if(documentPreviewBusy)throw Error('DOCUMENT_PREVIEW_BUSY');

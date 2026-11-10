@@ -325,3 +325,10 @@ bindings include original native member/activity/opened-source provenance.
 The existing native MIT, viewer, engine and PilotDeck notices apply. The native
 PDF viewer verifies complete output bytes and decoded page count. Native
 reference receipt integration is tracked separately.
+
+Native opened-source and derived Office-PDF attestations follow the existing
+Gateway HMAC proof pattern with distinct native signature domains. Proofs bind
+the original owner, activity/history/member identity and complete opened source,
+with PDF output SHA/size/pages added for derived proofs. Original native and
+PilotDeck integration notices apply. Native selection/reference snapshot
+integration is tracked in the execution worklist.
