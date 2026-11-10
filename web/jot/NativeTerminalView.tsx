@@ -79,11 +79,14 @@ export default function NativeTerminalView(props:Props) {
     let current:Live|undefined,observer:ResizeObserver|undefined,fitTimer:ReturnType<typeof setTimeout>|undefined;
     let opening:ReturnType<typeof setTimeout>|undefined,disposed=false;
     const notifyPending=(value:boolean)=>{if(!disposed){setPending(value);callbacks.current.onPendingChange(value);}};
+    const warnBeforeUnload=(event:BeforeUnloadEvent)=>{if(current?.sender?.hasPending){event.preventDefault();event.returnValue='';}};
+    window.addEventListener('beforeunload',warnBeforeUnload);
     const dispose=()=>{
       if(disposed)return;disposed=true;
       const unknown=current?.sender?.unconfirmedCount??0;
       abort.abort();clearTimeout(opening);clearTimeout(fitTimer);observer?.disconnect();
       window.removeEventListener('resize',scheduleFit);window.visualViewport?.removeEventListener('resize',scheduleFit);
+      window.removeEventListener('beforeunload',warnBeforeUnload);
       current?.sender?.close();callbacks.current.onPendingChange(false);
       if(live.current===current)live.current=undefined;
       try{current?.terminal.dispose();}

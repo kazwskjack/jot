@@ -19,6 +19,7 @@ export class TerminalInputSender {
     private readonly post:(command:TerminalInput)=>Promise<void>,private readonly pending:(value:boolean)=>void,
     private readonly refused:(message:string)=>void,private readonly failed:()=>void) {}
   get canWrite(){return !this.closed&&this.writable;}
+  get hasPending(){return this.entries.size>0;}
   get unconfirmedCount(){let count=0;for(const entry of this.entries.values())if(entry.posted)count++;return count;}
   private cost(command:TerminalInput){return this.encoder.encode(JSON.stringify(command)).length+this.window.frameOverheadBytes;}
   setWritable(value:boolean) {
