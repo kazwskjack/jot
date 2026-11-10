@@ -1832,3 +1832,5 @@ if any, to sign a "copyright disclaimer" for the program, if necessary.
 For more information on this, and how to apply and follow the GNU AGPL, see
 <https://www.gnu.org/licenses/>.
 
+
+Directory and DOM search logic also derives from the same fixed PilotDeck revision, ui/src/components/code-editor/hooks/useDomFileSearch.ts and ui/src/components/code-editor/utils/fileSearch.ts. Type annotations are removed for the static script and bounded results retain source offset semantics. The full AGPL-3.0 license above applies.

@@ -22,5 +22,25 @@
       "modified": false
     }
   ],
-  "consumption": "Public classic browser scripts inside an opaque sandbox. No package installation or script execution performed during development."
+  "consumption": "Public classic browser scripts inside an opaque sandbox. No package installation or script execution performed during development.",
+  "adapted_source": [
+    {
+      "path": "ui/src/components/code-editor/view/subcomponents/DocxBuiltinPreview.tsx",
+      "sha256": "19dc7cc5f52402826ea1fd8968e3b2fab8d7cc1175f3b272a309c35319427379",
+      "license": "AGPL-3.0",
+      "changes": "Retained render options and heading recognition, adapted native directory controls within the opaque iframe."
+    },
+    {
+      "path": "ui/src/components/code-editor/hooks/useDomFileSearch.ts",
+      "sha256": "6ab33a59851912060d4834b96ee996e7dd65f970da0616103b944df4a4ac02ae",
+      "license": "AGPL-3.0",
+      "changes": "Retained per-text-node ranges and CSS Custom Highlights with native selection fallback and bounded search scope."
+    },
+    {
+      "path": "ui/src/components/code-editor/utils/fileSearch.ts",
+      "sha256": "42c6d3627c37725c12d2472a3f78e07cc6ceb2f507546209a39c44412d751db1",
+      "license": "AGPL-3.0",
+      "changes": "Retained Unicode source-offset case folding, removed TypeScript annotations for the static script and bounded match count."
+    }
+  ]
 }
