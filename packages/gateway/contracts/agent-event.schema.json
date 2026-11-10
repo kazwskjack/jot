@@ -654,6 +654,7 @@
     }
   ],
   "$defs": {
+        "NativeFileSearch": {"oneOf":[{"type":"object","additionalProperties":false,"properties":{"shape":{"const":"paths","type":"string"},"paths":{"type":"array","items":{"type":"string","minLength":1}},"total":{"type":"integer","minimum":0,"maximum":9007199254740991},"truncated":{"type":"boolean"}},"required":["shape","paths","total","truncated"]},{"type":"object","additionalProperties":false,"properties":{"shape":{"const":"matches","type":"string"},"files":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"path":{"type":"string","minLength":1},"matches":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"lineNumber":{"type":"integer","minimum":1,"maximum":9007199254740991},"line":{"type":"string"}},"required":["lineNumber","line"]}}},"required":["path","matches"]}},"total":{"type":"integer","minimum":0,"maximum":9007199254740991},"truncated":{"type":"boolean"}},"required":["shape","files","total","truncated"]},{"type":"object","additionalProperties":false,"properties":{"shape":{"const":"source_limit","type":"string"}},"required":["shape"]}]},
     "ProjectionPayload": {
       "type": "object",
       "required": [
@@ -1796,6 +1797,7 @@
         "detail": {
           "type": "object",
           "properties": {
+                "file_search": {"$ref": "#/$defs/NativeFileSearch"},
             "queries": {
               "type": "array",
               "items": {

@@ -207,3 +207,12 @@ at revision `783499ffdb2d501bf590b2e035acd027a882df10`.
 The adapted portions retain GNU AGPL v3 terms under the retained complete
 PilotDeck license above. Jot reads its real interpreted xterm buffer and
 binds any chosen prompt input to the exact current native attachment.
+
+
+Native glob/grep activity rendering selects the published `SearchMeta`
+from installed `@deepseek-ai/dsh-tool-fs-search` 0.2.1-rc.2 and the original
+Agent tool-result event. Its MIT terms remain at the retained DSH MIT license.
+Jot's existing activity expansion/search uses only paths, line numbers, match
+text and native total/truncation fields. This connects the pinned PilotDeck
+`FileListContent.tsx` / Grep/Glob presentation scope to Jot's owned event chain.
+The retained PilotDeck AGPL license and prior tool-renderer attribution apply.

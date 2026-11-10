@@ -128,6 +128,35 @@ export function publicNativeToolResult(data, includeBrowse = true) {
     artifact_receipts: artifacts }
 }
 
+/** Only the declared glob/grep presentationMeta vocabulary may enter a public activity. */
+export function publicNativeFileSearch(value) {
+  const meta=record(value);
+  if(!meta||typeof meta.truncated!=='boolean'||!Number.isSafeInteger(meta.total)||meta.total<0)return;
+  const paths=meta.shape==='paths',matches=meta.shape==='matches';
+  if((!paths&&!matches)||Object.keys(meta).sort().join(',')!==(paths?'paths,shape,total,truncated':'files,shape,total,truncated'))return;
+  const path=value=>typeof value==='string'&&value.length>0;
+  let count=0;
+  if(paths){
+    if(!Array.isArray(meta.paths)||!meta.paths.every(path))return;
+    count=meta.paths.length;
+  }else{
+    if(!Array.isArray(meta.files))return;
+    for(const file of meta.files){
+      if(!record(file)||Object.keys(file).sort().join(',')!=='matches,path'||!path(file.path)||!Array.isArray(file.matches))return;
+      for(const match of file.matches){
+        if(!record(match)||Object.keys(match).sort().join(',')!=='line,lineNumber'
+          ||!Number.isSafeInteger(match.lineNumber)||match.lineNumber<1||typeof match.line!=='string')return;
+        count++;
+      }
+    }
+  }
+  if(count>meta.total)return;
+  // shortcut: larger native presentation/spill sources need the owned paged result path.
+  if(Buffer.byteLength(JSON.stringify(meta),'utf8')>524288)return {shape:'source_limit'};
+  return paths?{shape:'paths',paths:[...meta.paths],total:meta.total,truncated:meta.truncated}
+    :{shape:'matches',files:meta.files.map(file=>({path:file.path,matches:file.matches.map(match=>({lineNumber:match.lineNumber,line:match.line}))})),total:meta.total,truncated:meta.truncated};
+}
+
 /** Strict public vocabulary for authenticated result observations. */
 export function parsePublicNativeToolResult(value) {
   const result = record(value)

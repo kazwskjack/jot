@@ -1,4 +1,4 @@
-import {publicNativeToolResult,publicNativeToolCall,sessionToolCallId,type PublicNativeToolResult,type PublicNativeToolCall,type NativeArtifactReceipt} from './native-tool-result.js'
+import {publicNativeFileSearch,publicNativeToolResult,publicNativeToolCall,sessionToolCallId,type PublicNativeToolResult,type PublicNativeToolCall,type NativeArtifactReceipt} from './native-tool-result.js'
 import {createHash} from 'node:crypto'
 import {
   safeWebOperationCounts, safeWebOperationId, safeWebOperationItems, safeWebOperationUrl,
@@ -131,6 +131,10 @@ function toolActivity(data: Record<string, unknown>, context: ProjectionContext,
   if (!completed) context.knownTools?.set(callId, tool)
   const result = completed ? (publicResult ?? publicNativeToolResult(data, tool.kind === 'browse')) : null
   const failed = result?.failed === true
+  if(completed&&!failed&&tool.kind==='search'&&['glob','grep'].includes(String(tool.publicDetail?.tool_name))){
+    const fileSearch=publicNativeFileSearch(data.meta);
+    if(fileSearch)tool.publicDetail={...(tool.publicDetail??detailFor(tool,context.runId)),file_search:fileSearch};
+  }
   if (completed && tool.kind === 'browse') {
     if (failed) {
       const evidence = result?.evidence
