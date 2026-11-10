@@ -308,7 +308,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
  const [visualState,setVisualState]=useState<{identity:string;enabled:boolean}>();
  const [fullscreen,setFullscreen]=useState(false),[displayError,setDisplayError]=useState('');
  const [fullscreenPending,setFullscreenPending]=useState(false),fullscreenRequest=useRef(false);
- const visual=visualState?.identity===identity?visualState.enabled:props.officeTextFocus?.value.text_view===2||!!props.officeRegionFocus;
+ const visual=visualState?.identity===identity?visualState.enabled:props.officeFocus?.value.cell_view===2||props.officeTextFocus?.value.text_view===2||!!props.officeRegionFocus;
  useEffect(()=>{
   const changed=()=>setFullscreen(!!root.current&&window.document.fullscreenElement===root.current);
   window.document.addEventListener('fullscreenchange',changed);changed();
@@ -367,7 +367,8 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
    <p>原文件结构化内容 · {current.page.engine.name} {current.page.engine.version}</p>
    {current.page.document.truncated&&<p role="status">结构化解析结果已截断，文字与单元格引用入口有未覆盖部分。可下载原固定版本查看完整文件。</p>}
    {current.page.document.kind==='xlsx'&&<>
-    {props.officeFocus&&visual&&<p role="status">原单元格引用按保存值与公式核对，可切换结构化单元格定位原引用。</p>}
+    {props.officeFocus?.value.cell_view!==2&&props.officeFocus&&visual&&<p role="status">原单元格引用按保存值与公式核对，可切换结构化单元格定位原引用。</p>}
+    {props.officeFocus?.value.cell_view===2&&(!visual||current.page.xlsx_visual?.ready!==true)&&<p role="status">原引用使用原生单元格视图，请打开原生工作簿核对原选区。</p>}
     <nav aria-label="工作簿查看方式"><button type="button" aria-pressed={!visual} onClick={()=>setVisualState({identity,enabled:false})}>结构化单元格与引用</button>
      <button type="button" aria-pressed={visual} disabled={current.page.xlsx_visual?.protocol!==1||current.page.xlsx_visual.ready!==true} onClick={()=>setVisualState({identity,enabled:true})}>原生工作簿视觉内容</button></nav>
     {current.page.xlsx_visual?.ready!==true&&<p role="status">{current.page.xlsx_visual?.reason==='source_limit'?'原工作簿超过当前视觉渲染资源范围。':'原工作簿尚未通过视觉读取检查。'}</p>}
@@ -391,7 +392,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
     ?<ActivityToolFileDocx key={identity+':'+revision} {...props}/>
     :visual&&current.page.document.kind==='pptx'&&current.page.pptx_visual?.protocol===1&&current.page.pptx_visual.ready===true
     ?<ActivityToolFilePptx key={identity+':'+revision} {...props}/>
-    :<section className="jot-office-content" data-chat-search-content={JSON.stringify(['listed-office',identity])}><OfficeContent key={identity+':'+revision} value={current.page.document} source={props} officeFocus={props.officeFocus} officeTextFocus={props.officeTextFocus?.value.text_view===2?undefined:props.officeTextFocus}/></section>}
+    :<section className="jot-office-content" data-chat-search-content={JSON.stringify(['listed-office',identity])}><OfficeContent key={identity+':'+revision} value={current.page.document} source={props} officeFocus={props.officeFocus?.value.cell_view===2?undefined:props.officeFocus} officeTextFocus={props.officeTextFocus?.value.text_view===2?undefined:props.officeTextFocus}/></section>}
   </>}
   {current?.error&&<p role="alert">{current.error} <button type="button" onClick={refresh}>重试读取</button></p>}
  </section>;

@@ -1,6 +1,7 @@
 /* Adapted from pinned PilotDeck SpreadsheetInteractivePreview.tsx. See SOURCES.json and LICENSES.txt. */
 import {scripts,styles} from './assets.js';
 import {createNativeWorkbook} from './workbook.js';
+import {createCellReferences} from './cell-references.js';
 
 const parentHost=new URLSearchParams(location.search).get('parent');
 if(!parentHost||!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(parentHost))throw Error('XLSX_PARENT_INVALID');
@@ -8,7 +9,7 @@ const parentOrigin='http://'+parentHost,content=document.getElementById('content
 const sheetSelect=document.getElementById('sheet'),zoom=document.getElementById('zoom'),cell=document.getElementById('cell');
 const query=document.getElementById('query'),counter=document.getElementById('matches'),coverage=document.getElementById('coverage');
 let token,started=false,closed=false,busy=false,univer,api,book,selectionListener,activeSheetListener,chain=Promise.resolve();
-let workbookData,matches=[],matchIndex=0,searchGeneration=0,searchTimer,zoomPercent=100;
+let workbookData,matches=[],matchIndex=0,searchGeneration=0,searchTimer,zoomPercent=100,cellReferences;
 const report=message=>{if(!closed)parent.postMessage({protocol:1,token,...message},parentOrigin);};
 const boot=()=>parent.postMessage({type:'jot-xlsx-boot',protocol:1,started},parentOrigin);
 const controls=()=>{
@@ -17,11 +18,12 @@ const controls=()=>{
  document.getElementById('search').disabled=!ready;
  document.getElementById('match-previous').disabled=!ready||busy||!matches.length;
  document.getElementById('match-next').disabled=!ready||busy||!matches.length;
+ cellReferences?.controls();
 };
 const dispose=()=>{
  if(closed)return;
  closed=true;searchGeneration++;clearTimeout(searchTimer);matches=[];workbookData=undefined;
- selectionListener?.dispose();activeSheetListener?.dispose();univer?.dispose();
+ cellReferences?.dispose();selectionListener?.dispose();activeSheetListener?.dispose();univer?.dispose();
  book=undefined;api=undefined;univer=undefined;content.replaceChildren();controls();
 };
 const fail=()=>{report({type:'jot-xlsx-error',code:'XLSX_RENDER_FAILED'});dispose();status.textContent='原生表格读取失败';};
@@ -128,6 +130,7 @@ addEventListener('message',async event=>{
  if(event.source!==parent||event.origin!==parentOrigin||!event.data||typeof event.data!=='object'||Array.isArray(event.data))return;
  const value=event.data;
  if(value.type==='jot-xlsx-probe'&&value.protocol===1&&Object.keys(value).length===2){boot();return;}
+ if(started&&value.protocol===1&&value.token===token&&Object.keys(value).length===4){cellReferences?.command(value);return;}
  if(started||value.type!=='jot-xlsx-init'||value.protocol!==1||typeof value.token!=='string'||!/^[a-f0-9-]{36}$/.test(value.token)||Object.keys(value).length!==4
   ||!(value.bytes instanceof ArrayBuffer)||value.bytes.byteLength>20*1024*1024)return;
  started=true;token=value.token;status.textContent='正在读取原生表格组件…';
@@ -165,9 +168,11 @@ addEventListener('message',async event=>{
   if(closed)return;
   sheetSelect.value=book.getActiveSheet().getSheetId();updateCell(book.getActiveSheet());
   selectionListener=api.addEvent(api.Event.SelectionChanged,({worksheet,selections})=>{
-   const first=selections[0];if(!closed&&first)updateCell(worksheet,first.startRow,first.startColumn);
+   if(closed)return;
+   cellReferences?.invalidate();const first=selections[0];if(first)updateCell(worksheet,first.startRow,first.startColumn);
   });
-  activeSheetListener=api.addEvent(api.Event.ActiveSheetChanged,({activeSheet})=>{if(!closed){sheetSelect.value=activeSheet.getSheetId();updateCell(activeSheet);}});
+  activeSheetListener=api.addEvent(api.Event.ActiveSheetChanged,({activeSheet})=>{if(!closed){cellReferences?.invalidate();sheetSelect.value=activeSheet.getSheetId();updateCell(activeSheet);}});
+  cellReferences=createCellReferences({getBook:()=>book,isWorking:()=>busy,report,run});
   controls();status.textContent='原生工作簿已读取。'+data.warnings.map(warning=>warning.message).join(' ');
   report({type:'jot-xlsx-ready',info:{sheets:data.workbook.sheetOrder.length,warnings:data.warnings.length}});
  }catch{if(!closed)fail();}finally{value.bytes=null;}

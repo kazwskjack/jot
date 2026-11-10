@@ -1,8 +1,12 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
 import {readOfficeViewerUrl,readListedFilePreviewBytes,type ListedFilePreviewSource} from './activity-file-preview-client';
+import type {OfficeCellFocus} from './FileTextReferences';
+import type {OfficeRegionSession} from './OfficeFileRegionReference';
+import XlsxCellReferences from './XlsxCellReferences';
 
-function XlsxAttempt({source,owner,identity}:{source:ListedFilePreviewSource;owner:string;identity:string}){
+function XlsxAttempt({source,owner,identity,officeFocus}:{source:ListedFilePreviewSource;owner:string;identity:string;officeFocus?:OfficeCellFocus}){
+ const cellSession=useRef<OfficeRegionSession|undefined>(undefined);
  const frame=useRef<HTMLIFrameElement>(null),probe=useRef<(element:HTMLIFrameElement)=>void>(()=>{}),cancel=useRef<()=>void>(()=>{});
  const [url,setUrl]=useState<string>(),[state,setState]=useState<{phase:'loading'|'ready'|'error';message:string;working?:boolean}>({phase:'loading',message:'正在核对原工作簿并读取视觉内容…'});
  useEffect(()=>{
@@ -27,6 +31,7 @@ function XlsxAttempt({source,owner,identity}:{source:ListedFilePreviewSource;own
    if(!sent||value.protocol!==1||value.token!==token||Object.keys(value).length!==4)return;
    if(value.type==='jot-xlsx-error'&&value.code==='XLSX_RENDER_FAILED'){fail('工作簿视觉读取失败，可重读或切换结构化单元格查看。');return;}
    if(value.type==='jot-xlsx-ready'&&value.info&&Object.keys(value.info).length===2&&Number.isSafeInteger(value.info.sheets)&&value.info.sheets>=1&&value.info.sheets<=100&&Number.isSafeInteger(value.info.warnings)&&value.info.warnings>=0&&value.info.warnings<=2){
+    if(frame.current?.contentWindow&&origin)cellSession.current={window:frame.current.contentWindow,origin,token,live,close:fail};
     ready=true;window.clearTimeout(timer);setState({phase:'ready',message:`已读取 ${value.info.sheets} 个原生工作表${value.info.warnings?'，存在工作簿显示提示，请对照原文件。':'。'}`});
    }else if(ready&&value.type==='jot-xlsx-work'&&typeof value.busy==='boolean'){
     if(value.busy&&!working)arm();if(!value.busy)window.clearTimeout(timer);working=value.busy;
@@ -42,14 +47,15 @@ function XlsxAttempt({source,owner,identity}:{source:ListedFilePreviewSource;own
    const verified=await readListedFilePreviewBytes(source,owner,controller.signal);if(!live())return;bytes=verified.buffer as ArrayBuffer;send();
   };
   void load().catch(error=>{if(!controller.signal.aborted)fail(error instanceof Error?error.message:'原工作簿读取失败');});
-  return()=>{dispose();probe.current=()=>{};cancel.current=()=>{};};
+  return()=>{dispose();cellSession.current=undefined;probe.current=()=>{};cancel.current=()=>{};};
  },[identity,owner]);
  return <section className="jot-xlsx-preview" aria-label="原工作簿视觉内容">
   <p role={state.phase==='error'?'alert':'status'}>{state.working?'正在处理原生工作簿…':state.message} {(state.phase==='loading'||state.working)&&<button type="button" onClick={()=>cancel.current()}>取消并关闭视觉查看器</button>}</p>
   {state.phase!=='error'&&url&&<iframe ref={frame} src={url} title="原固定版本工作簿视觉查看器" sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={event=>probe.current(event.currentTarget)}/>}
+  {state.phase==='ready'&&cellSession.current&&<XlsxCellReferences source={source} owner={owner} session={cellSession.current} focus={officeFocus}/>}
  </section>;
 }
-export default function ActivityToolFileXlsx(source:ListedFilePreviewSource){
- const owner=taskDraftScope(),[revision,setRevision]=useState(0),identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,revision]);
- return <><button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取工作簿视觉内容</button><XlsxAttempt key={identity} source={source} owner={owner} identity={identity}/></>;
+export default function ActivityToolFileXlsx(source:ListedFilePreviewSource&{officeFocus?:OfficeCellFocus}){
+ const owner=taskDraftScope(),[revision,setRevision]=useState(0),identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,source.officeFocus?.key,revision]);
+ return <><button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取工作簿视觉内容</button><XlsxAttempt key={identity} source={source} owner={owner} identity={identity} officeFocus={source.officeFocus?.value.cell_view===2?source.officeFocus:undefined}/></>;
 }

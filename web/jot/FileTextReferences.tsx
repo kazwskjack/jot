@@ -7,7 +7,7 @@ import type {Artifact,ActivityToolResultFile} from './types';
 import './assistant-reply-quote.css';
 
 export type FileTextReference={text_view?:1|2;rotation?:number;owner:string;conversationId:string;runId:string;activityId:string;resultSha:string;file:Pick<ActivityToolResultFile,'path'|'version'|'sha256'|'size'>;reference:TextContentReference};
-export type FileCellReference=Omit<FileTextReference,'reference'|'rotation'|'text_view'>&{reference:CellRangeContentReference};
+export type FileCellReference=Omit<FileTextReference,'reference'|'rotation'|'text_view'>&{cell_view?:1|2;reference:CellRangeContentReference};
 export type FileSelectionReference=FileTextReference|FileCellReference;
 export type OfficeTextFocus={key:string;value:FileTextReference};
 export type OfficeCellFocus={key:string;value:FileCellReference};
@@ -20,7 +20,7 @@ export type FileReference=FileSelectionReference|FileRegionReference;
 export type FileSourceReference=FileSelectionReference|FileRegionDraft;
 export function isFileRegion<T extends FileSourceReference>(value:T):value is Extract<T,FileRegionDraft>{return value.reference.selectionMode==='region';}
 export function isFileCells<T extends FileSourceReference>(value:T):value is Extract<T,FileCellReference>{return value.reference.selectionMode==='cells';}
-export const FileTextReferenceContext=createContext<{owner:string;conversationId:string;disabled:boolean;regionDisabled:boolean;regionRenderers?:Array<'pdf'|'docx'|'pptx'>;onAdd:(reference:FileSelectionReference)=>boolean;onAddMany?:(references:FileTextReference[])=>boolean;onAddRegion:(reference:FileRegionDraft,file:File)=>Promise<boolean>}|null>(null);
+export const FileTextReferenceContext=createContext<{owner:string;conversationId:string;disabled:boolean;regionDisabled:boolean;cellViews?:Array<1|2>;regionRenderers?:Array<'pdf'|'docx'|'pptx'>;onAdd:(reference:FileSelectionReference)=>boolean;onAddMany?:(references:FileTextReference[])=>boolean;onAddRegion:(reference:FileRegionDraft,file:File)=>Promise<boolean>}|null>(null);
 export function resolveRegionArtifact(value:FileRegionReference,resolve:(entryId:string)=>Artifact|undefined){
  const artifact=resolve(value.uploadEntryId);
  return artifact&&artifact.conversation_id===value.conversationId&&artifact.origin==='upload'&&artifact.status==='ready'&&artifact.version===1
@@ -47,7 +47,7 @@ function RegionPreview({file}:{file:File}){
 }
 export function FileReferenceDetails({value,file,ready}:{value:FileSourceReference;file?:File;ready?:boolean}){
  const [open,setOpen]=useState(false);
- const location=isFileCells(value)?`${value.reference.locator.sheetName} · ${value.reference.locator.ranges.join('、')}`
+ const location=isFileCells(value)?`${value.cell_view===2?'原生视图 · ':''}${value.reference.locator.sheetName} · ${value.reference.locator.ranges.join('、')}`
   :isFileRegion(value)&&value.reference.renderer.id==='docx'?'Word区域'
   :isFileRegion(value)&&value.reference.renderer.id==='pptx'?`幻灯片 ${value.reference.locator.slideNumber} 区域`
   :!isFileRegion(value)&&value.reference.renderer.id==='docx'?'Word文字'

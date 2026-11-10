@@ -27735,7 +27735,7 @@
                 "const": true
               },
               "renderers": {"type":"array","minItems":1,"uniqueItems":true,"items":{"enum":["pdf","xlsx","docx","pptx"]},"description":"Supported reference metadata renderer IDs. Original file readers and input consumers retain their availability checks."},
-              "docx_text_views": {"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"integer","enum":[1,2]},"description":"Accepted DOCX text locator protocols. Version 1 keeps structured inspection order. Version 2 pins docx-preview 0.4.0 raw visual DOM text-node order. This declares metadata acceptance only."},
+              "docx_text_views": {"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"integer","enum":[1,2]},"description":"Accepted DOCX text locator protocols. Version 1 keeps structured inspection order. Version 2 pins docx-preview 0.4.0 raw visual DOM text-node order. This declares metadata acceptance only."},"xlsx_cell_views":{"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"integer","enum":[1,2]},"description":"Accepted XLSX cell locator protocols. Missing or1 retains structured cached values/formulas. Version2 pins Univer0.25.1, ExcelJS4.4.0, JSZip3.10.1 and zhCN native display/raw/formula/context reads. Native viewport readiness is independent."},
               "region_renderers": {"type":"array","minItems":1,"uniqueItems":true,"items":{"enum":["pdf","docx","pptx"]},"description":"Accepted region metadata renderers with original pinned PNG input. Client surface readiness remains independent."}
             },
             "required": [
@@ -57081,7 +57081,10 @@
         ],
         "additionalProperties": false
       },
-      "OfficeRegionView": {"type":"object","properties":{"protocol":{"const":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":33554432},"height":{"type":"number","exclusiveMinimum":0,"maximum":33554432},"section":{"type":"integer","minimum":1,"maximum":50000}},"required":["protocol","width","height","section"],"additionalProperties":false,"description":"Fixed docx-preview 0.4.0 section index and unzoomed section border-box dimensions. Original layout is reconfirmed before region focus."},
+      "OfficeRegionView": {"oneOf":[{"$ref":"#/components/schemas/DocxRegionView"},{"$ref":"#/components/schemas/PptxRegionView"}]},
+      "DocxRegionView": {"type":"object","properties":{"protocol":{"const":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":33554432},"height":{"type":"number","exclusiveMinimum":0,"maximum":33554432},"section":{"type":"integer","minimum":1,"maximum":50000}},"required":["protocol","width","height","section"],"additionalProperties":false,"description":"Fixed docx-preview 0.4.0 section index and unzoomed section border-box dimensions. Original layout is reconfirmed before region focus."},
+      "PptxRegionView": {"type":"object","properties":{"protocol":{"const":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":33554432},"height":{"type":"number","exclusiveMinimum":0,"maximum":33554432},"slideNumber":{"type":"integer","minimum":1,"maximum":50000}},"required":["protocol","width","height","slideNumber"],"additionalProperties":false,"description":"Fixed docx-preview 0.4.0 section index and unzoomed section border-box dimensions. Original layout is reconfirmed before region focus."},
+      "PptxRegionSelectionReference": {"type":"object","properties":{"schemaVersion":{"const":1},"kind":{"const":"content-reference"},"id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"selectionMode":{"const":"region"},"source":{"$ref":"#/components/schemas/PptxReferenceSource"},"renderer":{"type":"object","properties":{"id":{"const":"pptx"},"backend":{"const":"builtin"},"locatorQuality":{"const":"visual"}},"required":["id","backend","locatorQuality"],"additionalProperties":false},"createdAt":{"type":"string"},"locator":{"type":"object","properties":{"surface":{"const":"slide"},"slideNumber":{"type":"integer","minimum":1,"maximum":50000},"rect":{"$ref":"#/components/schemas/FileReferenceRect"}},"required":["surface","slideNumber","rect"],"additionalProperties":false},"image":{"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":255},"mimeType":{"const":"image/png"},"width":{"type":"integer","minimum":1,"maximum":4096},"height":{"type":"integer","minimum":1,"maximum":4096},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},"required":["name","mimeType","width","height","sha256"],"additionalProperties":false},"nearbyText":{"type":"string","maxLength":100000}},"required":["schemaVersion","kind","id","selectionMode","source","renderer","createdAt","locator","image"],"additionalProperties":false,"description":"Native PPTX visual region PNG. Runtime also requires matching original slide number, source/PNG identity and at most4194304 image pixels."},
       "DocxRegionSelectionReference": {"type":"object","properties":{"schemaVersion":{"const":1},"kind":{"const":"content-reference"},"id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$"},"selectionMode":{"const":"region"},"source":{"$ref":"#/components/schemas/DocxReferenceSource"},"renderer":{"type":"object","properties":{"id":{"const":"docx"},"backend":{"const":"builtin"},"locatorQuality":{"const":"visual"}},"required":["id","backend","locatorQuality"],"additionalProperties":false},"createdAt":{"type":"string"},"locator":{"type":"object","properties":{"surface":{"const":"document"},"rect":{"$ref":"#/components/schemas/FileReferenceRect"}},"required":["surface","rect"],"additionalProperties":false},"image":{"type":"object","properties":{"name":{"type":"string","minLength":1,"maxLength":255},"mimeType":{"const":"image/png"},"width":{"type":"integer","minimum":1,"maximum":4096},"height":{"type":"integer","minimum":1,"maximum":4096},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}},"required":["name","mimeType","width","height","sha256"],"additionalProperties":false},"nearbyText":{"type":"string","maxLength":100000}},"required":["schemaVersion","kind","id","selectionMode","source","renderer","createdAt","locator","image"],"additionalProperties":false,"description":"Word visual region PNG snapshot. Runtime additionally enforces at most 4194304 image pixels and matching original uploaded image bytes."},
       "ContentReferenceSnapshot": {
         "type": "object",
@@ -57153,8 +57156,23 @@
             ],
             "additionalProperties": false
           },
-          "text_view": {"type":"integer","enum":[1,2]},
-          "region_view": {"$ref":"#/components/schemas/OfficeRegionView"}
+          "text_view": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ]
+          },
+          "region_view": {
+            "$ref": "#/components/schemas/OfficeRegionView"
+          },
+          "cell_view": {
+            "type": "integer",
+            "enum": [
+              1,
+              2
+            ]
+          }
         },
         "required": [
           "conversationId",
@@ -57184,7 +57202,13 @@
                   "required": [
                     "image_artifact"
                   ]
-                }, {"required":["text_view"]}]
+                },
+                {
+                  "required": [
+                    "text_view"
+                  ]
+                }
+              ]
             }
           },
           {
@@ -57197,13 +57221,269 @@
               "rotation",
               "imageBytes",
               "image_artifact"
-            ], "not":{"required":["text_view"]}},
-          {"properties":{"reference":{"$ref":"#/components/schemas/CellRangeSelectionReference"}},"not":{"anyOf":[{"required":["rotation"]},{"required":["imageBytes"]},{"required":["image_artifact"]}, {"required":["text_view"]}]}},
-          {"properties":{"reference":{"$ref":"#/components/schemas/DocxTextSelectionReference"}},"not":{"anyOf":[{"required":["rotation"]},{"required":["imageBytes"]},{"required":["image_artifact"]}]},"required":["text_view"]},
-          {"properties":{"text_view":{"const":1},"reference":{"$ref":"#/components/schemas/PptxTextSelectionReference"}},"not":{"anyOf":[{"required":["rotation"]},{"required":["imageBytes"]},{"required":["image_artifact"]}]},"required":["text_view"]},
-          {"properties":{"reference":{"$ref":"#/components/schemas/DocxRegionSelectionReference"},"rotation":{"const":0},"imageBytes":{"maximum":8388608}},"required":["rotation","imageBytes","image_artifact","region_view"],"not":{"required":["text_view"]}}
+            ],
+            "not": {
+              "required": [
+                "text_view"
+              ]
+            }
+          },
+          {
+            "properties": {
+              "reference": {
+                "$ref": "#/components/schemas/CellRangeSelectionReference"
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "rotation"
+                  ]
+                },
+                {
+                  "required": [
+                    "imageBytes"
+                  ]
+                },
+                {
+                  "required": [
+                    "image_artifact"
+                  ]
+                },
+                {
+                  "required": [
+                    "text_view"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "properties": {
+              "reference": {
+                "$ref": "#/components/schemas/DocxTextSelectionReference"
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "rotation"
+                  ]
+                },
+                {
+                  "required": [
+                    "imageBytes"
+                  ]
+                },
+                {
+                  "required": [
+                    "image_artifact"
+                  ]
+                }
+              ]
+            },
+            "required": [
+              "text_view"
+            ]
+          },
+          {
+            "properties": {
+              "text_view": {
+                "const": 1
+              },
+              "reference": {
+                "$ref": "#/components/schemas/PptxTextSelectionReference"
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "rotation"
+                  ]
+                },
+                {
+                  "required": [
+                    "imageBytes"
+                  ]
+                },
+                {
+                  "required": [
+                    "image_artifact"
+                  ]
+                }
+              ]
+            },
+            "required": [
+              "text_view"
+            ]
+          },
+          {
+            "properties": {
+              "reference": {
+                "$ref": "#/components/schemas/DocxRegionSelectionReference"
+              },
+              "rotation": {
+                "const": 0
+              },
+              "imageBytes": {
+                "maximum": 8388608
+              },
+              "region_view": {
+                "$ref": "#/components/schemas/DocxRegionView"
+              }
+            },
+            "required": [
+              "rotation",
+              "imageBytes",
+              "image_artifact",
+              "region_view"
+            ],
+            "not": {
+              "required": [
+                "text_view"
+              ]
+            }
+          },
+          {
+            "properties": {
+              "reference": {
+                "$ref": "#/components/schemas/PptxRegionSelectionReference"
+              },
+              "rotation": {
+                "const": 0
+              },
+              "imageBytes": {
+                "maximum": 8388608
+              },
+              "region_view": {
+                "$ref": "#/components/schemas/PptxRegionView"
+              }
+            },
+            "required": [
+              "rotation",
+              "imageBytes",
+              "image_artifact",
+              "region_view"
+            ],
+            "not": {
+              "required": [
+                "text_view"
+              ]
+            }
+          }
         ],
-        "allOf": [{"if":{"required":["region_view"]},"then":{"properties":{"reference":{"$ref":"#/components/schemas/DocxRegionSelectionReference"}}}}]
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "region_view"
+              ]
+            },
+            "then": {
+              "oneOf": [
+                {
+                  "properties": {
+                    "reference": {
+                      "$ref": "#/components/schemas/DocxRegionSelectionReference"
+                    },
+                    "region_view": {
+                      "$ref": "#/components/schemas/DocxRegionView"
+                    }
+                  }
+                },
+                {
+                  "properties": {
+                    "reference": {
+                      "$ref": "#/components/schemas/PptxRegionSelectionReference"
+                    },
+                    "region_view": {
+                      "$ref": "#/components/schemas/PptxRegionView"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "cell_view"
+              ]
+            },
+            "then": {
+              "properties": {
+                "reference": {
+                  "$ref": "#/components/schemas/CellRangeSelectionReference"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "cell_view"
+              ],
+              "properties": {
+                "cell_view": {
+                  "const": 2
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "reference": {
+                  "properties": {
+                    "cells": {
+                      "items": {
+                        "required": [
+                          "rawValues",
+                          "formulas",
+                          "rowCount",
+                          "columnCount",
+                          "truncated"
+                        ],
+                        "properties": {
+                          "rawValues": {
+                            "items": {
+                              "items": {
+                                "type": [
+                                  "string",
+                                  "number",
+                                  "boolean",
+                                  "null"
+                                ],
+                                "maxLength": 100000
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "headers": {
+                      "minItems": 1,
+                      "maxItems": 2,
+                      "items": {
+                        "minItems": 1,
+                        "maxItems": 30
+                      }
+                    },
+                    "surroundingValues": {
+                      "minItems": 1,
+                      "maxItems": 20,
+                      "items": {
+                        "minItems": 1,
+                        "maxItems": 30
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
       },
       "MessageReferenceSnapshots": {
         "type": "object",
