@@ -1,6 +1,6 @@
 import {signOfficePrintProof} from './messages/office-print-proof.ts';
 import {createOfficePreviewStatusReader} from './file-engine/office-preview-status.ts';
-import {readActivityFileDocument,readActivityFileOfficePdf} from './events/activity-file-document.ts';
+import {readActivityFileDocument,readActivityFileOfficePdf,parseOfficePrintQuery} from './events/activity-file-document.ts';
 import {messageReferenceSnapshotsInstalled,commandReferenceSnapshotsInstalled,captureRunCommandReferenceSnapshots,assertReferenceSnapshotImages} from './messages/reference-snapshots.ts';
 import {prepareReferenceSteeringText,type ReferenceSnapshotInput} from './messages/content-reference.js';
 import {createPinnedByteStore} from './artifacts/pinned-byte-source.ts';
@@ -650,6 +650,9 @@ export async function buildServer(config: {
   app.setErrorHandler((error, request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
     if(['content_reference_request_invalid','content_reference_request_too_large','content_reference_attachment_mismatch','office_print_reference_unproven'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(code==='office_print_retention_full')return reply.code(507).send({error:{code:'OFFICE_PRINT_RETENTION_FULL'}});
+    if(code==='office_print_retained_unavailable')return reply.code(404).send({error:{code:'OFFICE_PRINT_RETAINED_UNAVAILABLE'}});
+    if(code==='office_print_retained_invalid')return reply.code(409).send({error:{code:'OFFICE_PRINT_RETAINED_INVALID'}});
     if(code==='content_reference_request_conflict')return reply.code(409).send({error:{code:'CONTENT_REFERENCE_REQUEST_CONFLICT'}});
     if(code==='content_reference_storage_unavailable')return reply.code(503).send({error:{code:'CONTENT_REFERENCE_STORAGE_UNAVAILABLE'}});
     // Extended SQLite BUSY results retain primary result code 5.
@@ -1149,11 +1152,12 @@ export async function buildServer(config: {
       return reply.header('cache-control','private, no-store').header('x-content-type-options','nosniff').send(value);
     }finally{request.raw.off('aborted',abort);reply.raw.off('close',abort);documentPreviewBusy=false;}
   });
+  const officePrintRoot=join(dirname(resolve(config.databasePath)),'.jot-office-print-'+createHash('sha256').update(resolve(config.databasePath)).digest('hex').slice(0,16));
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/file/print',async(request,reply)=>{
     const {conversationId,activityId}=request.params as {conversationId:string;activityId:string},owner=actor(request as any);
-    const input=parseActivityFileDownloadQuery(request.query as Record<string,unknown>);
-    if(input.framed)throw Error('invalid_activity_tool_result_query');
+    const {input,expected}=parseOfficePrintQuery(request.query as Record<string,unknown>);
     conversations.get(conversationId,owner);
+    if(!officePrintReferencesReady)throw Error('office_print_reference_unproven');
     if(documentPreviewBusy)return reply.code(429).header('retry-after','1').send({error:{code:'DOCUMENT_PREVIEW_BUSY'}});
     documentPreviewBusy=true;
     const controller=new AbortController(),abort=()=>controller.abort();
@@ -1161,7 +1165,7 @@ export async function buildServer(config: {
     if(request.raw.aborted||reply.raw.destroyed)abort();
     try{
       const value=await readActivityFileOfficePdf(db,workbench,owner,conversationId,activityId,input,
-        join(dirname(resolve(config.databasePath)),'.jot-document-previews'),controller.signal);
+        officePrintRoot,controller.signal,expected);
       conversations.get(conversationId,owner);
       const proof=signOfficePrintProof(config.internalChannelToken,owner,{conversationId,runId:input.runId,activityId,resultSha:input.resultSha,
         file:{path:input.path,version:input.version,sha256:input.fileSha,size:input.size}},

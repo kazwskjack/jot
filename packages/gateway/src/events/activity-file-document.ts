@@ -1,3 +1,4 @@
+import {readRetainedOfficePdf,retainOfficePdf} from '../artifacts/office-print-store.ts';
 import type {DatabaseSync} from 'node:sqlite';
 import {constants,createWriteStream} from 'node:fs';
 import {createHash} from 'node:crypto';
@@ -58,9 +59,29 @@ export async function readActivityFileDocument(db:DatabaseSync,reader:Pick<Workb
  });
 }
 
+export function parseOfficePrintQuery(query:Record<string,unknown>){
+ const {preview_sha256,preview_size_bytes,preview_page_count,...source}=query;
+ const input=parseActivityFileDownloadQuery(source);
+ if(input.framed)throw Error('invalid_activity_tool_result_query');
+ let expected:{sha256:string;size:number;pageCount:number}|undefined;
+ if(preview_sha256!==undefined||preview_size_bytes!==undefined||preview_page_count!==undefined){
+  const size=Number(preview_size_bytes),pageCount=Number(preview_page_count);
+  if(typeof preview_sha256!=='string'||!/^[a-f0-9]{64}$/.test(preview_sha256)
+   ||typeof preview_size_bytes!=='string'||String(size)!==preview_size_bytes||!Number.isSafeInteger(size)||size<100||size>20*1024*1024
+   ||typeof preview_page_count!=='string'||String(pageCount)!==preview_page_count||!Number.isSafeInteger(pageCount)||pageCount<1||pageCount>50000)throw Error('invalid_activity_tool_result_query');
+  expected={sha256:preview_sha256,size,pageCount};
+ }
+ return {input,expected};
+}
+
 export async function readActivityFileOfficePdf(db:DatabaseSync,reader:Pick<WorkbenchService,'readBinaryFile'>,
- owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal){
+ owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal,expected?:{sha256:string;size:number;pageCount:number}){
  return withPinnedOfficeSource(db,reader,owner,conversationId,activityId,input,root,signal,async({file,format,path,directory,engine})=>{
+  const binding=createHash('sha256').update(JSON.stringify(['jot-office-print-store/v1',owner,conversationId,input.runId,activityId,input.resultSha,input.path,input.version,input.fileSha,input.size])).digest('hex');
+  if(expected){
+   const retained=await readRetainedOfficePdf(root,binding,expected,signal);
+   return {...file,...retained,execution_authorized:false as const};
+  }
   const output=join(directory,'preview.pdf');
   const result=await engine.run({operation:'office.export_pdf',input_path:path,output_path:output,
    media_type:format.mediaType,job_dir:directory,request:{save_as:{format:'pdf'},jot_preview_pdf:1}},
@@ -76,8 +97,10 @@ export async function readActivityFileOfficePdf(db:DatabaseSync,reader:Pick<Work
    if(!before.isFile()||before.nlink!==1||before.size<100||before.size>20*1024*1024)throw Error('DOCUMENT_PREVIEW_TOO_LARGE');
    const bytes=await handle.readFile();signal.throwIfAborted();const after=await handle.stat();
    if(bytes.length!==before.size||after.size!==before.size||after.mtimeMs!==before.mtimeMs||bytes.subarray(0,5).toString('ascii')!=='%PDF-')throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
-   return {...file,pdf:{bytes,sha256:createHash('sha256').update(bytes).digest('hex'),size:bytes.length,page_count:Number(checks.page_count)},
-    engine:{name:result.engine.name,version:result.engine.version},execution_authorized:false as const};
+   const retained={pdf:{bytes,sha256:createHash('sha256').update(bytes).digest('hex'),size:bytes.length,page_count:Number(checks.page_count)},
+    engine:{name:result.engine.name,version:result.engine.version}};
+   await retainOfficePdf(db,root,directory,binding,retained,signal);
+   return {...file,...retained,execution_authorized:false as const};
   }finally{await handle.close();}
  });
 }
