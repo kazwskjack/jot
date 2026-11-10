@@ -71,9 +71,13 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
  const sheet=value.sheets[part],disabled=!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId;
  useEffect(()=>{
   if(jumped.current||!focused?.confirmed||part!==focused.index)return;
-  const target=root.current?.querySelector<HTMLElement>(`[data-office-reference-cell="${focused.address}"]`);
-  if(target){target.scrollIntoView({block:'center',inline:'nearest'});jumped.current=true;}
- },[focused,part,page]);
+  const frame=window.requestAnimationFrame(()=>{
+   if(taskDraftScope()!==owner||jumped.current)return;
+   const target=root.current?.querySelector<HTMLElement>(`[data-office-reference-cell="${focused.address}"]`);
+   if(target){target.scrollIntoView({block:'center',inline:'nearest'});jumped.current=true;}
+  });
+  return()=>window.cancelAnimationFrame(frame);
+ },[focused,part,page,rangeView,rangeRow,rangeColumn,owner]);
  const capture=(ranges:string[])=>{
   if(!context||disabled||taskDraftScope()!==owner||!sheet?.name||!ranges.length)return;
   let snapshots:CellRangeSnapshot[];
