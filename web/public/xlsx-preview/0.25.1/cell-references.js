@@ -38,7 +38,8 @@ export function createCellReferences({getBook,isWorking,report,run}){
     }
     displayValues.push(displays);rawValues.push(raws);formulas.push(expressions);
    }
-   return {range:worksheet.getRange(selection).getA1Notation(),displayValues,rawValues,formulas,rowCount,columnCount,truncated:rows<rowCount||columns<columnCount};
+   // Numeric range construction preserves finite row/column selections as explicit A1 rectangles.
+   return {range:worksheet.getRange(startRow,startColumn,rowCount,columnCount).getA1Notation(),displayValues,rawValues,formulas,rowCount,columnCount,truncated:rows<rowCount||columns<columnCount};
   });
   const first=selections[0],headerRows=Math.min(2,first.startRow),top=Math.max(0,first.startRow-1),left=Math.max(0,first.startColumn-1);
   const display=range=>{const value=range.getDisplayValue();if(typeof value!=='string')throw Error('SELECTION_UNAVAILABLE');return value;};
