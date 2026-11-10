@@ -197,3 +197,13 @@ Explicit terminal Session loading also uses the installed DSH
 and original exact-identity, persisted-preset, writer and subagent ownership
 semantics. Caller cancellation releases Jot's waiting request. Native shared
 resolution remains owned by the original Host service lifecycle.
+
+
+`web/jot/terminal-screen-hints.ts` and the prompt/link controls in
+`NativeTerminalView.tsx` adapt PilotDeck's `Shell.tsx` prompt scanning,
+`ShellMinimalView.tsx` link controls, `ui/server/index.js` URL normalization
+and wrapping detection, and `ui/src/utils/clipboard.ts` text-copy fallback
+at revision `783499ffdb2d501bf590b2e035acd027a882df10`.
+The adapted portions retain GNU AGPL v3 terms under the retained complete
+PilotDeck license above. Jot reads its real interpreted xterm buffer and
+binds any chosen prompt input to the exact current native attachment.

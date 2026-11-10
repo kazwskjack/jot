@@ -1,6 +1,9 @@
 type Disposable={dispose():void};
+export type TerminalBuffer={baseY:number;cursorY:number;length:number;
+  getLine(index:number):{isWrapped:boolean;translateToString(trimRight?:boolean):string}|undefined};
 export type TerminalApi={
   cols:number;rows:number;options:{disableStdin:boolean};
+  buffer:{active:TerminalBuffer};
   open(node:HTMLElement):void;loadAddon(addon:Disposable):void;dispose():void;
   write(text:string,callback:()=>void):void;reset():void;resize(cols:number,rows:number):void;
   focus():void;scrollToBottom():void;paste(text:string):void;
