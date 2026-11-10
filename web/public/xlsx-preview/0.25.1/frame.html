@@ -5,10 +5,12 @@
  body { display: flex; flex-direction: column; }
  header { padding: 0.5rem; border-bottom: 1px solid #ccc; }
  nav { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
- input,select { min-height: 2rem; } input { width: 4rem; }
+ input,select,button { min-height: 2rem; } input { width: 4rem; } input[type=search] { width: 12rem; max-width: 100%; }
  #cell { display: block; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 5rem; overflow: auto; }
  #status { margin: 0.3rem 0; } #content { flex: 1; min-height: 24rem; position: relative; overflow: hidden; }
 </style></head><body>
-<header><nav aria-label="原生工作表导航"><label>工作表 <select id="sheet" disabled></select></label><label>缩放 % <input id="zoom" type="number" min="25" max="300" step="10" value="100" disabled></label></nav><output id="cell" aria-label="当前单元格及公式或显示值"></output><p id="status" role="status">等待读取原工作簿</p></header>
+<header><nav aria-label="原生工作表导航"><label>工作表 <select id="sheet" disabled></select></label><label>缩放 % <input id="zoom" type="number" min="25" max="300" step="10" value="100" disabled></label></nav>
+<nav aria-label="原生工作簿跨表搜索"><label>查找 <input id="query" type="search" maxlength="200" disabled></label><button id="search" type="button" disabled>重新搜索</button><button id="match-previous" type="button" disabled>上一处</button><button id="match-next" type="button" disabled>下一处</button><output id="matches" aria-live="polite">尚未搜索</output><small>在可见工作表中搜索单元格显示值。</small><small id="coverage"></small></nav>
+<output id="cell" aria-label="当前单元格及公式或显示值"></output><p id="status" role="status">等待读取原工作簿</p></header>
 <main id="content" aria-label="原生工作簿视觉内容"></main>
 <script type="module" nonce="__JOT_OFFICE_NONCE__" src="./frame.js"></script></body></html>

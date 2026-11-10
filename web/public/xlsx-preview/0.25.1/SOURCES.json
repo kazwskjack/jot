@@ -565,6 +565,6 @@
     "Original SpreadsheetInteractivePreview native plugin order and read-only/focus configuration, Chinese locales, owned API events and dispose.",
     "Original spreadsheetPreview namespace/theme/style/cell/row/column/merge/freeze/date/formula conversion adapted to browser ExcelJS and original JSZip input.",
     "React JSX runtime production CJS source has a static browser wrapper assigning its exports to the existing React global. Original runtime source bytes remain embedded with its license.",
-    "Current native entry offers sheet switching, zoom and selected-cell display/formula inspection. Native search, native selection/reference protocol and image region entry remain in progress. Structured saved-value references retain their original view."
+    "Current native entry offers sheet switching, validated zoom, selected-cell display/formula inspection and native visible-sheet sparse-cell display search. Search follows the original locale-folded literal match and activate behavior, with2097152 UTF-16 units/50000 cells/2000 hits, generation cancellation, explicit uncovered-content status and owned timer cleanup. Native selection/reference protocol and image region entry remain in progress. Structured saved-value references retain their original view."
   ]
 }
