@@ -16,7 +16,7 @@ export function validateTerminalOptions(value:unknown,sessionId:string):Terminal
 export function validateTerminalCommand(value:unknown):TerminalCommand;
 export type TerminalReceipt=Readonly<{
   protocol:1;session_id:string;host_instance:string;request_id:string;
-  state:'not_admitted'|'pending'|'completed'|'rejected'|'unknown';
+  state:'not_admitted'|'pending'|'completed'|'rejected'|'unknown'|'wait_ended_unknown';
   inventory:TerminalInventory|null;
   rejection:Readonly<{status:number;error_code:string}>|null;
   execution_authorized:false;

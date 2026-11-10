@@ -35,7 +35,7 @@ export function validateTerminalReceipt(value,command,sessionId) {
   if(!exact(value,'execution_authorized,host_instance,inventory,protocol,rejection,request_id,session_id,state')
     ||value.protocol!==1||value.session_id!==sessionId||value.host_instance!==command.host_instance
     ||value.request_id!==command.request_id||value.execution_authorized!==false
-    ||!['not_admitted','pending','completed','rejected','unknown'].includes(value.state))throw Error('terminal_receipt_invalid');
+    ||!['not_admitted','pending','completed','rejected','unknown','wait_ended_unknown'].includes(value.state))throw Error('terminal_receipt_invalid');
   if(value.state==='rejected') {
     if(!exact(value.rejection,'error_code,status')||!Number.isInteger(value.rejection.status)
       ||value.rejection.status<400||value.rejection.status>=500||value.rejection.status===408

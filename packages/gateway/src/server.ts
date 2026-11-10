@@ -63,6 +63,8 @@ import {registerPublicationExecutionRoutes} from './git/publication-execution-ro
 import {registerPublicationDispatchRoutes} from './git/publication-dispatch-routes.ts';
 import type {NativeGitClient} from './git/native-transport-client.ts';
 import {WorkPublicationExecutions} from './persistent-tasks/work-publication-executions.ts';
+import {readTerminalWaitReceipt,replayTerminalWaitReceipt} from './terminal/wait-receipts.ts';
+import {validateTerminalCommand} from './terminal/control.js';
 import {registerTerminalReceiptRoutes} from './terminal/receipt-routes.ts';
 import {registerTerminalControlRoutes,type TerminalControlClient} from './terminal/control-routes.ts';
 import {registerTerminalInventoryRoutes,type TerminalInventoryClient} from './terminal/inventory-routes.ts';
@@ -506,6 +508,13 @@ export async function buildServer(config: {
     }
     const idempotencyKey = String(request.headers['idempotency-key'] ?? '');
     if (!/^[\x21-\x7E]{8,128}$/.test(idempotencyKey)) throw new Error('idempotency_key_invalid');
+    if(request.method==='POST'&&request.routeOptions.url==='/v1/conversations/:conversationId/runs/:runId/terminals/commands'){
+      const command=validateTerminalCommand(request.body),params=request.params as {conversationId:string;runId:string};
+      if(idempotencyKey===command.request_id){
+        const owner=actor(request),ended=readTerminalWaitReceipt(db,owner,params.conversationId,params.runId,command);
+        if(ended){const replay=replayTerminalWaitReceipt(db,owner,command,ended);return reply.code(replay.status).send(replay.body);}
+      }
+    }
     if((request.routeOptions.config as {nativeCommandQueryMutation?:boolean}).nativeCommandQueryMutation===true){
       reply.header('cache-control','private, no-store');return;
     }
@@ -664,6 +673,8 @@ export async function buildServer(config: {
   app.setErrorHandler((error, request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
     if(['content_reference_request_invalid','content_reference_request_too_large','content_reference_attachment_mismatch','office_print_reference_unproven'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(code==='terminal_command_invalid')return reply.code(422).send({error:{code:'TERMINAL_INPUT_INVALID'}});
+    if(code==='terminal_receipt_conflict')return reply.code(409).send({error:{code:'TERMINAL_RECEIPT_CONFLICT'}});
     if(code==='office_preview_binary_unavailable')return reply.code(503).send({error:{code:'OFFICE_PREVIEW_BINARY_UNAVAILABLE'}});
     if(code==='office_preview_configuration_changed')return reply.code(409).send({error:{code:'OFFICE_PREVIEW_CONFIGURATION_CHANGED'}});
     if(code==='office_preview_candidate_query_invalid')return reply.code(422).send({error:{code:'OFFICE_PREVIEW_QUERY_INVALID'}});

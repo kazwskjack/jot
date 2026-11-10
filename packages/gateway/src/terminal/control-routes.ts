@@ -4,6 +4,7 @@ import {SessionAdapterError} from '../harness/session-controller-client.ts';
 import {readOwnedTerminalSession} from './inventory-routes.ts';
 import {validateTerminalInventory,type TerminalInventory} from './inventory.js';
 import {validateTerminalOptions,validateTerminalCommand,type TerminalOptions,type TerminalCommand,type TerminalReceipt} from './control.js';
+import {readTerminalWaitReceipt,replayTerminalWaitReceipt} from './wait-receipts.ts';
 
 export interface TerminalControlClient {
   terminalReceipt?(ownerId:string,sessionId:string,command:TerminalCommand,signal?:AbortSignal):Promise<TerminalReceipt>;
@@ -29,6 +30,8 @@ export function registerTerminalControlRoutes(app:FastifyInstance,options:{
       if(command&&request.headers['idempotency-key']!==command.request_id)throw Error('terminal_command_invalid');
       const binding=()=>readOwnedTerminalSession(db,owner,conversationId,runId),before=binding();
       if(!before)return reply.code(404).send({error:{code:'TERMINAL_SESSION_NOT_FOUND'}});
+      const ended=command&&readTerminalWaitReceipt(db,owner,conversationId,runId,command);
+      if(command&&ended){const replay=replayTerminalWaitReceipt(db,owner,command,ended);return reply.code(replay.status).send(replay.body);}
       if(before.archived_at!==null&&command?.action!=='close')return reply.code(409).send({error:{code:'TERMINAL_SESSION_ARCHIVED'}});
       if(!client)return reply.code(503).send({error:{code:'TERMINAL_UNAVAILABLE'}});
       const signal=AbortSignal.any([abort.signal,AbortSignal.timeout(30000)]);
@@ -46,6 +49,7 @@ export function registerTerminalControlRoutes(app:FastifyInstance,options:{
       const code=(error as Error)?.message;
       if(code==='unauthorized')return reply.code(401).send({error:{code:'UNAUTHORIZED'}});
       if(code==='terminal_command_invalid')return reply.code(422).send({error:{code:'TERMINAL_INPUT_INVALID'}});
+      if(code==='terminal_receipt_conflict')return reply.code(409).send({error:{code:'TERMINAL_RECEIPT_CONFLICT'}});
       return reply.code(503).send({error:{code:'TERMINAL_UNAVAILABLE'}});
     } finally {
       request.raw.off('aborted',disconnected);reply.raw.off('close',disconnected);

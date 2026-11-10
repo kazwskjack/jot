@@ -162,3 +162,7 @@ original Gateway idempotency receipts preserve explicit user command identity.
 Terminal receipt recovery observes the exact original native operation result.
 It retains bounded Host metadata snapshots and reuses Jot's original Gateway
 idempotency reservation, without invoking another native terminal operation.
+
+Ending a terminal-command wait persists an original Jot metadata receipt and
+prevents later dispatch of that exact original request. Native already-issued
+operations retain their own lifecycle and completion observations.
