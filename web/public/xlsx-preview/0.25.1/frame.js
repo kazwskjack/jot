@@ -9,6 +9,8 @@ if(!parentHost||!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(parentHost))throw Erro
 const parentOrigin='http://'+parentHost,content=document.getElementById('content'),status=document.getElementById('status');
 const sheetSelect=document.getElementById('sheet'),zoom=document.getElementById('zoom'),cell=document.getElementById('cell');
 const query=document.getElementById('query'),counter=document.getElementById('matches'),coverage=document.getElementById('coverage');
+const batchPrevious=document.getElementById('search-batch-previous'),batchNext=document.getElementById('search-batch-next');
+let searchBatch=0,searchStarts=[{sheetIndex:0,rowIndex:0,columnIndex:0}],hasNextSearchBatch=false;
 let token,started=false,closed=false,busy=false,univer,api,book,selectionListener,activeSheetListener,chain=Promise.resolve();
 let workbookData,matches=[],matchIndex=0,searchGeneration=0,searchTimer,zoomPercent=100,cellReferences,region;
 const report=(message,transfer=[])=>{if(!closed)parent.postMessage({protocol:1,token,...message},parentOrigin,transfer);};
@@ -18,6 +20,8 @@ const controls=()=>{
  const ready=!!book&&!closed;
  sheetSelect.disabled=!ready||busy;zoom.disabled=!ready||busy;query.disabled=!ready;
  document.getElementById('search').disabled=!ready;
+ query.closest('nav').setAttribute('aria-busy',String(busy));
+ batchPrevious.disabled=!ready||busy||searchBatch===0;batchNext.disabled=!ready||busy||!hasNextSearchBatch;
  document.getElementById('match-previous').disabled=!ready||busy||!matches.length;
  document.getElementById('match-next').disabled=!ready||busy||!matches.length;
  cellReferences?.controls();
@@ -25,7 +29,7 @@ const controls=()=>{
 };
 const dispose=()=>{
  if(closed)return;
- closed=true;searchGeneration++;clearTimeout(searchTimer);matches=[];workbookData=undefined;
+ closed=true;searchGeneration++;clearTimeout(searchTimer);matches=[];searchStarts=[];workbookData=undefined;
  region?.dispose();cellReferences?.dispose();selectionListener?.dispose();activeSheetListener?.dispose();univer?.dispose();
  book=undefined;api=undefined;univer=undefined;content.replaceChildren();controls();
 };
@@ -58,54 +62,71 @@ function showMatch(delta,generation){
  worksheet.zoom(zoomPercent/100);
  worksheet.getRange(match.row,match.column).activate();
  sheetSelect.value=match.sheetId;updateCell(worksheet,match.row,match.column);
- counter.textContent=`${matchIndex+1} / ${matches.length}`;
+ counter.textContent=`第 ${searchBatch+1} 批 · ${matchIndex+1} / ${matches.length}`;
 }
-async function search(generation,value){
+async function search(generation,value,page=0){
  if(closed||generation!==searchGeneration)return;
  const normalized=value.trim().toLocaleLowerCase();
  if(value.length>200){counter.textContent='查找文字最多200字符';return;}
- matches=[];matchIndex=0;
- let scannedUnits=0,scannedCells=0,limited=false;
- const data=workbookData,currentBook=book;
+ matches=[];matchIndex=0;hasNextSearchBatch=false;
+ const data=workbookData,currentBook=book,cursor=searchStarts[page],found=[];
+ let scannedCells=0,more=false,nextCursor;
+ counter.textContent=`正在搜索第 ${page+1} 批…`;
  if(normalized){
-  // shortcut: bounded display-value search, extend coverage with the larger-source viewer.
-  scan:for(const sheetId of data.sheetOrder){
+  scan:for(let sheetIndex=cursor.sheetIndex;sheetIndex<data.sheetOrder.length;sheetIndex++){
    if(closed||generation!==searchGeneration)return;
+   const sheetId=data.sheetOrder[sheetIndex];
    const worksheet=currentBook.getSheetBySheetId(sheetId),sheetData=data.sheets[sheetId];
    if(!worksheet||!sheetData?.cellData)continue;
-   for(const rowKey of Object.keys(sheetData.cellData)){
-    const row=Number(rowKey),rowData=sheetData.cellData[rowKey];
+   const rowKeys=Object.keys(sheetData.cellData);
+   const firstRow=sheetIndex===cursor.sheetIndex?cursor.rowIndex:0;
+   for(let rowIndex=firstRow;rowIndex<rowKeys.length;rowIndex++){
+    const rowKey=rowKeys[rowIndex],row=Number(rowKey),rowData=sheetData.cellData[rowKey];
     if(!Number.isInteger(row)||row<0||row>=sheetData.rowCount||!rowData)continue;
-    for(const columnKey of Object.keys(rowData)){
+    const columnKeys=Object.keys(rowData);
+    const firstColumn=sheetIndex===cursor.sheetIndex&&rowIndex===cursor.rowIndex?cursor.columnIndex:0;
+    for(let columnIndex=firstColumn;columnIndex<columnKeys.length;columnIndex++){
      if(closed||generation!==searchGeneration)return;
-     const column=Number(columnKey);
+     const column=Number(columnKeys[columnIndex]);
      if(!Number.isInteger(column)||column<0||column>=sheetData.columnCount)continue;
-     if(scannedCells>=50000||scannedUnits>=2097152){limited=true;break scan;}
      const display=worksheet.getRange(row,column).getDisplayValue();
      if(typeof display!=='string')throw Error('XLSX_SEARCH_DISPLAY_INVALID');
-     const text=display.slice(0,2097152-scannedUnits);
-     scannedUnits+=text.length;scannedCells++;
-     if(text.length<display.length)limited=true;
-     if(text.toLocaleLowerCase().includes(normalized)){
-      if(matches.length===2000){limited=true;break scan;}
-      matches.push({sheetId,row,column});
+     scannedCells++;
+     if(display.toLocaleLowerCase().includes(normalized)){
+      if(found.length===1000){more=true;break scan;}
+      found.push({sheetId,row,column});
+      // Resume after the last retained cell, including at the end of a sparse row.
+      if(found.length===1000)nextCursor={sheetIndex,rowIndex,columnIndex:columnIndex+1};
      }
-     if(scannedCells%250===0)await new Promise(resolve=>requestAnimationFrame(resolve));
+     if(scannedCells%250===0){
+      counter.textContent=`正在搜索第 ${page+1} 批 · 已找到 ${found.length} 处`;
+      await new Promise(resolve=>setTimeout(resolve,0));
+     }
     }
    }
   }
  }
  if(closed||generation!==searchGeneration)return;
- coverage.textContent=limited?'搜索达到当前字符、单元格或命中上限，存在未覆盖内容。':'';
- counter.textContent=matches.length?`1 / ${matches.length}`:normalized?'没有匹配':'尚未搜索';
+ searchStarts.length=page+1;if(more)searchStarts.push(nextCursor);
+ searchBatch=page;hasNextSearchBatch=more;matches=found;
+ coverage.textContent=more?'当前批最多1000处，可继续搜索后续全部已接纳显示值。':normalized?'已搜索至可见工作表末尾。':'';
+ counter.textContent=matches.length?`第 ${page+1} 批 · 1 / ${matches.length}`:normalized?'没有匹配':'尚未搜索';
  if(matches.length)showMatch(0,generation);
 }
 function scheduleSearch(immediate=false){
  const generation=++searchGeneration,value=query.value;
- clearTimeout(searchTimer);matches=[];matchIndex=0;controls();coverage.textContent='';
- counter.textContent=value.trim()?'等待搜索':'尚未搜索';
+ clearTimeout(searchTimer);matches=[];matchIndex=0;
+ searchBatch=0;searchStarts=[{sheetIndex:0,rowIndex:0,columnIndex:0}];hasNextSearchBatch=false;
+ controls();coverage.textContent='';counter.textContent=value.trim()?'等待搜索':'尚未搜索';
  searchTimer=setTimeout(()=>run(()=>search(generation,value)),immediate?0:180);
 }
+function changeSearchBatch(delta){
+ if(busy||closed||delta<0&&searchBatch===0||delta>0&&!hasNextSearchBatch)return;
+ const generation=searchGeneration,value=query.value,page=searchBatch+delta;
+ run(()=>search(generation,value,page));
+}
+batchPrevious.addEventListener('click',()=>changeSearchBatch(-1));
+batchNext.addEventListener('click',()=>changeSearchBatch(1));
 query.addEventListener('input',()=>scheduleSearch());
 document.getElementById('search').addEventListener('click',()=>scheduleSearch(true));
 function moveMatch(delta){const generation=searchGeneration;run(()=>showMatch(delta,generation));}

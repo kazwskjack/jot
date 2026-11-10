@@ -598,6 +598,10 @@
     {
       "path": "web/public/xlsx-preview/0.25.1/frame.js",
       "changes": "Boot/probe includes a unique static-document instance. Parent binds it before byte transfer and rejects a replacement document after initialization. Token-scoped pagehide notification invalidates old ready/reference sessions through the existing close/manual reread path. Same-document duplicate probes remain valid. No automatic file transfer or upload retry."
+    },
+    {
+      "path": "web/public/xlsx-preview/0.25.1/frame.js",
+      "changes": "Retains pinned SpreadsheetInteractivePreview sparse cellData traversal, complete native getDisplayValue locale-lowercase matching and original sheet/range activation. Removes total2Mi display text,50000-cell and2000-result cutoffs. Each1000-cell result batch has a numeric sheet/row-key/column-key continuation bookmark and one further-match probe. Previous/next batches rescan stable sparse source positions. Every250 scanned cells yields via timer, old query/close generations cancel, old result arrays release. Serial work/watchdog/capture and visible-sheet/source/conversion limits remain."
     }
   ]
 }
