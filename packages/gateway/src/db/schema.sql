@@ -422,3 +422,16 @@ CREATE TABLE IF NOT EXISTS ga_crawl_events (
   created_at TEXT NOT NULL,
   PRIMARY KEY(batch_id,event_seq)
 );
+
+
+CREATE TABLE IF NOT EXISTS wb_office_preview_configuration (
+ singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+ version INTEGER NOT NULL CHECK(version>=1),
+ service TEXT NOT NULL CHECK(service IN ('builtin','libreoffice')),
+ binary_path TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS wb_office_preview_configuration_commands (
+ owner_id TEXT NOT NULL, command_key TEXT NOT NULL,
+ request_sha256 TEXT NOT NULL, response_json TEXT NOT NULL, created_at TEXT NOT NULL,
+ PRIMARY KEY(owner_id,command_key)
+);

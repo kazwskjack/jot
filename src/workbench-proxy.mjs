@@ -190,7 +190,8 @@ export function registerWorkbenchProxy(app,config,localCsrf){
    }catch{return reply.code(502).send({error:{code:`${prefix}_UNAVAILABLE`}});}
    finally{clearTimeout(timer);}
   }
-  const officePreviewRead=req.method==='GET'&&['/v1/office-preview/status','/v1/office-preview/candidates'].includes(suffix);
+  const officePreviewRead=req.method==='GET'&&['/v1/office-preview/status','/v1/office-preview/candidates','/v1/office-preview/configuration'].includes(suffix);
+  const officePreviewWrite=req.method==='PATCH'&&suffix==='/v1/office-preview/configuration';
   const allowed=/^\/v1\/(capabilities|plugin-profile|agents|persistent-tasks|teams|workspaces|runs|conversations|interactions|channel-bindings|push|projects|artifacts|uploads)(?:\/|$)/;
   const pushAllowed=(req.method==='GET'&&suffix==='/v1/push/vapid-public-key')
    ||(req.method==='POST'&&suffix==='/v1/push/subscriptions')
@@ -200,7 +201,7 @@ export function registerWorkbenchProxy(app,config,localCsrf){
   if(pluginBundle){
    try{const name=decodeURIComponent(pluginBundle[1]);scopedBundle=name.length<=192&&/^@[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(name)&&encodeURIComponent(name)===pluginBundle[1];}catch{}
   }
-  if(!(allowed.test(suffix)||officePreviewRead)||((suffix==='/v1/push'||suffix.startsWith('/v1/push/'))&&!pushAllowed)||/%(?:2e|5c)/i.test(suffix)||/%2f/i.test(suffix)&&!scopedBundle||suffix.includes('\\'))return reply.code(400).send({error:{code:'INVALID_WORKBENCH_PATH'}});
+  if(!(allowed.test(suffix)||officePreviewRead||officePreviewWrite)||((suffix==='/v1/push'||suffix.startsWith('/v1/push/'))&&!pushAllowed)||/%(?:2e|5c)/i.test(suffix)||/%2f/i.test(suffix)&&!scopedBundle||suffix.includes('\\'))return reply.code(400).send({error:{code:'INVALID_WORKBENCH_PATH'}});
   const headers={'x-user-id':config.owner,'x-csrf-token':config.csrf,'origin':`http://${req.headers.host??'localhost'}`,'accept':req.headers.accept??'application/json'};
   if(req.headers['idempotency-key'])headers['idempotency-key']=req.headers['idempotency-key'];
   if(req.headers['last-event-id'])headers['last-event-id']=req.headers['last-event-id'];
@@ -209,7 +210,7 @@ export function registerWorkbenchProxy(app,config,localCsrf){
    const binaryDownload=listedFileDownload||req.method==='GET'&&(/^\/v1\/workspaces\/[^/]+\/files\/binary$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/checkpoints\/[^/]+\/restore-reviews\/[^/]+\/target$/.test(suffix));
   if(binary&&!Buffer.isBuffer(req.body))return reply.code(415).send({error:{code:'BINARY_UPLOAD_REQUIRED'}});
   if(req.body!==undefined)headers['content-type']=binary?'application/octet-stream':'application/json';
-   if(officePreviewRead||binary||binaryDownload||/^\/v1\/artifacts\/[^/]+\/text$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result(?:\/file(?:\/(?:bytes|document))?)?$/.test(suffix)||/^\/v1\/runs\/[^/]+\/native-member-executions$/.test(suffix)||/^\/v1\/runs\/[^/]+\/native-members\/[^/]+\/execution$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/(?:activities|native-member-runs|artifact-search|interaction-history(?:\/[^/]+)?|interaction-search|tool-result-search)$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/memory\/import(?:\/|$)/.test(suffix)||/^\/v1\/projects\/[^/]+\/git(?:\/|$)/.test(suffix))reply.header('cache-control','private, no-store');
+   if(officePreviewRead||officePreviewWrite||binary||binaryDownload||/^\/v1\/artifacts\/[^/]+\/text$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result(?:\/file(?:\/(?:bytes|document))?)?$/.test(suffix)||/^\/v1\/runs\/[^/]+\/native-member-executions$/.test(suffix)||/^\/v1\/runs\/[^/]+\/native-members\/[^/]+\/execution$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/(?:activities|native-member-runs|artifact-search|interaction-history(?:\/[^/]+)?|interaction-search|tool-result-search)$/.test(suffix)||/^\/v1\/workspaces\/[^/]+\/memory\/import(?:\/|$)/.test(suffix)||/^\/v1\/projects\/[^/]+\/git(?:\/|$)/.test(suffix))reply.header('cache-control','private, no-store');
    const artifactTextRead=/^\/v1\/artifacts\/[^/]+\/text$/.test(suffix)||/^\/v1\/conversations\/[^/]+\/artifact-search$/.test(suffix);
    const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),binary||binaryDownload||artifactTextRead?120000:suffix==='/v1/office-preview/candidates'?75000:/^\/v1\/conversations\/[^/]+\/activities\/[^/]+\/tool-result\/file\/document$/.test(suffix)?60000:30000);
   req.raw.once('aborted',()=>controller.abort());reply.raw.once('close',()=>controller.abort());

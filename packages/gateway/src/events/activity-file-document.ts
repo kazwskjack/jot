@@ -18,7 +18,7 @@ type OfficeSource={file:ReturnType<typeof readActivityToolResultFileDownload>;
 
 /** Seal original bytes and run preview work outside the database transaction. */
 async function withPinnedOfficeSource<T>(db:DatabaseSync,reader:Pick<WorkbenchService,'readBinaryFile'>,
- owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal,read:(source:OfficeSource)=>Promise<T>){
+ owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal,read:(source:OfficeSource)=>Promise<T>,binaryPath?:string){
  const format=officePreviewFormat(input.path);
  if(!format)throw Error('UNSUPPORTED_FORMAT_OPERATION');
  if(input.size>20*1024*1024)throw Error('DOCUMENT_PREVIEW_TOO_LARGE');
@@ -35,7 +35,7 @@ async function withPinnedOfficeSource<T>(db:DatabaseSync,reader:Pick<WorkbenchSe
   const path=join(directory,'input.'+format.extension);
   await pipeline(Readable.from(writer.source.stream(signal)),createWriteStream(path,{flags:'wx',mode:0o600}),{signal});
   const engine=new FileEngineAdapter({python:process.env.GENERAL_AGENT_FILE_ENGINE_PYTHON?.trim()||'/usr/bin/python3',
-   workerPath:process.env.GENERAL_AGENT_FILE_ENGINE_SCRIPT?.trim()||fileURLToPath(new URL('../../file-engine/worker.py',import.meta.url)),timeoutMs:30000});
+   workerPath:process.env.GENERAL_AGENT_FILE_ENGINE_SCRIPT?.trim()||fileURLToPath(new URL('../../file-engine/worker.py',import.meta.url)),timeoutMs:30000,...(binaryPath?{libreOffice:binaryPath}:{})});
   return await read({file,format,path,directory,engine});
  }finally{
   try{await store.dispose();}finally{if(directory)await rm(directory,{recursive:true,force:true});}
@@ -76,7 +76,7 @@ export function parseOfficePrintQuery(query:Record<string,unknown>){
 }
 
 export async function readActivityFileOfficePdf(db:DatabaseSync,reader:Pick<WorkbenchService,'readBinaryFile'>,
- owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal,expected?:{sha256:string;size:number;pageCount:number}){
+ owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal,expected?:{sha256:string;size:number;pageCount:number},binaryPath?:string){
  return withPinnedOfficeSource(db,reader,owner,conversationId,activityId,input,root,signal,async({file,format,path,directory,engine})=>{
   const binding=createHash('sha256').update(JSON.stringify(['jot-office-print-store/v1',owner,conversationId,input.runId,activityId,input.resultSha,input.path,input.version,input.fileSha,input.size])).digest('hex');
   if(expected){
@@ -103,5 +103,5 @@ export async function readActivityFileOfficePdf(db:DatabaseSync,reader:Pick<Work
    await retainOfficePdf(db,root,directory,binding,retained,signal);
    return {...file,...retained,execution_authorized:false as const};
   }finally{await handle.close();}
- });
+ },binaryPath);
 }

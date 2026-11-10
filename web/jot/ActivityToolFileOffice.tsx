@@ -309,7 +309,11 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;page?:Page;error?:string}>(),[revision,setRevision]=useState(0);
  const [visualState,setVisualState]=useState<{identity:string;enabled:boolean}>();
- const [printSource,setPrintSource]=useState<{identity:string;enabled:boolean}>();const native=officePreviewFormat(file.path)?.native===true;const print=printSource?.identity===identity?printSource.enabled:!!props.printFocus;
+ const [printSource,setPrintSource]=useState<{identity:string;enabled:boolean}>();
+ const [configuredService,setConfiguredService]=useState<{identity:string;service:'builtin'|'libreoffice'}>();
+ const native=officePreviewFormat(file.path)?.native===true;
+ const nativeFocus=!!(props.officeFocus||props.officeTextFocus||props.officeRegionFocus);
+ const print=printSource?.identity===identity?printSource.enabled:!!props.printFocus||!nativeFocus&&configuredService?.identity===identity&&configuredService.service==='libreoffice';
  const [fullscreen,setFullscreen]=useState(false),[displayError,setDisplayError]=useState('');
  const [fullscreenPending,setFullscreenPending]=useState(false),fullscreenRequest=useRef(false);
  const visual=visualState?.identity===identity?visualState.enabled:props.officeFocus?.value.cell_view===2||props.officeTextFocus?.value.text_view===2||!!props.officeRegionFocus;
@@ -368,7 +372,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
    <button type="button" aria-pressed={print} disabled={loading} onClick={()=>setPrintSource({identity,enabled:true})}>LibreOffice转换PDF</button>
   </nav>
   {displayError&&<p role="alert">{displayError}</p>}
-  <OfficePreviewServiceStatus key={identity} owner={owner} onRendererChange={refresh}/>
+  <OfficePreviewServiceStatus key={identity} owner={owner} onRendererChange={()=>{setPrintSource(undefined);refresh();}} onStatus={value=>setConfiguredService({identity,service:value.service})}/>
   <ActivityToolFileBytes {...props}/>
   {!native&&!print&&<p role="status">此文件可通过LibreOffice转换PDF查看，请选择转换入口。</p>}
   {print&&<OfficeFilePrintPreview key={identity+':print:'+revision} {...props} focus={props.printFocus}/>}

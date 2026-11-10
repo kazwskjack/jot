@@ -35,9 +35,11 @@ export class FileEngineAdapter {
   private readonly python: string;
   private readonly workerPath: string;
   private readonly timeoutMs: number;
-  constructor(options: { python: string; workerPath: string; timeoutMs?: number }) {
+  private readonly libreOffice: string|undefined;
+  constructor(options: { python: string; workerPath: string; timeoutMs?: number; libreOffice?:string }) {
     this.python = options.python; this.workerPath = options.workerPath;
     this.timeoutMs = options.timeoutMs ?? 120_000;
+    this.libreOffice=options.libreOffice;
   }
 
   run(input: FileEngineInput,options:{signal?:AbortSignal;maxOutputBytes?:number}={}): Promise<FileEngineResult> {
@@ -49,7 +51,7 @@ export class FileEngineAdapter {
       }
       const child = spawn(this.python, [this.workerPath], {
         stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform!=='win32',
-        env: fileEngineChildEnvironment(),
+        env: fileEngineChildEnvironment({...process.env,GENERAL_AGENT_LIBREOFFICE:this.libreOffice??process.env.GENERAL_AGENT_LIBREOFFICE}),
       });
       const stdout: Buffer[] = [];let outputBytes=0,failure:Error|undefined;
       let termination:Promise<void>|undefined;

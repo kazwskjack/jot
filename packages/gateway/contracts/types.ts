@@ -828,6 +828,9 @@ export type ActivityToolResultFile={path:string;version:number;sha256:string;siz
 export type ActivityToolFilePage={text_protocol?:2;conversation_id:string;run_id:string;activity_id:string;result_sha256:string;path:string;version:number;sha256:string;size:number;source:'workspace'|'isolated';text_sha256:string;offset_chars:number;total_chars:number;text:string;next_offset_chars?:number;execution_authorized:false};
 export type ActivityToolFileBytes=Pick<ActivityToolFilePage,'conversation_id'|'run_id'|'activity_id'|'result_sha256'|'path'|'version'|'sha256'|'size'|'source'|'execution_authorized'>&{offset_bytes:number;length_bytes:number;content_base64:string;chunk_sha256:string;next_offset_bytes?:number};
 
+export type OfficePreviewConfiguration={protocol:1;version:number;service:'builtin'|'libreoffice';binaryPath:string;writable:boolean;execution_authorized:false};
+export type OfficePreviewConfigurationUpdate={expected_version:number;service:OfficePreviewConfiguration['service'];binaryPath:string};
+
 export type OfficePreviewBinaryStatus={binaryPath:string}&(
  {available:true;version:string}|{available:false;reason:'probe_failed'|'version_unconfirmed'}
 );
@@ -835,7 +838,7 @@ export type OfficePreviewCandidates={protocol:1;checkedAt:string;candidates:Offi
 
 export type OfficePreviewStatus = {
   protocol: 1;
-  service: 'builtin';
+  service: 'builtin'|'libreoffice';
   configuredBinaryPath: string;
   rendererSignature: string;
   checkedAt: string;

@@ -1,3 +1,4 @@
+import {OfficePreviewConfigurationStore} from './file-engine/office-preview-configuration.ts';
 import {createOfficePreviewCandidateReader} from './file-engine/office-preview-candidates.ts';
 import {signOfficePrintProof} from './messages/office-print-proof.ts';
 import {createOfficePreviewStatusReader} from './file-engine/office-preview-status.ts';
@@ -173,6 +174,7 @@ function verifiedPrincipalActor(request: { headers: Record<string, unknown> }, r
 }
 
 export async function buildServer(config: {
+  officePreviewOwnerId?:string;
   channelAttachmentIntakeV2?:boolean;
   modelCatalogClient?:ModelCatalogClient;
   conversationModeClient?:ConversationModeClient;
@@ -226,6 +228,8 @@ export async function buildServer(config: {
   emotion?: {env?:NodeJS.ProcessEnv;transport?:typeof fetch;accountingRoutes?:EmotionAccounting['routes']};
 }) {
 
+  if(config.officePreviewOwnerId!==undefined&&(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(config.officePreviewOwnerId)
+    ||!config.csrfToken||config.csrfToken.length<16||!config.allowedOrigins?.length))throw Error('office_preview_owner_configuration_invalid');
   if(config.hostAdmin?.writeEnabled&&config.hostAdmin.enabled!==true)throw Error('host_settings_write_configuration_invalid');
   const ingressMode = config.ingressMode ?? 'standalone-local';
   if (ingressMode !== 'standalone-local' && ingressMode !== 'public-api') throw new Error('config_ingress_mode_invalid');
@@ -498,6 +502,7 @@ export async function buildServer(config: {
     if((request.routeOptions.config as {nativeCommandQueryMutation?:boolean}).nativeCommandQueryMutation===true){
       reply.header('cache-control','private, no-store');return;
     }
+    if((request.routeOptions.config as {officePreviewConfigurationCommand?:boolean}).officePreviewConfigurationCommand===true)return;
     // Binary imports own a content-aware immutable receipt in the workspace service.
     if(request.method==='PUT'&&request.routeOptions.url==='/v1/workspaces/:workspaceId/files/binary')return;
     if(request.method==='POST'&&[
@@ -651,6 +656,9 @@ export async function buildServer(config: {
   app.setErrorHandler((error, request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
     if(['content_reference_request_invalid','content_reference_request_too_large','content_reference_attachment_mismatch','office_print_reference_unproven'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(code==='office_preview_configuration_forbidden')return reply.code(403).send({error:{code:'OFFICE_PREVIEW_CONFIGURATION_FORBIDDEN'}});
+    if(code==='office_preview_configuration_conflict')return reply.code(409).send({error:{code:'OFFICE_PREVIEW_CONFIGURATION_CONFLICT'}});
+    if(code==='office_preview_configuration_invalid')return reply.code(422).send({error:{code:'OFFICE_PREVIEW_CONFIGURATION_INVALID'}});
     if(code==='office_print_retention_full')return reply.code(507).send({error:{code:'OFFICE_PRINT_RETENTION_FULL'}});
     if(code==='office_print_retained_unavailable')return reply.code(404).send({error:{code:'OFFICE_PRINT_RETAINED_UNAVAILABLE'}});
     if(code==='office_print_retained_invalid')return reply.code(409).send({error:{code:'OFFICE_PRINT_RETAINED_INVALID'}});
@@ -802,9 +810,21 @@ export async function buildServer(config: {
   });
 
   app.get('/healthz', async () => ({ ok: true, service: 'jot-general-agent-bff' }));
-  const officePreviewStatus=createOfficePreviewStatusReader(),officePreviewCandidates=createOfficePreviewCandidateReader();
+  const officePreviewConfiguration=new OfficePreviewConfigurationStore(db,config.officePreviewOwnerId);
+  const readOfficePreviewSettings=()=>officePreviewConfiguration.get();
+  const officePreviewStatus=createOfficePreviewStatusReader(readOfficePreviewSettings),officePreviewCandidates=createOfficePreviewCandidateReader(readOfficePreviewSettings);
   const officePrintReferencesReady=typeof config.internalChannelToken==='string'&&config.internalChannelToken.length>=16;
   app.addHook('onClose',async()=>{officePreviewStatus.close();officePreviewCandidates.close();});
+  app.get('/v1/office-preview/configuration',async(request,reply)=>{
+    const owner=actor(request as any);reply.header('cache-control','private, no-store');
+    if(Object.keys(request.query as Record<string,unknown>).length)throw Error('office_preview_configuration_invalid');
+    return officePreviewConfiguration.get(owner);
+  });
+  app.patch('/v1/office-preview/configuration',{config:{officePreviewConfigurationCommand:true}},async(request,reply)=>{
+    const owner=actor(request as any);reply.header('cache-control','private, no-store');
+    if(Object.keys(request.query as Record<string,unknown>).length)throw Error('office_preview_configuration_invalid');
+    return officePreviewConfiguration.update(owner,String(request.headers['idempotency-key']??''),request.body);
+  });
   app.get('/v1/office-preview/status',async(request,reply)=>{
     actor(request as any);
     const query=request.query as Record<string,unknown>;
@@ -1176,7 +1196,7 @@ export async function buildServer(config: {
     if(request.raw.aborted||reply.raw.destroyed)abort();
     try{
       const value=await readActivityFileOfficePdf(db,workbench,owner,conversationId,activityId,input,
-        officePrintRoot,controller.signal,expected);
+        officePrintRoot,controller.signal,expected,officePreviewConfiguration.get().binaryPath||process.env.GENERAL_AGENT_LIBREOFFICE?.trim()||'/usr/bin/libreoffice');
       conversations.get(conversationId,owner);
       const proof=signOfficePrintProof(config.internalChannelToken,owner,{conversationId,runId:input.runId,activityId,resultSha:input.resultSha,
         file:{path:input.path,version:input.version,sha256:input.fileSha,size:input.size}},

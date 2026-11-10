@@ -1,5 +1,5 @@
 import type {OfficePrintView} from '../../packages/gateway/contracts/types';
-import {base,taskDraftScope} from './client';
+import {ApiError,base,taskDraftScope} from './client';
 import {readVerifiedPreviewBytes} from './artifact-preview-bytes.mjs';
 import type {ActivityToolResultFile} from './types';
 
@@ -47,7 +47,7 @@ export async function readOfficePrintPreviewBytes({conversationId,runId,activity
   if(response.status===507)throw Error('转换PDF保留空间已满，已有副本继续保留。');
   if(expected&&response.status===404)throw Error('原转换PDF副本或原来源暂不可读取，可重新转换并对照原快照。');
   if(expected&&response.status===409)throw Error('原来源或转换PDF副本尚未通过核对，请对照原快照。');
-  if(response.status===429)throw Error('文档引擎正在处理另一个文件，请稍后重试转换。');
+  if(response.status===429)throw new ApiError(429,'文档引擎正在处理另一个文件，请稍后重试转换。');
   if(!response.ok||!response.body||response.headers.get('content-type')?.split(';')[0]!=='application/octet-stream'
    ||response.headers.get('x-activity-file-sha256')!==file.sha256||response.headers.get('x-activity-file-size')!==String(file.size)
    ||response.headers.get('x-activity-file-version')!==String(file.version)||response.headers.get('x-activity-tool-result-sha256')!==resultSha

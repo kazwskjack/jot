@@ -1,6 +1,6 @@
 import type {OfficePrintFocus} from './pdf-file-view-state';
 import React,{lazy,Suspense,useEffect,useRef,useState} from 'react';
-import {taskDraftScope} from './client';
+import {ApiError,abortableDelay,taskDraftScope} from './client';
 import {readOfficePrintPreviewBytes,type ListedFilePreviewSource,type OfficePrintPreview} from './activity-file-preview-client';
 const PdfViewer=lazy(()=>import('./ActivityToolFilePdf'));
 
@@ -16,7 +16,17 @@ export default function OfficeFilePrintPreview(source:ListedFilePreviewSource&{f
   const stop=(message:string)=>{controller.abort();if(live&&taskDraftScope()===owner)setState({identity,error:message});};
   cancel.current=()=>stop('转换预览读取已取消。');
   const timer=window.setTimeout(()=>stop('转换PDF读取超时，请稍后重试。'),60000);
-  void readOfficePrintPreviewBytes(source,owner,controller.signal,readOriginal?source.focus?.view:undefined).then(preview=>{
+  const load=async()=>{
+   // A renderer switch may overlap cleanup of its cancelled structured preview.
+   for(let attempt=0;;attempt++){
+    try{return await readOfficePrintPreviewBytes(source,owner,controller.signal,readOriginal?source.focus?.view:undefined);}
+    catch(error){
+     if(!(error instanceof ApiError)||error.status!==429||attempt>=6)throw error;
+     await abortableDelay(1000,controller.signal);
+    }
+   }
+  };
+  void load().then(preview=>{
    if(live&&!controller.signal.aborted&&taskDraftScope()===owner)setState({identity,preview,confirmed:!source.focus||source.focus.view.sha256===preview.sha256&&source.focus.view.size===preview.size&&source.focus.view.pageCount===preview.pageCount});
   }).catch(error=>{
    if(live&&!controller.signal.aborted&&taskDraftScope()===owner)setState({identity,error:error instanceof Error?error.message:'转换PDF读取失败。'});

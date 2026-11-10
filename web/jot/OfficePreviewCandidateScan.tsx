@@ -2,7 +2,7 @@ import React,{useEffect,useRef,useState} from 'react';
 import type {OfficePreviewCandidates} from '../../packages/gateway/contracts/types';
 import {request,taskDraftScope} from './client';
 
-export default function OfficePreviewCandidateScan({owner}:{owner:string}){
+export default function OfficePreviewCandidateScan({owner,onSelect}:{owner:string;onSelect?:(path:string)=>void}){
  const active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{owner:string;loading:boolean;value?:OfficePreviewCandidates;error?:string}>();
  useEffect(()=>()=>{active.current?.abort();active.current=null;},[owner]);
@@ -32,7 +32,7 @@ export default function OfficePreviewCandidateScan({owner}:{owner:string}){
   {current?.error&&<p role="alert">{current.error}</p>}
   {current?.value&&<>
    <p>版本扫描时间 <time dateTime={current.value.checkedAt}>{current.value.checkedAt}</time></p>
-   <ul>{current.value.candidates.map(item=><li key={item.binaryPath}><code>{item.binaryPath}</code> · {item.available?item.version:item.reason==='probe_failed'?'版本探测失败':'版本信息未确认'}</li>)}</ul>
+   <ul>{current.value.candidates.map(item=><li key={item.binaryPath}><code>{item.binaryPath}</code> · {item.available?item.version:item.reason==='probe_failed'?'版本探测失败':'版本信息未确认'} {item.available&&onSelect&&<button type="button" onClick={()=>{if(taskDraftScope()===owner)onSelect(item.binaryPath);}}>选择此路径</button>}</li>)}</ul>
    {current.value.truncated&&<p role="status">目录读取或候选数量受限，已显示当前有界扫描结果。</p>}
   </>}
  </section>;

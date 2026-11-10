@@ -1,3 +1,4 @@
+import {officePreviewEnvironmentSettings} from './office-preview-configuration.ts';
 // Status/signature semantics adapted from pinned PilotDeck officePreviewStatus.ts.
 // AGPL-3.0 notices are retained in packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt.
 import {execFile} from 'node:child_process';
@@ -16,25 +17,25 @@ export function probeOfficePreviewBinary(binaryPath:string,environment:Record<st
  });
 }
 
-export function createOfficePreviewStatusReader(){
+export function createOfficePreviewStatusReader(readSettings=officePreviewEnvironmentSettings){
  let cached:{key:string;at:number;value:OfficePreviewStatus}|undefined;
  let pending:{key:string;promise:Promise<OfficePreviewStatus>;controller:AbortController}|undefined;
  let closed=false;
  return {
   async read(refresh=false):Promise<OfficePreviewStatus>{
    if(closed)throw Error('office_preview_status_closed');
-   const configuredBinaryPath=process.env.GENERAL_AGENT_LIBREOFFICE?.trim()??'';
+   const {service,binaryPath:configuredBinaryPath}=readSettings();
    if(configuredBinaryPath.length>4096||configuredBinaryPath.includes('\0'))throw Error('office_preview_configuration_invalid');
-   const environment=fileEngineChildEnvironment(),binaryPath=environment.GENERAL_AGENT_LIBREOFFICE!;
-   const key=JSON.stringify([configuredBinaryPath,binaryPath,environment.PATH]);
+   const environment=fileEngineChildEnvironment({...process.env,GENERAL_AGENT_LIBREOFFICE:configuredBinaryPath||process.env.GENERAL_AGENT_LIBREOFFICE}),binaryPath=environment.GENERAL_AGENT_LIBREOFFICE!;
+   const key=JSON.stringify([service,configuredBinaryPath,binaryPath,environment.PATH]);
    // Coalesce refresh clicks during an active probe and its immediate result window.
    if(cached?.key===key&&Date.now()-cached.at<(refresh?1000:30000))return cached.value;
    if(pending?.key===key)return pending.promise;
    pending?.controller.abort();
    const controller=new AbortController();
    const promise=probeOfficePreviewBinary(binaryPath,environment,controller.signal).then(libreOffice=>({
-    protocol:1 as const,service:'builtin' as const,configuredBinaryPath,
-    rendererSignature:JSON.stringify(['builtin',configuredBinaryPath]),checkedAt:new Date().toISOString(),
+    protocol:1 as const,service,configuredBinaryPath,
+    rendererSignature:JSON.stringify([service,configuredBinaryPath,binaryPath]),checkedAt:new Date().toISOString(),
     supportedServices:['builtin','libreoffice'] as ['builtin','libreoffice'],libreOffice,execution_authorized:false as const,
    }));
    pending={key,promise,controller};

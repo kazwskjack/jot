@@ -33,10 +33,12 @@ export function loadBffConfig() {
   const databasePath = process.env.GENERAL_AGENT_DB?.trim() || '/var/lib/jot/jot.db';
   const slackWebhook = slackWebhookConfiguration(process.env);
   const smsWebhook=smsWebhookConfiguration(process.env);
+  const officePreviewOwnerId=process.env.GENERAL_AGENT_OFFICE_PREVIEW_OWNER_ID?.trim();
   const host = process.env.GENERAL_AGENT_HOST?.trim() || '127.0.0.1';
   if (!['127.0.0.1', 'localhost', '::1'].includes(host.toLowerCase())) throw new Error('config_public_api_identity_required');
   return {
     ingressMode,
+    ...(officePreviewOwnerId?{officePreviewOwnerId}:{}),
     host,
     port: Number(process.env.GENERAL_AGENT_PORT || 18831),
     databasePath,

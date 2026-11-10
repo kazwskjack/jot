@@ -1,3 +1,4 @@
+import {officePreviewEnvironmentSettings} from './office-preview-configuration.ts';
 // Candidate locations follow pinned PilotDeck officePreview.js (783499ff).
 // AGPL-3.0 notice retained in packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt.
 import {opendir} from 'node:fs/promises';
@@ -55,14 +56,14 @@ async function scanCandidates(environment:NodeJS.ProcessEnv,signal:AbortSignal):
  return {protocol:1,checkedAt:new Date().toISOString(),candidates,truncated,execution_authorized:false};
 }
 
-export function createOfficePreviewCandidateReader(){
+export function createOfficePreviewCandidateReader(readSettings=officePreviewEnvironmentSettings){
  let cached:{key:string;at:number;value:OfficePreviewCandidates}|undefined;
  let pending:{key:string;promise:Promise<OfficePreviewCandidates>;controller:AbortController}|undefined;
  let closed=false;
  return {
   async read(refresh=false):Promise<OfficePreviewCandidates>{
    if(closed)throw Error('office_preview_candidates_closed');
-   const environment={...process.env};
+   const environment={...process.env,GENERAL_AGENT_LIBREOFFICE:readSettings().binaryPath||process.env.GENERAL_AGENT_LIBREOFFICE};
    const key=JSON.stringify([environment.GENERAL_AGENT_LIBREOFFICE,environment.LIBREOFFICE_PATH,environment.SOFFICE_PATH,environment.PATH,
     environment.PYTHONPATH,environment.ProgramW6432,environment.ProgramFiles,environment['ProgramFiles(x86)'],homedir()]);
    if(cached?.key===key&&Date.now()-cached.at<(refresh?1000:30000))return cached.value;
