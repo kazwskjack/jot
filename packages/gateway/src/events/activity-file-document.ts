@@ -1,6 +1,7 @@
 import type {DatabaseSync} from 'node:sqlite';
-import {createWriteStream} from 'node:fs';
-import {mkdir,mkdtemp,rm} from 'node:fs/promises';
+import {constants,createWriteStream} from 'node:fs';
+import {createHash} from 'node:crypto';
+import {mkdir,mkdtemp,rm,open} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {Readable} from 'node:stream';
@@ -11,9 +12,12 @@ import {createPinnedByteStore} from '../artifacts/pinned-byte-source.ts';
 import {normalizeOfficePreviewContent,officePreviewFormat} from '../artifacts/document-preview-content.ts';
 import {readActivityToolResultFileDownload,parseActivityFileDownloadQuery} from './activity-tool-result.ts';
 
-/** Inspect sealed original bytes outside the original database read transaction. */
-export async function readActivityFileDocument(db:DatabaseSync,reader:Pick<WorkbenchService,'readBinaryFile'>,
- owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal){
+type OfficeSource={file:ReturnType<typeof readActivityToolResultFileDownload>;
+ format:NonNullable<ReturnType<typeof officePreviewFormat>>;path:string;directory:string;engine:FileEngineAdapter};
+
+/** Seal original bytes and run preview work outside the database transaction. */
+async function withPinnedOfficeSource<T>(db:DatabaseSync,reader:Pick<WorkbenchService,'readBinaryFile'>,
+ owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal,read:(source:OfficeSource)=>Promise<T>){
  const format=officePreviewFormat(input.path);
  if(!format)throw Error('UNSUPPORTED_FORMAT_OPERATION');
  if(input.size>20*1024*1024)throw Error('DOCUMENT_PREVIEW_TOO_LARGE');
@@ -31,6 +35,15 @@ export async function readActivityFileDocument(db:DatabaseSync,reader:Pick<Workb
   await pipeline(Readable.from(writer.source.stream(signal)),createWriteStream(path,{flags:'wx',mode:0o600}),{signal});
   const engine=new FileEngineAdapter({python:process.env.GENERAL_AGENT_FILE_ENGINE_PYTHON?.trim()||'/usr/bin/python3',
    workerPath:process.env.GENERAL_AGENT_FILE_ENGINE_SCRIPT?.trim()||fileURLToPath(new URL('../../file-engine/worker.py',import.meta.url)),timeoutMs:30000});
+  return await read({file,format,path,directory,engine});
+ }finally{
+  try{await store.dispose();}finally{if(directory)await rm(directory,{recursive:true,force:true});}
+ }
+}
+
+export async function readActivityFileDocument(db:DatabaseSync,reader:Pick<WorkbenchService,'readBinaryFile'>,
+ owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal){
+ return withPinnedOfficeSource(db,reader,owner,conversationId,activityId,input,root,signal,async({file,format,path,engine})=>{
   const result=await engine.run({operation:'document.inspect',input_path:path,media_type:format.mediaType,job_dir:directory,request:{[`verify_${format.kind}_visual`]:true,...(format.kind==='xlsx'?{include_xlsx_raw:true}:{})}},
    {signal,maxOutputBytes:2*1024*1024});
   signal.throwIfAborted();
@@ -42,7 +55,29 @@ export async function readActivityFileDocument(db:DatabaseSync,reader:Pick<Workb
   const visual={[`${format.kind}_visual`]:{protocol:1 as const,ready:verified,...(verified?{}:{reason})}};
   return {...file,...visual,document_protocol:1 as const,media_type:format.mediaType,document:normalizeOfficePreviewContent(format.mediaType,result.content),
    engine:{name:result.engine.name,version:result.engine.version},execution_authorized:false as const};
- }finally{
-  try{await store.dispose();}finally{if(directory)await rm(directory,{recursive:true,force:true});}
- }
+ });
+}
+
+export async function readActivityFileOfficePdf(db:DatabaseSync,reader:Pick<WorkbenchService,'readBinaryFile'>,
+ owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal){
+ return withPinnedOfficeSource(db,reader,owner,conversationId,activityId,input,root,signal,async({file,format,path,directory,engine})=>{
+  const output=join(directory,'preview.pdf');
+  const result=await engine.run({operation:'office.export_pdf',input_path:path,output_path:output,
+   media_type:format.mediaType,job_dir:directory,request:{save_as:{format:'pdf'},jot_preview_pdf:1}},
+   {signal,maxOutputBytes:65536});
+  signal.throwIfAborted();
+  const checks=result.checks;
+  if(result.output_path!==output||result.engine?.name!=='libreoffice_uno'||typeof result.engine.version!=='string'||result.engine.version.length>200
+   ||checks?.engine_saved!=='PASS'||checks.saved_and_reopened!=='PASS'||checks.macro_execution!=='DISABLED'||checks.external_links!=='DISABLED'
+   ||!Number.isSafeInteger(checks.page_count)||Number(checks.page_count)<1||Number(checks.page_count)>50000)throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
+  const handle=await open(output,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
+  try{
+   const before=await handle.stat();
+   if(!before.isFile()||before.nlink!==1||before.size<100||before.size>20*1024*1024)throw Error('DOCUMENT_PREVIEW_TOO_LARGE');
+   const bytes=await handle.readFile();signal.throwIfAborted();const after=await handle.stat();
+   if(bytes.length!==before.size||after.size!==before.size||after.mtimeMs!==before.mtimeMs||bytes.subarray(0,5).toString('ascii')!=='%PDF-')throw Error('DOCUMENT_PREVIEW_RESULT_INVALID');
+   return {...file,pdf:{bytes,sha256:createHash('sha256').update(bytes).digest('hex'),size:bytes.length,page_count:Number(checks.page_count)},
+    engine:{name:result.engine.name,version:result.engine.version},execution_authorized:false as const};
+  }finally{await handle.close();}
+ });
 }

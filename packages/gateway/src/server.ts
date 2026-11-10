@@ -1,5 +1,5 @@
 import {createOfficePreviewStatusReader} from './file-engine/office-preview-status.ts';
-import {readActivityFileDocument} from './events/activity-file-document.ts';
+import {readActivityFileDocument,readActivityFileOfficePdf} from './events/activity-file-document.ts';
 import {messageReferenceSnapshotsInstalled,commandReferenceSnapshotsInstalled,captureRunCommandReferenceSnapshots,assertReferenceSnapshotImages} from './messages/reference-snapshots.ts';
 import {prepareReferenceSteeringText,type ReferenceSnapshotInput} from './messages/content-reference.js';
 import {createPinnedByteStore} from './artifacts/pinned-byte-source.ts';
@@ -621,7 +621,7 @@ export async function buildServer(config: {
   app.addHook('onSend', async (request, reply, payload) => {
     const registeredRoute=request.routeOptions.url;
     if(request.method==='GET'&&reply.statusCode<400&&String(reply.getHeader('content-type')??'').startsWith('application/octet-stream')
-      &&['/v1/workspaces/:workspaceId/files/binary','/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore-reviews/:reviewId/target'].includes(registeredRoute??''))return payload;
+      &&['/v1/workspaces/:workspaceId/files/binary','/v1/workspaces/:workspaceId/checkpoints/:checkpointId/restore-reviews/:reviewId/target','/v1/conversations/:conversationId/activities/:activityId/tool-result/file/print'].includes(registeredRoute??''))return payload;
     const operationId=typeof registeredRoute==='string'?contracts.operationFor(request.method,registeredRoute):null;
     let responseValue: unknown = null;
     if (typeof payload === 'string' && payload.length) {
@@ -1145,6 +1145,30 @@ export async function buildServer(config: {
         join(dirname(resolve(config.databasePath)),'.jot-document-previews'),controller.signal);
       conversations.get(conversationId,owner);
       return reply.header('cache-control','private, no-store').header('x-content-type-options','nosniff').send(value);
+    }finally{request.raw.off('aborted',abort);reply.raw.off('close',abort);documentPreviewBusy=false;}
+  });
+  app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/file/print',async(request,reply)=>{
+    const {conversationId,activityId}=request.params as {conversationId:string;activityId:string},owner=actor(request as any);
+    const input=parseActivityFileDownloadQuery(request.query as Record<string,unknown>);
+    if(input.framed)throw Error('invalid_activity_tool_result_query');
+    conversations.get(conversationId,owner);
+    if(documentPreviewBusy)return reply.code(429).header('retry-after','1').send({error:{code:'DOCUMENT_PREVIEW_BUSY'}});
+    documentPreviewBusy=true;
+    const controller=new AbortController(),abort=()=>controller.abort();
+    request.raw.once('aborted',abort);reply.raw.once('close',abort);
+    if(request.raw.aborted||reply.raw.destroyed)abort();
+    try{
+      const value=await readActivityFileOfficePdf(db,workbench,owner,conversationId,activityId,input,
+        join(dirname(resolve(config.databasePath)),'.jot-document-previews'),controller.signal);
+      conversations.get(conversationId,owner);
+      return reply.header('cache-control','private, no-store').header('x-content-type-options','nosniff')
+        .header('x-activity-file-sha256',value.sha256).header('x-activity-file-size',String(value.size))
+        .header('x-activity-file-version',String(value.version)).header('x-activity-tool-result-sha256',value.result_sha256)
+        .header('x-jot-preview-protocol','1').header('x-jot-preview-renderer','libreoffice')
+        .header('x-jot-preview-media-type','application/pdf').header('x-jot-preview-sha256',value.pdf.sha256)
+        .header('x-jot-preview-size',String(value.pdf.size)).header('x-jot-preview-pages',String(value.pdf.page_count))
+        .header('x-jot-execution-authorized','false').header('content-length',String(value.pdf.size))
+        .header('content-disposition','attachment; filename="office-preview.pdf"').type('application/octet-stream').send(value.pdf.bytes);
     }finally{request.raw.off('aborted',abort);reply.raw.off('close',abort);documentPreviewBusy=false;}
   });
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/file/download', async (request,reply) => {

@@ -535,6 +535,7 @@ def uno_export_pdf(req: dict, input_path: Path, output_path: Path, job_dir: Path
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "writer_pdf_Export",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "calc_pdf_Export",
         "application/vnd.ms-excel": "calc_pdf_Export",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation": "impress_pdf_Export",
     }
     if str(req.get("request", {}).get("save_as", {}).get("format", "")).lower() != "pdf":
         fail("UNSUPPORTED_FORMAT_OPERATION")
@@ -571,6 +572,8 @@ def uno_export_pdf(req: dict, input_path: Path, output_path: Path, job_dir: Path
             (prop("FilterName", filter_name), prop("Overwrite", True)))
         document.close(True); document = None
         if not output_path.is_file() or output_path.stat().st_size < 100: fail("OUTPUT_CHECK_FAILED")
+        if req.get("request", {}).get("jot_preview_pdf") == 1 and output_path.stat().st_size > 20 * 1024 * 1024:
+            fail("DOCUMENT_PREVIEW_TOO_LARGE")
         content = pdf_read(output_path)
         if int(content.get("page_count", 0)) < 1: fail("OUTPUT_CHECK_FAILED")
     finally:
@@ -646,7 +649,10 @@ def execute(req: dict) -> dict:
         return result
     root = Path(job_dir).resolve(); root.mkdir(parents=True, exist_ok=True, mode=0o700)
     output_path = safe_path(str(req.get("output_path", "")), str(root), must_exist=False)
-    if operation == "office.export_pdf": result = uno_export_pdf(req, input_path, output_path, root); engine = "libreoffice_uno"
+    if operation == "office.export_pdf":
+        if req.get("request", {}).get("jot_preview_pdf") == 1:
+            verify_ooxml_visual_source(input_path)
+        result = uno_export_pdf(req, input_path, output_path, root); engine = "libreoffice_uno"
     elif operation.startswith("pdf."): result = pdf_edit(operation, input_path, output_path, req.get("request", {})); engine = "pypdf"
     else: result = uno_edit(req, input_path, output_path, root); engine = "libreoffice_uno"
     return {"ok": True, "engine": {"name": engine, "version": "runtime-probed"}, **result, "warnings": []}
