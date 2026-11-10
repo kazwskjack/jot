@@ -1,3 +1,4 @@
+import {createOfficePreviewStatusReader} from './file-engine/office-preview-status.ts';
 import {readActivityFileDocument} from './events/activity-file-document.ts';
 import {messageReferenceSnapshotsInstalled,commandReferenceSnapshotsInstalled,captureRunCommandReferenceSnapshots,assertReferenceSnapshotImages} from './messages/reference-snapshots.ts';
 import {prepareReferenceSteeringText,type ReferenceSnapshotInput} from './messages/content-reference.js';
@@ -796,6 +797,18 @@ export async function buildServer(config: {
   });
 
   app.get('/healthz', async () => ({ ok: true, service: 'jot-general-agent-bff' }));
+  const officePreviewStatus=createOfficePreviewStatusReader();
+  app.addHook('onClose',async()=>officePreviewStatus.close());
+  app.get('/v1/office-preview/status',async(request,reply)=>{
+    actor(request as any);
+    const query=request.query as Record<string,unknown>;
+    if(Object.keys(query).some(key=>key!=='refresh')
+      ||query.refresh!==undefined&&(typeof query.refresh!=='string'||!['1','true','0','false'].includes(query.refresh))){
+      return reply.code(422).send({error:{code:'OFFICE_PREVIEW_QUERY_INVALID'}});
+    }
+    reply.header('cache-control','no-store');
+    return officePreviewStatus.read(query.refresh==='1'||query.refresh==='true');
+  });
   app.get('/v1/push/vapid-public-key',async(_request,reply)=>{
     if(!pushSubscriptions)throw new Error('push_channel_unavailable');
     reply.header('cache-control','private, no-store');

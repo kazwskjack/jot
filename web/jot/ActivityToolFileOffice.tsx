@@ -1,3 +1,4 @@
+import OfficePreviewServiceStatus from './OfficePreviewServiceStatus';
 // Selection context bounds adapted from PilotDeck 783499ff SpreadsheetInteractivePreview.tsx.
 // AGPL-3.0 terms retained at packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt.
 import OfficeTextReferenceAction from './OfficeTextReferenceAction';
@@ -361,6 +362,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
    <button type="button" disabled={loading} onClick={refresh}>重新读取固定版本</button>
   </nav>
   {displayError&&<p role="alert">{displayError}</p>}
+  <OfficePreviewServiceStatus key={identity} owner={owner} onRendererChange={refresh}/>
   <ActivityToolFileBytes {...props}/>
   {loading&&<p role="status">正在核对原版本并解析Office内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'Office读取已取消'});}}>取消读取</button></p>}
   {current?.page&&<>
