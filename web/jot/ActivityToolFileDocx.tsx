@@ -7,6 +7,19 @@ import {validateTextReferenceSource} from '../../packages/gateway/src/messages/c
 
 type Selection={serial:number;selectedText:string;occurrenceIndex:number;prefix:string;suffix:string};
 type Proposal={selection:Selection;reference:FileTextReference};
+async function readViewerUrl(signal:AbortSignal){
+ const response=await fetch('/docx-preview/0.4.0/viewer',{credentials:'same-origin',cache:'no-store',redirect:'error',signal});
+ if(!response.ok||response.headers.get('content-type')?.split(';')[0]!=='application/json')throw Error('独立Word查看器配置暂不可用。');
+ const text=await response.text();signal.throwIfAborted();
+ if(text.length>2048)throw Error('Word查看器配置尚未确认。');
+ const value=JSON.parse(text);
+ if(!value||typeof value!=='object'||Array.isArray(value)||value.protocol!==1||typeof value.url!=='string'||Object.keys(value).length!==2)throw Error('Word查看器配置尚未确认。');
+ const url=new URL(value.url),parent=new URL(window.location.href);
+ if(url.protocol!=='http:'||parent.protocol!=='http:'||url.origin===parent.origin||!/^jot-office-[a-f0-9]{32}\.localhost$/.test(url.hostname)
+  ||url.port!==parent.port||url.username||url.password||url.hash||url.pathname!=='/docx-preview/0.4.0/frame.html'
+  ||url.searchParams.size!==1||url.searchParams.get('parent')!==parent.host)throw Error('Word查看器独立来源尚未确认。');
+ return url.href;
+}
 function readSelection(value:unknown):Selection|undefined{
  if(!value||typeof value!=='object'||Array.isArray(value))return;
  const selection=value as Selection;
@@ -46,26 +59,51 @@ function DocxAttempt({source,owner,identity,officeTextFocus}:{source:ListedFileP
  const [proposal,setProposal]=useState<Proposal>(),selected=useRef<Proposal|undefined>(undefined),pending=useRef<Proposal|undefined>(undefined);
  const pendingTimer=useRef<number|undefined>(undefined);
  const [committing,setCommitting]=useState(false),[notice,setNotice]=useState(''),[focused,setFocused]=useState<boolean>();
+ const [viewerUrl,setViewerUrl]=useState<string>();
  const disabled=!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId;
  useEffect(()=>{if(disabled){selected.current=undefined;pending.current=undefined;window.clearTimeout(pendingTimer.current);setCommitting(false);setProposal(undefined);}},[disabled]);
  useEffect(()=>{
+  const controller=new AbortController();let active=true;
+  const stop=(message:string)=>{controller.abort();if(active)setState({phase:'error',message});};
+  const timer=window.setTimeout(()=>stop('独立Word查看器配置读取超时，请重试。'),10000);
+  cancel.current=()=>stop('Word查看器配置读取已取消。');
+  void readViewerUrl(controller.signal).then(url=>{
+   if(!active||controller.signal.aborted)return;
+   if(taskDraftScope()!==owner){setState({phase:'error',message:'文件所属账户已变化，请重新打开会话。'});return;}
+   setViewerUrl(url);
+  }).catch(error=>{if(active&&!controller.signal.aborted)setState({phase:'error',message:error instanceof Error?error.message:'独立Word查看器配置读取失败'});})
+   .finally(()=>window.clearTimeout(timer));
+  return()=>{active=false;controller.abort();window.clearTimeout(timer);};
+ },[identity,owner]);
+ useEffect(()=>{
+  if(!viewerUrl)return;
   const controller=new AbortController(),target=frame.current,token=crypto.randomUUID(),focus=originalVisualFocus(officeTextFocus,source,owner);
-  let bytes:ArrayBuffer|undefined,sent=false,closed=false,ready=false;
+  const viewerOrigin=new URL(viewerUrl).origin;
+  let bytes:ArrayBuffer|undefined,sent=false,closed=false,ready=false,booted=false;
   const live=()=>!closed&&!controller.signal.aborted&&taskDraftScope()===owner;
   const canAdd=()=>{const value=currentContext.current;return live()&&!!value&&!value.disabled&&value.owner===owner&&value.conversationId===source.conversationId;};
   const resetPending=()=>{pending.current=undefined;window.clearTimeout(pendingTimer.current);setCommitting(false);};
-  const dispose=()=>{closed=true;controller.abort();bytes=undefined;selected.current=undefined;pending.current=undefined;window.clearTimeout(timeout);window.clearTimeout(pendingTimer.current);window.removeEventListener('message',message);};
+  const dispose=()=>{closed=true;controller.abort();bytes=undefined;selected.current=undefined;pending.current=undefined;window.clearTimeout(timeout);window.clearTimeout(pendingTimer.current);window.removeEventListener('message',message);window.document.removeEventListener('securitypolicyviolation',policyViolation);};
   const fail=(text:string)=>{if(!live())return;dispose();setProposal(undefined);setCommitting(false);if(officeTextFocus)setFocused(false);setState({phase:'error',message:text});};
   const send=(element:HTMLIFrameElement)=>{
-   if(!live()||sent||!bytes||!target||element!==target||loaded.current!==target||!target.contentWindow)return;
+   if(!live()||sent||!booted||!bytes||!target||element!==target||!target.contentWindow)return;
    sent=true;
-   try{target.contentWindow.postMessage({type:'jot-docx-init',protocol:1,token,bytes,...(focus?{focus}:{})},'*',[bytes]);bytes=undefined;}
+   try{target.contentWindow.postMessage({type:'jot-docx-init',protocol:1,token,bytes,...(focus?{focus}:{})},viewerOrigin,[bytes]);bytes=undefined;}
    catch{fail('Word查看器未能接收原文件，请重试。');}
   };
+  const probe=(element:HTMLIFrameElement)=>{
+   if(live()&&element===target)element.contentWindow?.postMessage({type:'jot-docx-probe',protocol:1},viewerOrigin);
+  };
   const message=(event:MessageEvent)=>{
-   if(!live()||!sent||event.source!==target?.contentWindow)return;
+   if(!live()||event.source!==target?.contentWindow||event.origin!==viewerOrigin)return;
    const value=event.data;
-   if(!value||typeof value!=='object'||Array.isArray(value)||value.protocol!==1||value.token!==token||Object.keys(value).length!==4)return;
+   if(!value||typeof value!=='object'||Array.isArray(value))return;
+   if(!sent&&value.type==='jot-docx-boot'&&value.protocol===1&&typeof value.started==='boolean'&&Object.keys(value).length===3){
+    if(value.started){fail('Word查看器已处理上次读取，请点击重新读取Word视觉内容。');return;}
+    booted=true;if(target)send(target);return;
+   }
+   if(!sent)return;
+   if(value.protocol!==1||value.token!==token||Object.keys(value).length!==4)return;
    if(value.type==='jot-docx-ready'&&Number.isSafeInteger(value.sections)&&value.sections>=0&&value.sections<=50000){
     ready=true;window.clearTimeout(timeout);setState({phase:'ready',message:`已渲染 ${value.sections} 个Word分段。分段沿原文件分页标记。`});
    }else if(value.type==='jot-docx-error'&&['DOCX_RENDER_FAILED','DOCX_VIEW_LIMIT'].includes(value.code)){
@@ -85,34 +123,39 @@ function DocxAttempt({source,owner,identity,officeTextFocus}:{source:ListedFileP
     resetPending();
     if(currentContext.current?.onAdd(original.reference)){
      selected.current=undefined;setProposal(undefined);setNotice('Word文字引用已加入当前草稿。');
-     target?.contentWindow?.postMessage({type:'jot-docx-added',protocol:1,token,serial:selection.serial},'*');
+     target?.contentWindow?.postMessage({type:'jot-docx-added',protocol:1,token,serial:selection.serial},viewerOrigin);
     }else setNotice('文字引用尚未保存，请检查草稿状态或缩小选区。');
    }
   };
-  const timeout=window.setTimeout(()=>fail('Word视觉读取超时，可重试或切换结构化文字查看。'),30000);
+  const policyViolation=(event:SecurityPolicyViolationEvent)=>{
+   if(event.effectiveDirective==='frame-src'&&(event.blockedURI===viewerOrigin||event.blockedURI.startsWith(viewerOrigin+'/')))
+    fail('当前Jot页面无法载入独立Word查看器，请重新加载Jot页面后重试。');
+  };
+  const timeout=window.setTimeout(()=>fail('Word视觉读取超时，可重新加载Jot页面、重试或切换结构化文字查看。'),30000);
   setState({phase:'loading',message:'正在核对原文件并渲染Word…'});setFocused(officeTextFocus&&!focus?false:undefined);
-  window.addEventListener('message',message);notify.current=send;
+  window.addEventListener('message',message);window.document.addEventListener('securitypolicyviolation',policyViolation);notify.current=probe;
+  if(target&&loaded.current===target)probe(target);
   cancel.current=()=>fail('Word视觉读取已取消。');
   commit.current=()=>{
    const original=selected.current;
    if(!ready||!canAdd()||!original||pending.current||!target?.contentWindow)return;
    pending.current=original;setCommitting(true);setNotice('正在复核原视觉选区…');
    pendingTimer.current=window.setTimeout(()=>{if(live()){resetPending();setNotice('视觉选区复核未完成，请重新选择后引用。');}},2000);
-   target.contentWindow.postMessage({type:'jot-docx-commit',protocol:1,token,serial:original.selection.serial},'*');
+   target.contentWindow.postMessage({type:'jot-docx-commit',protocol:1,token,serial:original.selection.serial},viewerOrigin);
   };
   void readListedFilePreviewBytes(source,owner,controller.signal).then(value=>{
    if(!live())return;
    bytes=value.buffer as ArrayBuffer;if(target)send(target);
   }).catch(error=>{if(live())fail(error instanceof Error?error.message:'原Word文件读取失败');});
   return()=>{dispose();notify.current=()=>{};commit.current=()=>{};cancel.current=()=>{};};
- },[identity,owner]);
+ },[identity,owner,viewerUrl]);
  return <section className="jot-docx-preview" aria-label="Word视觉内容">
   <p role={state.phase==='error'?'alert':'status'}>{state.message}
    {state.phase==='loading'&&<button type="button" onClick={()=>cancel.current()}>取消读取</button>}
   </p>
   {officeTextFocus?.value.text_view===2&&<p role="status">{focused===true?'已核对并定位原视觉文字引用。':focused===false?'原视觉文字尚未与固定版本核对，请对照原引用快照。':'正在核对原视觉文字引用…'}</p>}
   {notice&&<p role="status">{notice}</p>}
-  {state.phase!=='error'&&<iframe ref={frame} title="原固定版本Word视觉查看器" src="/docx-preview/0.4.0/frame.html" sandbox="allow-scripts" referrerPolicy="no-referrer"
+  {state.phase!=='error'&&viewerUrl&&<iframe ref={frame} title="原固定版本Word视觉查看器" src={viewerUrl} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer"
    onLoad={event=>{loaded.current=event.currentTarget;notify.current(event.currentTarget);}}/>}
   {proposal&&<section className="jot-docx-selection" aria-label="待确认的Word视觉文字引用"><blockquote>{proposal.reference.reference.selectedText}</blockquote><button type="button" disabled={disabled||committing} onPointerDown={event=>event.preventDefault()} onMouseDown={event=>event.preventDefault()} onClick={()=>commit.current()}>引用Word文字到当前对话</button></section>}
  </section>;

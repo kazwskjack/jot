@@ -1,6 +1,9 @@
 /* Rendering options follow PilotDeck DocxBuiltinPreview at 783499ffdb2d501bf590b2e035acd027a882df10. See SOURCES.json and LICENSES.txt. */
 (() => {
  'use strict';
+ const parentHost=new URLSearchParams(window.location.search).get('parent');
+ if(!parentHost||!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(parentHost))return;
+ const parentOrigin='http://'+parentHost;
  // Adapted from the pinned PilotDeck fileSearch.ts Unicode fold/offset implementation.
 const ASCII_TEXT_PATTERN = /^[\x00-\x7f]*$/u;
 
@@ -108,7 +111,11 @@ function findTextSearchMatches(text, query, limit) {
 
  const content=document.getElementById('content'),styles=document.getElementById('styles'),status=document.getElementById('status');
  let started=false,zoom=1,sessionToken,visualView,selectionSerial=0,proposal,focusRange;
- const report=message=>window.parent.postMessage({protocol:1,token:sessionToken,...message},'*');
+ const boot=()=>window.parent.postMessage({type:'jot-docx-boot',protocol:1,started},parentOrigin);
+ window.addEventListener('message',event=>{
+  if(event.source===window.parent&&event.origin===parentOrigin&&event.data?.type==='jot-docx-probe'&&event.data.protocol===1&&Object.keys(event.data).length===2)boot();
+ });
+ const report=message=>window.parent.postMessage({protocol:1,token:sessionToken,...message},parentOrigin);
  // text_view 2 pins docx-preview 0.4.0 raw DOM text order. A renderer upgrade needs a new locator protocol.
  const indexVisualText=()=>{
   const walker=document.createTreeWalker(content,NodeFilter.SHOW_TEXT),parts=[],nodes=[];let length=0,node;
@@ -196,7 +203,7 @@ function findTextSearchMatches(text, query, limit) {
  document.addEventListener('mouseup',scheduleSelection);document.addEventListener('touchend',scheduleSelection);document.addEventListener('keyup',scheduleSelection);
  window.addEventListener('message',event=>{
   const value=event.data;
-  if(!visualView||event.source!==window.parent||!value||value.protocol!==1||value.token!==sessionToken||Object.keys(value).length!==4)return;
+  if(!visualView||event.source!==window.parent||event.origin!==parentOrigin||!value||value.protocol!==1||value.token!==sessionToken||Object.keys(value).length!==4)return;
   if(value.type==='jot-docx-commit'&&proposal&&value.serial===proposal.data.serial){
    const current=quoteFromRange(proposal.range,proposal.data.serial);
    if(current&&JSON.stringify(current)===JSON.stringify(proposal.data))report({type:'jot-docx-commit-ready',selection:current});
@@ -280,7 +287,7 @@ function findTextSearchMatches(text, query, limit) {
  document.addEventListener('submit',event=>event.preventDefault(),true);
  window.addEventListener('message',async event=>{
   const value=event.data;
-  if(started||event.source!==window.parent||!value||value.type!=='jot-docx-init'||value.protocol!==1
+  if(started||event.source!==window.parent||event.origin!==parentOrigin||!value||value.type!=='jot-docx-init'||value.protocol!==1
    ||typeof value.token!=='string'||!/^[a-f0-9-]{36}$/.test(value.token)||Object.keys(value).some(key=>!['type','protocol','token','bytes','focus'].includes(key))
    ||!(value.bytes instanceof ArrayBuffer)||value.bytes.byteLength>20*1024*1024)return;
   started=true;sessionToken=value.token;
@@ -311,4 +318,5 @@ function findTextSearchMatches(text, query, limit) {
    report({type:'jot-docx-error',code:error instanceof Error&&error.message==='DOCX_VIEW_LIMIT'?'DOCX_VIEW_LIMIT':'DOCX_RENDER_FAILED'});
   }finally{value.bytes=null;}
  });
+ boot();
 })();

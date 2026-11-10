@@ -22,7 +22,7 @@
       "modified": false
     }
   ],
-  "consumption": "Public classic browser scripts inside an opaque sandbox. No package installation or script execution performed during development.",
+  "consumption": "Public classic browser scripts inside a dedicated random localhost viewer origin. The viewer host serves only fixed public files, with allow-scripts/allow-same-origin sandbox and restricted CSP. Parent and child messages verify exact origin and source window before token-bound operations. No package installation or script execution performed during development.",
   "adapted_source": [
     {
       "path": "ui/src/components/code-editor/view/subcomponents/DocxBuiltinPreview.tsx",

@@ -18,6 +18,9 @@ export function encodeSseEvent(event){return `id: ${event.seq}\ndata: ${JSON.str
 
 export async function buildServer(options={}){
   const demo=options.demo??false,csrf=randomBytes(24).toString('hex');
+  const officeViewerHost=`jot-office-${randomBytes(16).toString('hex')}.localhost`;
+  const officeViewerFiles=new Set(['frame.html','frame.js','docx-preview.js','jszip.min.js','SOURCES.json','LICENSES.txt']);
+  const officeOrigin=host=>`http://${officeViewerHost}${host.includes(':')?host.slice(host.lastIndexOf(':')):''}`;
   const flag=value=>{if(value===undefined||value==='false')return false;if(value==='true')return true;throw Error('invalid_chat_configuration');};
   const chat=demo?undefined:chatRoute(options.chat??{enabled:flag(process.env.JOT_CHAT_ENABLED),baseUrl:process.env.JOT_CHAT_MODEL_URL,model:process.env.JOT_CHAT_MODEL,key:process.env.JOT_CHAT_MODEL_KEY,thinkingDisabledSupported:flag(process.env.JOT_CHAT_THINKING_DISABLED_SUPPORTED)});
   const staticRoot=resolve(options.publicRoot??publicRoot);
@@ -46,10 +49,12 @@ export async function buildServer(options={}){
   const app=Fastify({logger:false,bodyLimit:1500000}),streams=new Set();
   app.addHook('onRequest',async(req,reply)=>{
     const host=req.headers.host??'localhost';
-    if(!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host))return reply.code(403).send({error:'invalid_host'});
-    // The opaque Word sandbox may load only these public scripts across origins.
-    const docxScript=['GET','HEAD'].includes(req.method)&&/^\/docx-preview\/0\.4\.0\/(?:jszip\.min|docx-preview|frame)\.js$/.test(req.url);
-    if(!docxScript&&(req.headers['sec-fetch-site']==='cross-site'||(req.headers.origin&&req.headers.origin!==`http://${host}`)))return reply.code(403).send({error:'origin_denied'});
+    const local=/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host),viewer=host.split(':')[0]===officeViewerHost&&/^[^:]+(:\d+)?$/.test(host);
+    const port=host.includes(':')?Number(host.slice(host.lastIndexOf(':')+1)):80;
+    if(!local&&!viewer||!Number.isInteger(port)||port<1||port>65535)return reply.code(403).send({error:'invalid_host'});
+    const pathname=new URL(req.url,'http://localhost').pathname;
+    if(viewer&&(!['GET','HEAD'].includes(req.method)||!pathname.startsWith('/docx-preview/0.4.0/')||!officeViewerFiles.has(pathname.slice('/docx-preview/0.4.0/'.length))))return reply.code(404).send({error:'not_found'});
+    if(!viewer&&(req.headers['sec-fetch-site']==='cross-site'||(req.headers.origin&&req.headers.origin!==`http://${host}`)))return reply.code(403).send({error:'origin_denied'});
     if(req.url.startsWith('/api/')&&req.url.split('?')[0]!=='/api/capabilities'&&!sameToken(req.headers['x-jot-token'],csrf))return reply.code(403).send({error:'token_required'});
     if(req.url.startsWith('/workbench-api/')&&!['GET','HEAD'].includes(req.method)&&!sameToken(req.headers['x-csrf-token'],csrf))return reply.code(403).send({error:'token_required'});
     reply.header('Cache-Control','no-store').header('X-Content-Type-Options','nosniff').header('Referrer-Policy','no-referrer');
@@ -91,17 +96,25 @@ export async function buildServer(options={}){
   });
   app.get('/*',async(req,reply)=>{
     const pathname=new URL(req.url,'http://localhost').pathname;const path=resolve(staticRoot,pathname==='/'?'index.html':'.'+pathname);
+    const host=req.headers.host??'localhost',viewer=host.split(':')[0]===officeViewerHost;
+    if(pathname==='/docx-preview/0.4.0/viewer'&&!viewer){
+      const url=new URL('/docx-preview/0.4.0/frame.html',officeOrigin(host));url.searchParams.set('parent',host);
+      return {protocol:1,url:url.href};
+    }
+    if(pathname==='/docx-preview/0.4.0/frame.html'&&!viewer)return reply.code(404).send({error:'viewer_origin_required'});
     if(!path.startsWith(staticRoot+sep))return reply.code(404).send('Not found');
     try {
       const data=await readFile(path);
       if(pathname==='/docx-preview/0.4.0/frame.html'){
+        const parent=new URL(req.url,'http://localhost').searchParams.get('parent');
+        if(!parent||!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(parent)||officeOrigin(parent)!==`http://${host}`)return reply.code(403).send({error:'invalid_parent_origin'});
         const nonce=randomBytes(18).toString('base64');
         return reply.header('Content-Type','text/html; charset=utf-8').header('Content-Security-Policy',
-          `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors http://${req.headers.host}`)
+          `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; connect-src 'none'; frame-src about:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors http://${parent} http://${host}`)
           .send(data.toString('utf8').replaceAll('__JOT_DOCX_NONCE__',nonce));
       }
       const ext=path.split('.').pop(),types={html:'text/html',js:'application/javascript',css:'text/css',svg:'image/svg+xml'};
-      return reply.header('Content-Type',types[ext]??'application/octet-stream').header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; frame-ancestors 'none'").send(data);
+      return reply.header('Content-Type',types[ext]??'application/octet-stream').header('Content-Security-Policy',`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; frame-src 'self' ${officeOrigin(host)}; object-src 'none'; frame-ancestors 'none'`).send(data);
     }catch{return reply.code(404).send('Run npm run build before opening the interface.');}
   });
   let closing;
