@@ -292,7 +292,8 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   void action(async()=>{
    const retry=controller.pendingMessage;
    const preview=retry?'':replyQuoteMessage(fileReferenceMessage(draft,fileReferences,imageArtifact),replyQuotes);
-   const structured=!retry&&fileReferences.length>0&&modeCaps?.reference_snapshots?.protocol===1&&modeCaps.reference_snapshots.request===true;
+   const structured=!retry&&fileReferences.length>0&&modeCaps?.reference_snapshots?.protocol===1&&modeCaps.reference_snapshots.request===true
+    &&fileReferences.every(value=>value.reference.renderer.id==='pdf'||modeCaps?.reference_snapshots?.renderers?.some(renderer=>renderer===value.reference.renderer.id));
    const message=structured?replyQuoteMessage(draft.trim()||'请结合以下原文件引用继续。',replyQuotes):preview;
    const referenceSnapshots=structured?{protocol:1,items:fileReferenceSnapshots(fileReferences,imageArtifact)}:undefined;
    if(!retry&&quoteCount&&goalPrompt(preview,ordinary&&!chatMode&&!run&&goalMode).length>100000)throw Error('引用与消息过长，请减少引用或缩短消息后发送');
@@ -322,16 +323,24 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   conversationRegion.current?.querySelector<HTMLTextAreaElement>('.jot-prompt-composer textarea')?.focus();
   return true;
  };
- const addFileReference=(value:FileSelectionReference)=>{
-  if(quoteLocked||taskDraftScope()!==fileOwner||value.owner!==fileOwner||value.conversationId!==id)return false;
-  try{validateTextReference(value,id,fileOwner);}catch{return false;}
-  const fingerprint=(item:FileSelectionReference)=>JSON.stringify([item.runId,item.activityId,item.resultSha,item.file.path,item.file.version,item.file.sha256,item.file.size,
-   item.reference.selectionMode==='text'?[item.reference.selectedText,item.reference.locator.pageNumbers]:[item.reference.locator,item.reference.cells]]);
-  if(fileReferences.some(item=>!isFileRegion(item)&&fingerprint(item)===fingerprint(value)))return true;
-  const next=[...fileReferences,value];
+ const addFileReferences=(values:FileSelectionReference[])=>{
+  if(!values.length||quoteLocked||taskDraftScope()!==fileOwner)return false;
+  try{for(const value of values)validateTextReference(value,id,fileOwner);}catch{return false;}
+  const fingerprint=(item:FileSelectionReference)=>{
+   const reference=item.reference;
+   const location=reference.selectionMode==='cells'?[reference.locator,reference.cells]
+    :reference.renderer.id==='pdf'?[reference.selectedText,reference.locator.pageNumbers]:[('text_view' in item?item.text_view:undefined),reference.selectedText,reference.locator];
+   return JSON.stringify([item.runId,item.activityId,item.resultSha,item.file.path,item.file.version,item.file.sha256,item.file.size,location]);
+  };
+  const known=new Set(fileReferences.filter((item):item is FileSelectionReference=>!isFileRegion(item)).map(fingerprint));
+  const added:FileSelectionReference[]=[];
+  for(const value of values){const key=fingerprint(value);if(!known.has(key)){known.add(key);added.push(value);}}
+  if(!added.length)return true;
+  const next=[...fileReferences,...added];
   if(goalPrompt(replyQuoteMessage(fileReferenceMessage(draft,next),replyQuotes),ordinary&&!chatMode&&!run&&goalMode).length>100000){setError('引用与消息过长，请减少引用或缩短消息');return false;}
   setFileReferences(next);conversationRegion.current?.querySelector<HTMLTextAreaElement>('.jot-prompt-composer textarea')?.focus();return true;
  };
+ const addFileReference=(value:FileSelectionReference)=>addFileReferences([value]);
  const addRegionReference=(value:FileRegionDraft,file:File)=>{
   if(regionDisabled||!maxBytes||taskDraftScope()!==fileOwner||value.owner!==fileOwner||value.conversationId!==id)return Promise.resolve(false);
   const {reference}=value,rect=reference.locator.rect;
@@ -432,7 +441,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   }else setPreview({name:file.relative_path||file.file_name,unsupported:true});
  });
  const download=(file:Artifact)=>void action(async()=>{const response=await fetch(`${base}/v1/artifacts/${encodeURIComponent(file.artifact_id)}/download?version=${file.version}`,{credentials:'same-origin'});if(!response.ok)throw new Error('文件暂不可下载');const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download=file.file_name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
- return <FileTextReferenceContext.Provider value={{owner:fileOwner,conversationId:id,disabled:quoteLocked,regionDisabled,onAdd:addFileReference,onAddRegion:addRegionReference}}><section ref={conversationRegion} data-chat-search-scope tabIndex={-1} className="workbench-conversation jot-goal-stop-focus-target" aria-label={ordinary?"Ordinary conversation":"Role conversation"}><button disabled={busy||goalPending||controller.pendingMessage||!!draftBackup||controller.draftDirty||!!controller.draftSavePromise||draftSnapshot!==JSON.stringify(controller.draft)||quoteCount>0||uploads.entries.length>0||modelMutation.pending||modeWriter.pending||cancelWriter.pending} onClick={onClose}>返回工作台</button><h2>{ordinary?'我的对话':'角色对话'}</h2>{ordinary&&conversation&&<button type="button" className="jot-conversation-mode" style={{fontStyle:'italic',fontWeight:700,background:'transparent',border:0,color:'inherit'}} aria-label={`切换到 ${chatMode?'work':'chat'}`} disabled={!canToggle} onClick={()=>void saveMode()}>{chatMode?'chat':'work'}</button>}<p role="status">{controller.connection==='connected'?'已连接':controller.connection==='reconnecting'?'正在重新连接':'正在连接'}{run?` · ${run.status}`:''}</p>{controller.error&&<p role="alert">{controller.error}</p>}
+ return <FileTextReferenceContext.Provider value={{owner:fileOwner,conversationId:id,disabled:quoteLocked,regionDisabled,onAdd:addFileReference,onAddMany:addFileReferences,onAddRegion:addRegionReference}}><section ref={conversationRegion} data-chat-search-scope tabIndex={-1} className="workbench-conversation jot-goal-stop-focus-target" aria-label={ordinary?"Ordinary conversation":"Role conversation"}><button disabled={busy||goalPending||controller.pendingMessage||!!draftBackup||controller.draftDirty||!!controller.draftSavePromise||draftSnapshot!==JSON.stringify(controller.draft)||quoteCount>0||uploads.entries.length>0||modelMutation.pending||modeWriter.pending||cancelWriter.pending} onClick={onClose}>返回工作台</button><h2>{ordinary?'我的对话':'角色对话'}</h2>{ordinary&&conversation&&<button type="button" className="jot-conversation-mode" style={{fontStyle:'italic',fontWeight:700,background:'transparent',border:0,color:'inherit'}} aria-label={`切换到 ${chatMode?'work':'chat'}`} disabled={!canToggle} onClick={()=>void saveMode()}>{chatMode?'chat':'work'}</button>}<p role="status">{controller.connection==='connected'?'已连接':controller.connection==='reconnecting'?'正在重新连接':'正在连接'}{run?` · ${run.status}`:''}</p>{controller.error&&<p role="alert">{controller.error}</p>}
  <ConversationDisplayBoundary label="会话搜索"><ConversationHistorySearch root={conversationRegion} conversationId={id} messages={displayedMessages} activities={activityValues} runs={state?.runs??{}} onRevealActivity={revealActivity} onLoadActivityHistory={loadActivityHistory} {...(state?.snapshotSeq?{activityHistorySeq:state.snapshotSeq}:{})} {...(state?.seq?{resultSearchSeq:state.seq}:{})} renderedRevision={renderedMessages} revealedMessageId={historySelection} ready={Boolean(state)} onReveal={revealHistoryMessage} {...(state?.historyComplete!==undefined?{historyComplete:state.historyComplete}:{})} {...(state?.nextHistoryCursor?{historyCursor:state.nextHistoryCursor}:{})} onHistoryLoaded={retainHistory}/></ConversationDisplayBoundary>
  {!ordinary&&run&&['starting','running'].includes(run.status)&&<NativeMemberControls key={`native-member-controls:${run.run_id}`} run={run}/>}
  {ordinary&&conversation&&!chatMode&&<div inert={cancelWriter.pending||messageLocked}><ConversationGoal key={id} id={id} running={run?.status==='running'} runStatus={run?.status} controlRun={state?latestGoalRun(Object.values(state.runs),id):undefined} onResumeAccepted={()=>{void controller.refresh().catch(()=>{});}} onStopCompleted={focusConversationAfterStop} onPendingChange={setGoalPending}/></div>}

@@ -1,5 +1,7 @@
+import OfficeTextReferenceAction from './OfficeTextReferenceAction';
+import {officeTextView,resolveOfficeTextReference} from './office-text-reference';
 import {cellRangeCoordinates} from '../../packages/gateway/src/messages/content-reference.js';
-import {FileTextReferenceContext,type OfficeCellFocus} from './FileTextReferences';
+import {FileTextReferenceContext,type OfficeCellFocus,type OfficeTextFocus} from './FileTextReferences';
 import {createCellRangeContentReference,type CellRangeSnapshot} from './vendor/pilotdeck-content-reference';
 import './activity-tool-file-office.css';
 import React,{useContext,useEffect,useMemo,useRef,useState} from 'react';
@@ -197,35 +199,73 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
   </>}
  </section>;
 }
-function OfficeContent({value,source,officeFocus}:{value:OfficeDocumentPreview;source:ListedFilePreviewSource;officeFocus?:OfficeCellFocus}){
- const [part,setPart]=useState(0),[page,setPage]=useState(0),[column,setColumn]=useState(0),[table,setTable]=useState(0);
+function OfficeText({text,match}:{text:string;match?:{start:number;end:number}}){
+ if(!match)return <>{text}</>;
+ return <>{text.slice(0,match.start)}<mark data-office-reference-text>{text.slice(match.start,match.end)}</mark>{text.slice(match.end)}</>;
+}
+function OfficeDocumentContent({value,source,officeTextFocus}:{value:Exclude<OfficeDocumentPreview,{kind:'xlsx'}>;source:ListedFilePreviewSource;officeTextFocus?:OfficeTextFocus}){
+ const root=useRef<HTMLElement>(null),jumped=useRef(false),owner=taskDraftScope();
+ const view=useMemo(()=>officeTextView(value),[value]);
+ const focused=useMemo(()=>{
+  const original=officeTextFocus?.value;if(!original)return undefined;
+  if(original.text_view!==1||original.owner!==owner||original.conversationId!==source.conversationId||original.runId!==source.runId
+   ||original.activityId!==source.activityId||original.resultSha!==source.resultSha||original.file.path!==source.file.path
+   ||original.file.version!==source.file.version||original.file.sha256!==source.file.sha256||original.file.size!==source.file.size)return undefined;
+  return resolveOfficeTextReference(view,original.reference);
+ },[view,source,owner,officeTextFocus]);
+ const [part,setPart]=useState(focused?.block.part??0),[page,setPage]=useState(focused?.block.page??0);
+ const [column,setColumn]=useState(focused?.block.column??0),[table,setTable]=useState(focused?.block.table??0);
  const changePart=(value:number)=>{setPart(value);setPage(0);setColumn(0);};
- if(value.kind==='xlsx')return <SpreadsheetContent value={value} source={source} officeFocus={officeFocus}/>;
- if(value.kind==='pptx')return <>
-  {value.slides.slice(page*10,(page+1)*10).map(slide=><section key={slide.number} aria-label={`幻灯片 ${slide.number}`}><h5>幻灯片 {slide.number}</h5><pre>{slide.text}</pre></section>)}
-  {!value.slides.length&&<p>此演示文稿没有可显示的幻灯片文字。</p>}
-  <Pager page={page} count={Math.ceil(value.slides.length/10)} onChange={setPage} label="幻灯片文字翻页"/>
- </>;
- const rows=value.tables[table]??[],columns=rows.reduce((count,row)=>Math.max(count,row.length),0);
- return <>
-  <nav aria-label="Word内容分组" data-chat-search-ignore><button type="button" disabled={part===0} onClick={()=>changePart(0)}>段落</button><button type="button" disabled={part===1||!value.tables.length} onClick={()=>changePart(1)}>表格</button></nav>
-  {part===0?<>
-   {value.paragraphs.slice(page*30,(page+1)*30).map((text,index)=><p key={page*30+index} style={{whiteSpace:'pre-wrap'}}>{text}</p>)}
-   {!value.paragraphs.length&&<p>此文档没有可显示的段落。</p>}
-   <Pager page={page} count={Math.ceil(value.paragraphs.length/30)} onChange={setPage} label="Word段落翻页"/>
+ useEffect(()=>{
+  if(!focused||jumped.current)return;
+  const frame=window.requestAnimationFrame(()=>{
+   if(taskDraftScope()!==owner||jumped.current)return;
+   const target=root.current?.querySelector<HTMLElement>('[data-office-reference-text]');
+   if(target){target.scrollIntoView({block:'center',inline:'nearest'});jumped.current=true;}
+  });
+  return()=>window.cancelAnimationFrame(frame);
+ },[focused,part,page,column,table,owner]);
+ const match=(key:string)=>focused?.block.key===key?focused:undefined;
+ const rows=value.kind==='docx'?value.tables[table]??[]:[],columns=rows.reduce((count,row)=>Math.max(count,row.length),0);
+ return <section ref={root} aria-label="原Office文档文字">
+  <OfficeTextReferenceAction key={`${part}-${page}-${table}-${column}`} root={root} source={source} view={view}/>
+  {officeTextFocus&&<p role="status">{focused?(view.truncated||officeTextFocus.value.reference.truncated?'已核对原引用文字片段，原解析或引用存在截断。':'已核对并定位原引用文字。'):'原引用文字尚未与当前固定版本的解析结果核对，请对照原引用快照。'}</p>}
+  {value.kind==='pptx'?<>
+   {value.slides.slice(page*10,(page+1)*10).map(slide=><section key={slide.number} aria-label={`幻灯片 ${slide.number}`}>
+    <h5>幻灯片 {slide.number}</h5><pre data-office-text-block={'slide-'+slide.number}><OfficeText text={slide.text} match={match('slide-'+slide.number)}/></pre>
+   </section>)}
+   {!value.slides.length&&<p>此演示文稿没有可显示的幻灯片文字。</p>}
+   <Pager page={page} count={Math.ceil(value.slides.length/10)} onChange={setPage} label="幻灯片文字翻页"/>
   </>:<>
-   <label>表格 <select value={table} onChange={event=>{setTable(Number(event.target.value));setPage(0);setColumn(0);}}>{value.tables.map((_table,index)=><option key={index} value={index}>表格 {index+1}</option>)}</select></label>
-   <table><caption>表格 {table+1} · 列 {Math.min(column*20+1,columns)}–{Math.min((column+1)*20,columns)} / {columns}</caption><tbody>
-    {rows.slice(page*20,(page+1)*20).map((row,index)=><tr key={page*20+index}>{row.slice(column*20,(column+1)*20).map((text,index)=><td key={column*20+index}><pre>{text}</pre></td>)}</tr>)}
-   </tbody></table>
-   <Pager page={page} count={Math.ceil(rows.length/20)} onChange={setPage} label="Word表格行翻页"/>
-   <Pager page={column} count={Math.ceil(columns/20)} onChange={setColumn} label="Word表格列翻页"/>
+   <nav aria-label="Word内容分组" data-chat-search-ignore><button type="button" disabled={part===0} onClick={()=>changePart(0)}>段落</button><button type="button" disabled={part===1||!value.tables.length} onClick={()=>changePart(1)}>表格</button></nav>
+   {part===0?<>
+    {value.paragraphs.slice(page*30,(page+1)*30).map((text,index)=>{
+     const key='paragraph-'+(page*30+index);
+     return <p key={key} data-office-text-block={key} style={{whiteSpace:'pre-wrap'}}><OfficeText text={text} match={match(key)}/></p>;
+    })}
+    {!value.paragraphs.length&&<p>此文档没有可显示的段落。</p>}
+    <Pager page={page} count={Math.ceil(value.paragraphs.length/30)} onChange={setPage} label="Word段落翻页"/>
+   </>:<>
+    <label>表格 <select value={table} onChange={event=>{setTable(Number(event.target.value));setPage(0);setColumn(0);}}>{value.tables.map((_table,index)=><option key={index} value={index}>表格 {index+1}</option>)}</select></label>
+    <table><caption>表格 {table+1} · 列 {Math.min(column*20+1,columns)}–{Math.min((column+1)*20,columns)} / {columns}</caption><tbody>
+     {rows.slice(page*20,(page+1)*20).map((row,rowIndex)=><tr key={page*20+rowIndex}>{row.slice(column*20,(column+1)*20).map((text,columnIndex)=>{
+      const key=`table-${table}-row-${page*20+rowIndex}-column-${column*20+columnIndex}`;
+      return <td key={key}><pre data-office-text-block={key}><OfficeText text={text} match={match(key)}/></pre></td>;
+     })}</tr>)}
+    </tbody></table>
+    <Pager page={page} count={Math.ceil(rows.length/20)} onChange={setPage} label="Word表格行翻页"/>
+    <Pager page={column} count={Math.ceil(columns/20)} onChange={setColumn} label="Word表格列翻页"/>
+   </>}
   </>}
- </>;
+ </section>;
+}
+function OfficeContent({value,source,officeFocus,officeTextFocus}:{value:OfficeDocumentPreview;source:ListedFilePreviewSource;officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus}){
+ if(value.kind==='xlsx')return <SpreadsheetContent value={value} source={source} officeFocus={officeFocus}/>;
+ return <OfficeDocumentContent value={value} source={source} officeTextFocus={officeTextFocus}/>;
 }
 
-export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{officeFocus?:OfficeCellFocus}){
- const {conversationId,runId,activityId,resultSha,file}=props,owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file.path,file.version,file.sha256,file.size,props.officeFocus?.key]);
+export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus}){
+ const {conversationId,runId,activityId,resultSha,file}=props,owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file.path,file.version,file.sha256,file.size,props.officeFocus?.key,props.officeTextFocus?.key]);
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;page?:Page;error?:string}>(),[revision,setRevision]=useState(0);
  useEffect(()=>{root.current?.focus();root.current?.scrollIntoView({block:'nearest'});},[identity]);
@@ -262,7 +302,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
   {current?.page&&<>
    <p>原文件结构化内容 · {current.page.engine.name} {current.page.engine.version}</p>
    {current.page.document.truncated&&<p role="status">解析结果已截断，当前内容有未覆盖部分。可下载原固定版本查看完整文件。</p>}
-   <section className="jot-office-content" data-chat-search-content={JSON.stringify(['listed-office',identity])}><OfficeContent key={identity+':'+revision} value={current.page.document} source={props} officeFocus={props.officeFocus}/></section>
+   <section className="jot-office-content" data-chat-search-content={JSON.stringify(['listed-office',identity])}><OfficeContent key={identity+':'+revision} value={current.page.document} source={props} officeFocus={props.officeFocus} officeTextFocus={props.officeTextFocus}/></section>
   </>}
   {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试读取</button></p>}
  </section>;

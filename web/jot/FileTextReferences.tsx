@@ -6,17 +6,18 @@ import {CONTENT_REFERENCE_PROMPT_MARKER,type TextContentReference,type ImageRegi
 import type {Artifact,ActivityToolResultFile} from './types';
 import './assistant-reply-quote.css';
 
-export type FileTextReference={rotation?:number;owner:string;conversationId:string;runId:string;activityId:string;resultSha:string;file:Pick<ActivityToolResultFile,'path'|'version'|'sha256'|'size'>;reference:TextContentReference};
-export type FileCellReference=Omit<FileTextReference,'reference'|'rotation'>&{reference:CellRangeContentReference};
+export type FileTextReference={text_view?:1;rotation?:number;owner:string;conversationId:string;runId:string;activityId:string;resultSha:string;file:Pick<ActivityToolResultFile,'path'|'version'|'sha256'|'size'>;reference:TextContentReference};
+export type FileCellReference=Omit<FileTextReference,'reference'|'rotation'|'text_view'>&{reference:CellRangeContentReference};
 export type FileSelectionReference=FileTextReference|FileCellReference;
+export type OfficeTextFocus={key:string;value:FileTextReference};
 export type OfficeCellFocus={key:string;value:FileCellReference};
-export type FileRegionDraft=Omit<FileTextReference,'reference'>&{reference:ImageRegionContentReference;imageBytes:number;rotation:number};
+export type FileRegionDraft=Omit<FileTextReference,'reference'|'text_view'>&{reference:ImageRegionContentReference;imageBytes:number;rotation:number};
 export type FileRegionReference=FileRegionDraft&{uploadEntryId:string};
 export type FileReference=FileSelectionReference|FileRegionReference;
 export type FileSourceReference=FileSelectionReference|FileRegionDraft;
 export function isFileRegion<T extends FileSourceReference>(value:T):value is Extract<T,FileRegionDraft>{return value.reference.selectionMode==='region';}
 export function isFileCells<T extends FileSourceReference>(value:T):value is Extract<T,FileCellReference>{return value.reference.selectionMode==='cells';}
-export const FileTextReferenceContext=createContext<{owner:string;conversationId:string;disabled:boolean;regionDisabled:boolean;onAdd:(reference:FileSelectionReference)=>boolean;onAddRegion:(reference:FileRegionDraft,file:File)=>Promise<boolean>}|null>(null);
+export const FileTextReferenceContext=createContext<{owner:string;conversationId:string;disabled:boolean;regionDisabled:boolean;onAdd:(reference:FileSelectionReference)=>boolean;onAddMany?:(references:FileTextReference[])=>boolean;onAddRegion:(reference:FileRegionDraft,file:File)=>Promise<boolean>}|null>(null);
 export function resolveRegionArtifact(value:FileRegionReference,resolve:(entryId:string)=>Artifact|undefined){
  const artifact=resolve(value.uploadEntryId);
  return artifact&&artifact.conversation_id===value.conversationId&&artifact.origin==='upload'&&artifact.status==='ready'&&artifact.version===1
@@ -44,6 +45,8 @@ function RegionPreview({file}:{file:File}){
 export function FileReferenceDetails({value,file,ready}:{value:FileSourceReference;file?:File;ready?:boolean}){
  const [open,setOpen]=useState(false);
  const location=isFileCells(value)?`${value.reference.locator.sheetName} · ${value.reference.locator.ranges.join('、')}`
+  :!isFileRegion(value)&&value.reference.renderer.id==='docx'?'Word文字'
+  :!isFileRegion(value)&&value.reference.renderer.id==='pptx'?`幻灯片 ${value.reference.locator.slideNumbers?.join('、')}`
   :`第 ${isFileRegion(value)?value.reference.locator.pageNumber:value.reference.locator.pageNumbers?.join('、')} 页`;
  return <details onToggle={event=>setOpen(event.currentTarget.open)}><summary>{value.file.path} · {location}</summary>
   <p>原版本 {value.file.version} · SHA-256 <code>{value.file.sha256}</code></p>

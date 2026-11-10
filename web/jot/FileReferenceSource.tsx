@@ -20,6 +20,6 @@ export default function FileReferenceSource({value,requestId,onClose}:{value:Fil
   <p>{value.file.path} · 原版本 {value.file.version} · SHA-256 <code>{value.file.sha256}</code></p>
   {!isFileRegion(value)&&!isFileCells(value)&&<details><summary>原引用文字</summary><blockquote>{value.reference.selectedText}</blockquote></details>}
   {isFileCells(value)&&<details><summary>原单元格引用快照</summary><pre>{JSON.stringify(value.reference.cells,null,2)}</pre></details>}
-  <ActivityToolFile conversationId={value.conversationId} runId={value.runId} activityId={value.activityId} resultSha={value.resultSha} file={value.file} focus={focus} officeFocus={isFileCells(value)?{key:requestId,value}:undefined}/>
+  <ActivityToolFile conversationId={value.conversationId} runId={value.runId} activityId={value.activityId} resultSha={value.resultSha} file={value.file} focus={focus} officeFocus={isFileCells(value)?{key:requestId,value}:undefined} officeTextFocus={!isFileRegion(value)&&!isFileCells(value)&&['docx','pptx'].includes(value.reference.renderer.id)?{key:requestId,value}:undefined}/>
  </section>;
 }
