@@ -47,7 +47,9 @@ export async function buildServer(options={}){
   app.addHook('onRequest',async(req,reply)=>{
     const host=req.headers.host??'localhost';
     if(!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host))return reply.code(403).send({error:'invalid_host'});
-    if(req.headers['sec-fetch-site']==='cross-site'||(req.headers.origin&&req.headers.origin!==`http://${host}`))return reply.code(403).send({error:'origin_denied'});
+    // The opaque Word sandbox may load only these public scripts across origins.
+    const docxScript=['GET','HEAD'].includes(req.method)&&/^\/docx-preview\/0\.4\.0\/(?:jszip\.min|docx-preview|frame)\.js$/.test(req.url);
+    if(!docxScript&&(req.headers['sec-fetch-site']==='cross-site'||(req.headers.origin&&req.headers.origin!==`http://${host}`)))return reply.code(403).send({error:'origin_denied'});
     if(req.url.startsWith('/api/')&&req.url.split('?')[0]!=='/api/capabilities'&&!sameToken(req.headers['x-jot-token'],csrf))return reply.code(403).send({error:'token_required'});
     if(req.url.startsWith('/workbench-api/')&&!['GET','HEAD'].includes(req.method)&&!sameToken(req.headers['x-csrf-token'],csrf))return reply.code(403).send({error:'token_required'});
     reply.header('Cache-Control','no-store').header('X-Content-Type-Options','nosniff').header('Referrer-Policy','no-referrer');
@@ -90,7 +92,17 @@ export async function buildServer(options={}){
   app.get('/*',async(req,reply)=>{
     const pathname=new URL(req.url,'http://localhost').pathname;const path=resolve(staticRoot,pathname==='/'?'index.html':'.'+pathname);
     if(!path.startsWith(staticRoot+sep))return reply.code(404).send('Not found');
-    try {const data=await readFile(path);const ext=path.split('.').pop();const types={html:'text/html',js:'application/javascript',css:'text/css',svg:'image/svg+xml'};return reply.header('Content-Type',types[ext]??'application/octet-stream').header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; frame-ancestors 'none'").send(data);}catch{return reply.code(404).send('Run npm run build before opening the interface.');}
+    try {
+      const data=await readFile(path);
+      if(pathname==='/docx-preview/0.4.0/frame.html'){
+        const nonce=randomBytes(18).toString('base64');
+        return reply.header('Content-Type','text/html; charset=utf-8').header('Content-Security-Policy',
+          `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors http://${req.headers.host}`)
+          .send(data.toString('utf8').replaceAll('__JOT_DOCX_NONCE__',nonce));
+      }
+      const ext=path.split('.').pop(),types={html:'text/html',js:'application/javascript',css:'text/css',svg:'image/svg+xml'};
+      return reply.header('Content-Type',types[ext]??'application/octet-stream').header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; frame-ancestors 'none'").send(data);
+    }catch{return reply.code(404).send('Run npm run build before opening the interface.');}
   });
   let closing;
   return {app,agent,store,close:()=>closing??=(async()=>{for(const stream of streams)stream.destroy();await agent.close();await app.close();store.close();})()};

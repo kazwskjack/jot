@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1">
+ <title>Word视觉查看器</title>
+ <style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #eee; color: #222; }
+  nav { position: sticky; top: 0; z-index: 1; padding: 0.5rem; background: #fff; border-bottom: 1px solid #ccc; }
+  button { min-width: 2.5rem; min-height: 2rem; margin-inline: 0.2rem; }
+  #content { overflow: auto; min-height: 24rem; }
+  #content img { max-width: 100%; }
+ </style>
+</head>
+<body>
+ <nav aria-label="Word缩放"><button type="button" id="out" aria-label="缩小">−</button><output id="zoom" aria-live="polite">100%</output><button type="button" id="in" aria-label="放大">＋</button><span id="status" role="status">等待原文件</span></nav>
+ <div id="styles"></div><main id="content" aria-label="Word文档内容"></main>
+ <script nonce="__JOT_DOCX_NONCE__" src="./jszip.min.js"></script>
+ <script nonce="__JOT_DOCX_NONCE__" src="./docx-preview.js"></script>
+ <script nonce="__JOT_DOCX_NONCE__" src="./frame.js"></script>
+</body>
+</html>

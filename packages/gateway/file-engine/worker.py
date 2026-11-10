@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Confined file-engine process. One JSON request in, one JSON result out."""
-import hashlib, json, os, posixpath, re, shutil, subprocess, sys, time, uuid, zipfile
+import hashlib, io, json, os, posixpath, re, shutil, struct, subprocess, sys, time, uuid, zipfile, zlib
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -78,6 +78,77 @@ def docx_preview(path: Path) -> dict:
             tables.append(rows)
         if remaining <= 0: truncated = True; break
     return {"paragraphs": paragraphs, "tables": tables, "truncated": truncated}
+
+def verify_docx_visual_source(path: Path):
+    expanded, xml_nodes, names = 0, 0, set()
+    try:
+        with safe_zip(path, 32 * 1024 * 1024, 8 * 1024 * 1024) as archive, path.open("rb") as raw:
+            source_size = path.stat().st_size
+            for info in archive.infolist():
+                if info.filename in names or "\\" in info.filename or info.flag_bits & 1:
+                    fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+                names.add(info.filename)
+                if info.is_dir():
+                    continue
+                if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                    fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+                raw.seek(info.header_offset)
+                header = raw.read(30)
+                if len(header) != 30 or header[:4] != b"PK\x03\x04":
+                    fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+                fields = struct.unpack("<4s5H3I2H", header)
+                start = info.header_offset + 30 + fields[-2] + fields[-1]
+                if fields[3] != info.compress_type or start < 0 or start + info.compress_size > source_size:
+                    fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+                raw.seek(start)
+                decoder = zlib.decompressobj(-15) if info.compress_type == zipfile.ZIP_DEFLATED else None
+                remaining, actual, checksum, xml = info.compress_size, 0, 0, []
+                is_xml = info.filename.lower().endswith((".xml", ".rels"))
+                def accept(data):
+                    nonlocal actual, expanded, checksum
+                    actual += len(data); expanded += len(data)
+                    if actual > info.file_size or actual > 8 * 1024 * 1024 or expanded > 32 * 1024 * 1024:
+                        fail("DOCUMENT_VISUAL_LIMIT")
+                    checksum = zlib.crc32(data, checksum)
+                    if is_xml:
+                        xml.append(data)
+                while remaining:
+                    compressed = raw.read(min(65536, remaining))
+                    if not compressed:
+                        fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+                    remaining -= len(compressed)
+                    if decoder is None:
+                        accept(compressed)
+                    else:
+                        while compressed:
+                            accept(decoder.decompress(compressed, min(65536, info.file_size - actual + 1)))
+                            if decoder.unused_data:
+                                fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+                            compressed = decoder.unconsumed_tail
+                if decoder is not None:
+                    while not decoder.eof:
+                        data = decoder.decompress(b"", min(65536, info.file_size - actual + 1))
+                        if not data:
+                            break
+                        accept(data)
+                    if not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:
+                        fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+                if actual != info.file_size or checksum & 0xffffffff != info.CRC:
+                    fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+                if is_xml:
+                    data = b"".join(xml)
+                    if b"\x00" in data or re.search(rb"<!\s*(?:DOCTYPE|ENTITY)\b", data, re.I):
+                        fail("DOCUMENT_PREVIEW_XML_UNSAFE")
+                    for event, element in ET.iterparse(io.BytesIO(data), events=("start", "end")):
+                        if event == "start":
+                            xml_nodes += 1
+                            if xml_nodes > 50000:
+                                fail("DOCUMENT_VISUAL_LIMIT")
+                        else:
+                            element.clear()
+    except (ValueError, zlib.error, ET.ParseError, zipfile.BadZipFile, EOFError, struct.error):
+        fail("DOCUMENT_PREVIEW_FORMAT_INVALID")
+
 
 def pdf_preview(path: Path) -> dict:
     try:
@@ -535,7 +606,14 @@ def execute(req: dict) -> dict:
     if operation in {"document.inspect", "document.read"}:
         content = document_preview(input_path, media_type) if operation == "document.inspect" else inspect(input_path, media_type)
         engine = "pypdf" if media_type == "application/pdf" else "python_ooxml"
-        return {"ok": True, "engine": {"name": engine, "version": sys.version.split()[0]}, "content": content, "warnings": []}
+        result = {"ok": True, "engine": {"name": engine, "version": sys.version.split()[0]}, "content": content, "warnings": []}
+        if operation == "document.inspect" and "wordprocessingml" in media_type and req.get("request", {}).get("verify_docx_visual") is True:
+            try:
+                verify_docx_visual_source(input_path)
+                result["checks"] = {"docx_visual_source_verified": True}
+            except FileEngineError as error:
+                result["checks"] = {"docx_visual_source_verified": False, "docx_visual_reason": str(error)}
+        return result
     root = Path(job_dir).resolve(); root.mkdir(parents=True, exist_ok=True, mode=0o700)
     output_path = safe_path(str(req.get("output_path", "")), str(root), must_exist=False)
     if operation == "office.export_pdf": result = uno_export_pdf(req, input_path, output_path, root); engine = "libreoffice_uno"

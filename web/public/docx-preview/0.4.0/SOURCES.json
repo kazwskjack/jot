@@ -1,0 +1,26 @@
+{
+  "pilotdeck_revision": "783499ffdb2d501bf590b2e035acd027a882df10",
+  "sources": [
+    {
+      "name": "docx-preview",
+      "version": "0.4.0",
+      "file": "docx-preview.js",
+      "url": "https://registry.npmjs.org/docx-preview/-/docx-preview-0.4.0.tgz",
+      "archive_integrity": "sha512-OdKtE/uj3M4RfGarLkGjahUzRg8/kBp0Sraj1r1NAY1tp/sTpHOBqDrzVf9onMBt9vxP6SdQ6bpLCUCsFwjgcA==",
+      "upstream_integrity": "sha512-OdKtE/uj3M4RfGarLkGjahUzRg8/kBp0Sraj1r1NAY1tp/sTpHOBqDrzVf9onMBt9vxP6SdQ6bpLCUCsFwjgcA==",
+      "sha256": "48206d7d7ab55fcdf50e5a47aff0bd15734b3da6dd30e0b46e47ca172d0e16fc",
+      "modified": false
+    },
+    {
+      "name": "jszip",
+      "version": "3.10.1",
+      "file": "jszip.min.js",
+      "url": "https://registry.npmjs.org/jszip/-/jszip-3.10.1.tgz",
+      "archive_integrity": "sha512-xXDvecyTpGLrqFrvkrUSoxxfJI5AH7U8zxxtVclpsUtMCq4JQ290LY8AW5c7Ggnr/Y/oK+bQMbqK2qmtk3pN4g==",
+      "upstream_integrity": "sha512-xXDvecyTpGLrqFrvkrUSoxxfJI5AH7U8zxxtVclpsUtMCq4JQ290LY8AW5c7Ggnr/Y/oK+bQMbqK2qmtk3pN4g==",
+      "sha256": "acc7e41455a80765b5fd9c7ee1b8078a6d160bbbca455aeae854de65c947d59e",
+      "modified": false
+    }
+  ],
+  "consumption": "Public classic browser scripts inside an opaque sandbox. No package installation or script execution performed during development."
+}

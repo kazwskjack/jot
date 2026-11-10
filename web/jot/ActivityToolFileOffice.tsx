@@ -7,12 +7,14 @@ import './activity-tool-file-office.css';
 import React,{useContext,useEffect,useMemo,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
 import ActivityToolFileBytes from './ActivityToolFileBytes';
+import ActivityToolFileDocx from './ActivityToolFileDocx';
 import type {ListedFilePreviewSource} from './activity-file-preview-client';
 import {officePreviewFormat,normalizeOfficePreviewContent,type OfficeDocumentPreview} from '../../packages/gateway/src/artifacts/document-preview-content';
 
 type Page={document_protocol:1;conversation_id:string;run_id:string;activity_id:string;result_sha256:string;
  path:string;version:number;sha256:string;size:number;source:'workspace'|'isolated';media_type:string;
- document:OfficeDocumentPreview;engine:{name:string;version:string};execution_authorized:false};
+ document:OfficeDocumentPreview;engine:{name:string;version:string};execution_authorized:false;
+ docx_visual?:{protocol:1;ready:boolean;reason?:'source_limit'|'format_invalid'|'source_unverified'}};
 
 function Pager({page,count,onChange,label}:{page:number;count:number;onChange:(page:number)=>void;label:string}){
  return <nav aria-label={label} data-chat-search-ignore>
@@ -268,6 +270,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
  const {conversationId,runId,activityId,resultSha,file}=props,owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file.path,file.version,file.sha256,file.size,props.officeFocus?.key,props.officeTextFocus?.key]);
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;page?:Page;error?:string}>(),[revision,setRevision]=useState(0);
+ const [visualIdentity,setVisualIdentity]=useState<string>();
  useEffect(()=>{root.current?.focus();root.current?.scrollIntoView({block:'nearest'});},[identity]);
  useEffect(()=>{
   const controller=new AbortController();active.current=controller;setState({identity});
@@ -302,7 +305,14 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
   {current?.page&&<>
    <p>原文件结构化内容 · {current.page.engine.name} {current.page.engine.version}</p>
    {current.page.document.truncated&&<p role="status">解析结果已截断，当前内容有未覆盖部分。可下载原固定版本查看完整文件。</p>}
-   <section className="jot-office-content" data-chat-search-content={JSON.stringify(['listed-office',identity])}><OfficeContent key={identity+':'+revision} value={current.page.document} source={props} officeFocus={props.officeFocus} officeTextFocus={props.officeTextFocus}/></section>
+   {current.page.document.kind==='docx'&&<>
+    <nav aria-label="Word查看方式"><button type="button" aria-pressed={visualIdentity!==identity} onClick={()=>setVisualIdentity(undefined)}>结构化文字与引用</button>
+     <button type="button" aria-pressed={visualIdentity===identity} disabled={current.page.docx_visual?.protocol!==1||current.page.docx_visual.ready!==true} onClick={()=>setVisualIdentity(identity)}>Word视觉内容</button></nav>
+    {current.page.docx_visual?.ready!==true&&<p role="status">{current.page.docx_visual?.reason==='source_limit'?'原文件超过当前视觉渲染资源范围。':'原文件尚未通过视觉读取检查。'}</p>}
+   </>}
+   {visualIdentity===identity&&current.page.document.kind==='docx'&&current.page.docx_visual?.protocol===1&&current.page.docx_visual.ready===true
+    ?<ActivityToolFileDocx key={identity+':'+revision} {...props}/>
+    :<section className="jot-office-content" data-chat-search-content={JSON.stringify(['listed-office',identity])}><OfficeContent key={identity+':'+revision} value={current.page.document} source={props} officeFocus={props.officeFocus} officeTextFocus={props.officeTextFocus}/></section>}
   </>}
   {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试读取</button></p>}
  </section>;
