@@ -7,6 +7,13 @@ export interface TerminalInventoryClient {
   listTerminals(ownerId:string,sessionId:string,signal?:AbortSignal):Promise<TerminalInventory>;
 }
 
+export function readOwnedTerminalSession(db:DatabaseSync,owner:string,conversationId:string,runId:string) {
+  return withReadTransaction(db,()=>db.prepare(`SELECT s.session_id,c.archived_at FROM ga_run_native_sessions s
+    JOIN ga_runs r ON r.id=s.run_id AND r.conversation_id=s.conversation_id
+    JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=s.owner_id
+    WHERE s.run_id=? AND c.id=? AND c.owner_id=?`).get(runId,conversationId,owner) as {session_id:string;archived_at:string|null}|undefined);
+}
+
 /** Read retained Host terminals through the original owned run/session binding. */
 export function registerTerminalInventoryRoutes(app:FastifyInstance,options:{
   db:DatabaseSync;
@@ -25,10 +32,7 @@ export function registerTerminalInventoryRoutes(app:FastifyInstance,options:{
       const id=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
       if(!id.test(conversationId)||!id.test(runId)||Object.keys(request.query as object).length)
         return reply.code(400).send({error:{code:'TERMINAL_INPUT_INVALID'}});
-      const binding=()=>withReadTransaction(db,()=>db.prepare(`SELECT s.session_id FROM ga_run_native_sessions s
-        JOIN ga_runs r ON r.id=s.run_id AND r.conversation_id=s.conversation_id
-        JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=s.owner_id
-        WHERE s.run_id=? AND c.id=? AND c.owner_id=?`).get(runId,conversationId,owner) as {session_id:string}|undefined);
+      const binding=()=>readOwnedTerminalSession(db,owner,conversationId,runId);
       const source=binding();
       if(!source)return reply.code(404).send({error:{code:'TERMINAL_SESSION_NOT_FOUND'}});
       if(typeof client?.listTerminals!=='function')return reply.code(503).send({error:{code:'TERMINAL_UNAVAILABLE'}});

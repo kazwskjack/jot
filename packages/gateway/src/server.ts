@@ -63,6 +63,7 @@ import {registerPublicationExecutionRoutes} from './git/publication-execution-ro
 import {registerPublicationDispatchRoutes} from './git/publication-dispatch-routes.ts';
 import type {NativeGitClient} from './git/native-transport-client.ts';
 import {WorkPublicationExecutions} from './persistent-tasks/work-publication-executions.ts';
+import {registerTerminalControlRoutes,type TerminalControlClient} from './terminal/control-routes.ts';
 import {registerTerminalInventoryRoutes,type TerminalInventoryClient} from './terminal/inventory-routes.ts';
 import { EventStore, ExpiredCursorError, FutureCursorError } from './events/event-store.ts';
 import { RunRepository } from './runs/repository.ts';
@@ -224,6 +225,7 @@ export async function buildServer(config: {
   conversationGoalClient?: ConversationGoalClient;
   nativeMemberClient?:NativeMemberControlClient;
   terminalInventoryClient?:TerminalInventoryClient;
+  terminalControlClient?:TerminalControlClient;
   taskmasterInstallationClient?:TaskmasterInstallationClient;
   skillCatalogClient?: SkillCatalogHost;
   conversationForkSourceClient?:{inspectConversationForkSource(sessionId:string,signal?:AbortSignal):Promise<unknown>};
@@ -1046,6 +1048,7 @@ export async function buildServer(config: {
   registerDiscoveryPolicyRoutes(app,{policies:new DiscoveryPolicies(db,{onChange:(owner,receipt,event)=>persistentTasks.synchronizeDiscoveryPolicy(owner,receipt.policy_id,event)}),actor,role:(owner,id)=>workbench.getAgent(owner,id),atomic:atomicCommand});
   registerDiscoveryHistoryRoutes(app,{history:new DiscoveryHistory(db),actor,role:(owner,id)=>workbench.getAgent(owner,id)});
   registerTerminalInventoryRoutes(app,{db,actor,client:config.terminalInventoryClient});
+  registerTerminalControlRoutes(app,{db,actor,client:config.terminalControlClient});
   registerConversationGoalRoutes(app,{db,conversations,actor,client:config.conversationGoalClient,resumeAdmission:{enabled:config.conversationGoalResumeEnabled===true,controls:new ConversationGoalControls(db,events,runs),atomic:atomicCommand}});
   if(config.skillCatalogClient){
     const catalog=new SkillCatalogService(db,workbench,config.skillCatalogClient);

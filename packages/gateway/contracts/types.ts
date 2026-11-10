@@ -852,3 +852,5 @@ export type OfficePreviewStatus = {
 export type OfficePrintView={protocol:1;sha256:string;size:number;pageCount:number;proof:string};
 
 export type {TerminalInfo,TerminalInventory} from '../src/terminal/inventory.js';
+
+export type {TerminalOptions,TerminalCommand} from '../src/terminal/control.js';

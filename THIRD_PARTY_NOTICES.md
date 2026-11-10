@@ -154,3 +154,7 @@ Jot's terminal inventory projection, owned conversation route and metadata
 panel integrate this API through its published Session-owned metadata contract.
 The PilotDeck shell hook and mobile shortcuts at pinned revision
 `783499ffdb2d501bf590b2e035acd027a882df10` inform the remaining interactive scope.
+
+The same native terminal integration also uses `environment`, `shells`, `create`
+and `close` through published `0.2.1-rc.2` APIs. Host-instance binding and Jot's
+original Gateway idempotency receipts preserve explicit user command identity.
