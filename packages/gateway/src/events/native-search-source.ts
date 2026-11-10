@@ -187,12 +187,15 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
     const abort = new AbortController(), signal = AbortSignal.any([abort.signal,AbortSignal.timeout(120000)]);
     let stream:Readable|undefined, store:ReturnType<typeof createPinnedByteStore>|undefined;
     const reservation = {bytes:0};
+    const cancelled = () => stream?.destroy();
+    signal.addEventListener('abort',cancelled,{once:true});
     const disconnected = () => {abort.abort();stream?.destroy();};
     request.raw.once('aborted',disconnected);
     reply.raw.once('close',disconnected);
     if (request.raw.aborted || reply.raw.destroyed) disconnected();
     let cleanupPromise:Promise<void>|undefined;
     const cleanup = () => cleanupPromise ??= (async()=>{
+      signal.removeEventListener('abort',cancelled);
       request.raw.off('aborted',disconnected);
       reply.raw.off('close',disconnected);
       await store?.dispose();
