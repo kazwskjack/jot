@@ -103,11 +103,7 @@ const officeTypes={
  xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
  pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 } as const;
-export function officePreviewFormat(path:string){
- const extension=path.toLowerCase().split('.').at(-1);
- if(extension!=='docx'&&extension!=='xlsx'&&extension!=='pptx')return undefined;
- return {kind:extension,mediaType:officeTypes[extension]};
-}
+export {officePreviewFormat} from './office-preview-format.js';
 
 function spreadsheetPreviewCell(cell:Record<string,unknown>):SpreadsheetPreviewCell{
  const normalized:SpreadsheetPreviewCell={value:plainText(cell.value??''),formula:cell.formula==null?null:plainText(cell.formula)};

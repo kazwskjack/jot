@@ -32,7 +32,7 @@ async function withPinnedOfficeSource<T>(db:DatabaseSync,reader:Pick<WorkbenchSe
   }catch(error){if(db.isTransaction)db.exec('ROLLBACK');throw error;}
   await writer.seal();signal.throwIfAborted();
   await mkdir(root,{recursive:true,mode:0o700});directory=await mkdtemp(join(root,'office-'));
-  const path=join(directory,'input.'+format.kind);
+  const path=join(directory,'input.'+format.extension);
   await pipeline(Readable.from(writer.source.stream(signal)),createWriteStream(path,{flags:'wx',mode:0o600}),{signal});
   const engine=new FileEngineAdapter({python:process.env.GENERAL_AGENT_FILE_ENGINE_PYTHON?.trim()||'/usr/bin/python3',
    workerPath:process.env.GENERAL_AGENT_FILE_ENGINE_SCRIPT?.trim()||fileURLToPath(new URL('../../file-engine/worker.py',import.meta.url)),timeoutMs:30000});
@@ -44,7 +44,8 @@ async function withPinnedOfficeSource<T>(db:DatabaseSync,reader:Pick<WorkbenchSe
 
 export async function readActivityFileDocument(db:DatabaseSync,reader:Pick<WorkbenchService,'readBinaryFile'>,
  owner:string,conversationId:string,activityId:string,input:ReturnType<typeof parseActivityFileDownloadQuery>,root:string,signal:AbortSignal){
- return withPinnedOfficeSource(db,reader,owner,conversationId,activityId,input,root,signal,async({file,format,path,engine})=>{
+ if(!officePreviewFormat(input.path)?.native)throw Error('UNSUPPORTED_FORMAT_OPERATION');
+ return withPinnedOfficeSource(db,reader,owner,conversationId,activityId,input,root,signal,async({file,format,path,directory,engine})=>{
   const result=await engine.run({operation:'document.inspect',input_path:path,media_type:format.mediaType,job_dir:directory,request:{[`verify_${format.kind}_visual`]:true,...(format.kind==='xlsx'?{include_xlsx_raw:true}:{})}},
    {signal,maxOutputBytes:2*1024*1024});
   signal.throwIfAborted();

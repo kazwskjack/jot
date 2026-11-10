@@ -1,3 +1,4 @@
+import {officePreviewFormat} from '../artifacts/office-preview-format.js';
 // Validates Jot snapshots of the retained PilotDeck content-reference schema.
 // All references remain user-provided context with execution_authorized=false.
 const exact=(value,required,optional=[])=>!!value&&typeof value==='object'&&!Array.isArray(value)
@@ -14,9 +15,7 @@ const relative=value=>text(value,4096)&&value.length>0&&!/[\\:\u0000-\u001f\u007
 function officePrintPdfSource(value){
  const print=value?.print_view,ref=value?.reference,source=ref?.source,renderer=ref?.renderer;
  const path=value?.file?.path;
- const mimes={docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',pptx:'application/vnd.openxmlformats-officedocument.presentationml.presentation'};
- const mime=typeof path==='string'?mimes[path.toLowerCase().split('.').at(-1)]:undefined;
+ const mime=officePreviewFormat(path)?.mediaType;
  if(!exact(print,['protocol','sha256','size','pageCount','proof'])||print.protocol!==1||!sha(print.sha256)
   ||!Number.isSafeInteger(print.size)||print.size<100||print.size>20*1024*1024
   ||!positive(print.pageCount)||print.pageCount>50000||typeof print.proof!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(print.proof)

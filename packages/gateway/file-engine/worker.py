@@ -536,6 +536,12 @@ def uno_export_pdf(req: dict, input_path: Path, output_path: Path, job_dir: Path
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "calc_pdf_Export",
         "application/vnd.ms-excel": "calc_pdf_Export",
         "application/vnd.openxmlformats-officedocument.presentationml.presentation": "impress_pdf_Export",
+        "application/msword": "writer_pdf_Export",
+        "application/vnd.ms-works": "writer_pdf_Export",
+        "application/vnd.oasis.opendocument.text": "writer_pdf_Export",
+        "application/vnd.oasis.opendocument.spreadsheet": "calc_pdf_Export",
+        "application/vnd.ms-powerpoint": "impress_pdf_Export",
+        "application/vnd.oasis.opendocument.presentation": "impress_pdf_Export",
     }
     if str(req.get("request", {}).get("save_as", {}).get("format", "")).lower() != "pdf":
         fail("UNSUPPORTED_FORMAT_OPERATION")
@@ -651,7 +657,9 @@ def execute(req: dict) -> dict:
     output_path = safe_path(str(req.get("output_path", "")), str(root), must_exist=False)
     if operation == "office.export_pdf":
         if req.get("request", {}).get("jot_preview_pdf") == 1:
-            verify_ooxml_visual_source(input_path)
+            # Modern/ODF containers are mandatory ZIP; legacy/WPS may also contain ZIP data.
+            if "openxmlformats-officedocument" in media_type or "vnd.oasis.opendocument" in media_type or zipfile.is_zipfile(input_path):
+                verify_ooxml_visual_source(input_path)
         result = uno_export_pdf(req, input_path, output_path, root); engine = "libreoffice_uno"
     elif operation.startswith("pdf."): result = pdf_edit(operation, input_path, output_path, req.get("request", {})); engine = "pypdf"
     else: result = uno_edit(req, input_path, output_path, root); engine = "libreoffice_uno"

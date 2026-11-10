@@ -309,7 +309,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;page?:Page;error?:string}>(),[revision,setRevision]=useState(0);
  const [visualState,setVisualState]=useState<{identity:string;enabled:boolean}>();
- const [printSource,setPrintSource]=useState<{identity:string;enabled:boolean}>();const print=printSource?.identity===identity?printSource.enabled:!!props.printFocus;
+ const [printSource,setPrintSource]=useState<{identity:string;enabled:boolean}>();const native=officePreviewFormat(file.path)?.native===true;const print=printSource?.identity===identity?printSource.enabled:!!props.printFocus;
  const [fullscreen,setFullscreen]=useState(false),[displayError,setDisplayError]=useState('');
  const [fullscreenPending,setFullscreenPending]=useState(false),fullscreenRequest=useRef(false);
  const visual=visualState?.identity===identity?visualState.enabled:props.officeFocus?.value.cell_view===2||props.officeTextFocus?.value.text_view===2||!!props.officeRegionFocus;
@@ -320,7 +320,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
  },[]);
  useEffect(()=>{setDisplayError('');root.current?.focus();root.current?.scrollIntoView({block:'nearest'});},[identity]);
  useEffect(()=>{
-  if(print)return;
+  if(print||!native)return;
   const controller=new AbortController();active.current=controller;setState({identity});
   const load=async()=>{
    const format=officePreviewFormat(file.path);
@@ -344,9 +344,9 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
    setState({identity,error:message});
   });
   return()=>{controller.abort();if(active.current===controller)active.current=null;};
- },[identity,revision,print]);
+ },[identity,revision,print,native]);
  const current=state?.identity===identity?state:undefined;
- const loading=!print&&(!current||!current.page&&!current.error);
+ const loading=!print&&native&&(!current||!current.page&&!current.error);
  const refresh=()=>{
   if(taskDraftScope()!==owner)return;
   active.current?.abort();setState({identity});setRevision(value=>value+1);
@@ -364,12 +364,13 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
   <nav aria-label="Office查看器工具栏" data-chat-search-ignore>
    <button type="button" aria-pressed={fullscreen} disabled={fullscreenPending} onClick={()=>void toggleFullscreen()}>{fullscreen?'退出全屏':'全屏查看Office文件'}</button>
    <button type="button" disabled={loading} onClick={refresh}>重新读取固定版本</button>
-   <button type="button" aria-pressed={!print} onClick={()=>setPrintSource({identity,enabled:false})}>内置Office查看器</button>
+   <button type="button" aria-pressed={!print} disabled={!native} onClick={()=>setPrintSource({identity,enabled:false})}>内置Office查看器</button>
    <button type="button" aria-pressed={print} disabled={loading} onClick={()=>setPrintSource({identity,enabled:true})}>LibreOffice转换PDF</button>
   </nav>
   {displayError&&<p role="alert">{displayError}</p>}
   <OfficePreviewServiceStatus key={identity} owner={owner} onRendererChange={refresh}/>
   <ActivityToolFileBytes {...props}/>
+  {!native&&!print&&<p role="status">此文件可通过LibreOffice转换PDF查看，请选择转换入口。</p>}
   {print&&<OfficeFilePrintPreview key={identity+':print:'+revision} {...props} focus={props.printFocus}/>}
   {loading&&<p role="status">正在核对原版本并解析Office内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'Office读取已取消'});}}>取消读取</button></p>}
   {!print&&current?.page&&<>
