@@ -1,3 +1,4 @@
+import {registerUiDiagnostics} from './jot/ui-diagnostics';
 import type {TaskSourceSelection} from './workbench/types';
 import React,{useCallback,useEffect,useState} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -11,6 +12,7 @@ type DesktopOpenTaskIdentity=Readonly<{task_id:string;occurrence_id:string}>;
 type DesktopBridgeWindow=Window&{jotDesktop?:{onOpenTask?:(listener:(identity:DesktopOpenTaskIdentity)=>void)=>()=>void}};
 
 function WorkbenchApplication(){
+ useEffect(registerUiDiagnostics,[]);
  const [taskSource,setTaskSource]=useState<TaskSourceSelection|null>(null);
  const [managementPending,setManagementPending]=useState(false);
  const [desktopOpenTask,setDesktopOpenTask]=useState<DesktopOpenTaskIdentity|null>(null);
