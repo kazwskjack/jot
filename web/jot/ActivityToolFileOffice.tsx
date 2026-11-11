@@ -101,7 +101,7 @@ function SpreadsheetContent({value,source,viewingSource,officeFocus}:{value:Extr
  const [part,setPart]=useState(focused?.index??storedPage(saved?.sheet,value.sheets.length));
  const cells=useMemo(()=>Object.entries(value.sheets[part]?.cells??{}).sort(([a],[b])=>a.localeCompare(b,undefined,{numeric:true})),[value,part]);
  const [page,setPage]=useState(()=>focused?Math.max(0,Math.floor(cells.findIndex(([address])=>address===focused.address)/50)):storedPage(saved?.page,Math.ceil(cells.length/50)));
- const [selected,setSelected]=useState<string[]>([]),[notice,setNotice]=useState('');
+ const [selected,setSelected]=useState<string[]>([]),[notice,setNotice]=useState<string|{message:string;uncoveredAddress:string}>('');
  const [rangeDraft,setRangeDraft]=useState(officeFocus?.value.reference.locator.activeRange??saved?.range??'A1:J20');
  const [rangeView,setRangeView]=useState<string|undefined>(()=>{
   if(!officeFocus)return saved?.range;
@@ -129,7 +129,7 @@ function SpreadsheetContent({value,source,viewingSource,officeFocus}:{value:Extr
  const capture=(ranges:string[])=>{
   if(!source||!context||disabled||taskDraftScope()!==owner||!sheet?.name||!ranges.length)return;
   let snapshots:CellRangeSnapshot[];
-  let rawUnavailable=false;
+  let rawUnavailable=false,uncoveredAddress:string|undefined;
   try{
    snapshots=ranges.map(range=>{
     let dimensions:ReturnType<typeof cellRangeCoordinates>;
@@ -141,7 +141,7 @@ function SpreadsheetContent({value,source,viewingSource,officeFocus}:{value:Extr
      const values:string[]=[],expressions:string[]=[],raw:SpreadsheetRawValue[]=[];
      for(let column=0;column<columns;column++){
       const address=cellAddress(dimensions.left+column,dimensions.top+row),cell=sheet.cells[address];
-      if(!cell&&value.truncated)throw Error(`当前解析尚未覆盖${address}，无法确认该单元格为空，请缩小范围或读取完整来源。`);
+      if(!cell&&value.truncated){uncoveredAddress=address;throw Error(`当前解析尚未覆盖${address}，无法确认该单元格为空，请缩小范围或读取完整来源。`);}
       values.push(cell?.value??'');expressions.push(cell?.formula??'');
       if(cell&&!Object.hasOwn(cell,'raw_value'))rawComplete=false;
       raw.push(cell?.raw_value??null);
@@ -152,7 +152,10 @@ function SpreadsheetContent({value,source,viewingSource,officeFocus}:{value:Extr
     return {range,displayValues,formulas,...(rawComplete?{rawValues}:{}),rowCount:dimensions.rows,columnCount:dimensions.columns,
      truncated:value.truncated||rows<dimensions.rows||columns<dimensions.columns};
    });
-  }catch(error){setNotice(error instanceof Error?error.message:'选区快照尚未完成核对');return;}
+  }catch(error){
+   const message=error instanceof Error?error.message:'选区快照尚未完成核对';
+   setNotice(uncoveredAddress?{message,uncoveredAddress}:message);return;
+  }
   const nearby=spreadsheetReferenceContext(sheet,value.truncated,cellRangeCoordinates(ranges[0]));
   const reference=createCellRangeContentReference({
    source:{relativePath:source.file.path,fileName:source.native_source?source.file.path.split(/[\\/]/).at(-1)!:source.file.path.split('/').at(-1)!,mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -192,7 +195,7 @@ function SpreadsheetContent({value,source,viewingSource,officeFocus}:{value:Extr
    <button type="button" disabled={!selected.length&&!rangeDraft.trim()} onClick={()=>{setSelected([]);setRangeDraft('');anchor.current=null;drag.current=undefined;}}>{t('清空选择','Clear Selection')}</button>
    <span>{t('每次最多选择100个单元格，可跨页选择。','Select up to 100 cells at a time, across pages.')}</span>
   </div>
-  {notice&&<p role="status">{conversationUiError(notice,language)}</p>}
+  {notice&&<p role="status">{typeof notice==='string'?conversationUiError(notice,language):t(notice.message,`The current parsing does not cover ${notice.uncoveredAddress}, so this cell cannot be confirmed empty. Select a smaller range or read the complete source.`)}</p>}
   <fieldset data-chat-search-ignore>
    <legend>{t('矩形选区','Rectangular Selection')}</legend>
    <label>{t('单元格范围','Cell Range')} <input value={rangeDraft} maxLength={32} onChange={event=>{setRangeDraft(event.target.value);anchor.current=null;drag.current=undefined;}} placeholder="A1:C10"/></label>
