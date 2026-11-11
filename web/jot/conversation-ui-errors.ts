@@ -1,6 +1,16 @@
 // Fixed owned conversation UI failures; unknown/raw content stays unchanged.
 import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
 const english:Record<string,string>={
+ "此格式的原生结构化解析尚未确认": "Native structured parsing for this format is unconfirmed.",
+ "原生Office结构化来源尚未确认": "The native structured Office source is unconfirmed.",
+ "本次打开来源已变化，请重新打开文件。": "The source for this opening changed. Open the file again.",
+ "文件超过100 MiB结构化来源范围。": "The file exceeds the 100 MiB structured source limit.",
+ "原打开来源已变化，请重新打开文件。": "The original opening source changed. Open the file again.",
+ "文档转换器正在处理另一个文件，请稍后重试。": "The document converter is processing another file. Retry later.",
+ "本次转换读取已取消。": "This conversion read was cancelled.",
+ "PDF转换预览暂不可用": "The PDF conversion preview is unavailable.",
+ "原生Office转换PDF来源尚未确认": "The native Office converted PDF source is unconfirmed.",
+ "转换PDF文件头尚未确认": "The converted PDF header is unconfirmed.",
  "Office服务状态尚未确认。": "The Office service status is unconfirmed.",
  "Office服务状态读取失败，可刷新状态。": "Reading Office service status failed. Refresh the status.",
  "Office配置尚未确认。": "The Office configuration is unconfirmed.",

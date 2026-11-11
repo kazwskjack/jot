@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import type {PdfReferenceFocus} from './pdf-file-view-state';
 import {nativeMemberViewingSource,nativeMemberDownloadUrl} from './activity-file-preview-client';
 import React,{lazy,Suspense,useEffect,useRef,useState} from 'react';
@@ -9,6 +11,7 @@ import type {NativeMemberPreviewSource} from './activity-file-preview-client';
 const PdfViewer=lazy(()=>import('./NativeSearchFilePdf'));
 
 export default function NativeSearchOfficePrint({source,expectedOpenSha,expectedOpenProof,expectedPreview,focus,onOpened}:{source:NativeMemberPreviewSource;expectedOpenSha?:string|undefined;expectedOpenProof?:string|undefined;expectedPreview?:NativeOfficePrintPin|undefined;focus?:PdfReferenceFocus|undefined;onOpened?:(sha:string,proof?:string)=>boolean}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),identity=JSON.stringify([owner,source,expectedPreview]);
  const pin=useRef<{identity:string;value:NativeOfficePrintPin;revision:number}>(),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;preview?:NativeOfficePrintPreview;error?:string}>(),[revision,setRevision]=useState(0);
@@ -41,19 +44,19 @@ export default function NativeSearchOfficePrint({source,expectedOpenSha,expected
   setDownload({preview,url});
   return()=>URL.revokeObjectURL(url);
  },[preview]);
- return <section aria-label="原生Office转换PDF预览">
-  <h5>Office转换PDF</h5>
-  <p>源文件上限100 MiB，转换PDF上限20 MiB。转换沿原配置服务和原打开来源核对。</p>
-  {(!current||!preview&&!current.error)&&<p role="status">正在读取打开来源并转换PDF… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'本次转换读取已取消。'});}}>取消转换读取</button></p>}
+ return <section lang={language} aria-label={t('原生Office转换PDF预览','Native Office Converted PDF Preview')}>
+  <h5>{t('Office转换PDF','Office Converted PDF')}</h5>
+  <p>{t('源文件上限100 MiB，转换PDF上限20 MiB。转换沿原配置服务和原打开来源核对。','The source limit is 100 MiB and the converted PDF limit is 20 MiB. Conversion is verified against the original configured service and opening source.')}</p>
+  {(!current||!preview&&!current.error)&&<p role="status">{t('正在读取打开来源并转换PDF…','Reading the opening source and converting to PDF…')} <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'本次转换读取已取消。'});}}>{t('取消转换读取','Cancel Conversion Read')}</button></p>}
   {preview&&<>
-   {preview.retained!==undefined&&<p role="status">{preview.retained?'已留存原文件打开内容，可按原版本重新打开。':'原文件打开内容未留存，需要的内容可下载保存。'}</p>}
-   <a href={nativeMemberDownloadUrl(source)+'&open_sha256='+preview.openSha+(preview.openProof?'&open_proof='+preview.openProof:'')} download={source.member.path.split(/[\\/]/).at(-1)||'file'} onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载此转换所用原文件</a>
-   <p>原文件 {preview.sourceSize} 字节 · 源SHA-256 <code>{preview.sourceSha}</code></p>
-   <p>PDF {preview.size} 字节 · {preview.pageCount} 页 · SHA-256 <code>{preview.sha256}</code></p>
-   {download?.preview===preview&&<a href={download.url} download="office-preview.pdf" onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载此转换PDF</a>}
-   <ConversationDisplayBoundary key={preview.sha256} label="原生Office转换PDF"><Suspense fallback={<p role="status">正在载入PDF查看器…</p>}><PdfViewer bytes={preview.bytes} expectedPageCount={preview.pageCount} source={nativeMemberViewingSource(source,{openSha:preview.openSha,sha256:preview.sourceSha,size:preview.sourceSize,proof:preview.openProof})} printView={{protocol:1,sha256:preview.sha256,size:preview.size,pageCount:preview.pageCount,...(preview.pdfProof?{proof:preview.pdfProof}:{})}} focus={focus} onRetry={()=>setRevision(value=>value+1)}/></Suspense></ConversationDisplayBoundary>
+   {preview.retained!==undefined&&<p role="status">{preview.retained?t('已留存原文件打开内容，可按原版本重新打开。','The original opened file content was retained and can be reopened at its original version.'):t('原文件打开内容未留存，需要的内容可下载保存。','The original opened file content was not retained. Download any content you need to keep.')}</p>}
+   <a href={nativeMemberDownloadUrl(source)+'&open_sha256='+preview.openSha+(preview.openProof?'&open_proof='+preview.openProof:'')} download={source.member.path.split(/[\\/]/).at(-1)||'file'} onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>{t('下载此转换所用原文件','Download the Original File Used for This Conversion')}</a>
+   <p>{t('原文件','Original File')} {preview.sourceSize} {t('字节','bytes')} · {t('源SHA-256','Source SHA-256')} <code>{preview.sourceSha}</code></p>
+   <p>PDF {preview.size} {t('字节','bytes')} · {preview.pageCount} {t('页','pages')} · SHA-256 <code>{preview.sha256}</code></p>
+   {download?.preview===preview&&<a href={download.url} download="office-preview.pdf" onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>{t('下载此转换PDF','Download This Converted PDF')}</a>}
+   <ConversationDisplayBoundary key={preview.sha256} label={t('原生Office转换PDF','Native Office Converted PDF')}><Suspense fallback={<p role="status">{t('正在载入PDF查看器…','Loading PDF viewer…')}</p>}><PdfViewer bytes={preview.bytes} expectedPageCount={preview.pageCount} source={nativeMemberViewingSource(source,{openSha:preview.openSha,sha256:preview.sourceSha,size:preview.sourceSize,proof:preview.openProof})} printView={{protocol:1,sha256:preview.sha256,size:preview.size,pageCount:preview.pageCount,...(preview.pdfProof?{proof:preview.pdfProof}:{})}} focus={focus} onRetry={()=>setRevision(value=>value+1)}/></Suspense></ConversationDisplayBoundary>
   </>}
-  {current?.error&&<p role="alert">{current.error}</p>}
-  <button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取此转换预览</button>
+  {current?.error&&<p role="alert">{conversationUiError(current.error,language)}</p>}
+  <button type="button" onClick={()=>setRevision(value=>value+1)}>{t('重新读取此转换预览','Read This Conversion Preview Again')}</button>
  </section>;
 }

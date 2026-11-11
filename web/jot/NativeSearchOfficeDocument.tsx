@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import type {OfficeCellFocus,OfficeTextFocus} from './FileTextReferences';
 import React,{useEffect,useRef,useState} from 'react';
 import {OfficeContent} from './ActivityToolFileOffice';
@@ -8,6 +10,7 @@ import {nativeMemberViewingSource,nativeMemberDownloadUrl,type NativeMemberPrevi
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
 
 export default function NativeSearchOfficeDocument({source,expectedOpenSha,expectedOpenProof,expectedFile,officeFocus,officeTextFocus,onOpened}:{source:NativeMemberPreviewSource;expectedOpenSha?:string|undefined;expectedOpenProof?:string|undefined;expectedFile?:{sha256:string;size:number}|undefined;officeFocus?:OfficeCellFocus|undefined;officeTextFocus?:OfficeTextFocus|undefined;onOpened?:(sha:string,proof?:string)=>boolean}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),identity=JSON.stringify([owner,source,expectedFile]);
  const held=useRef<{identity:string;sha:string;proof?:string;revision:number}>();
  const [state,setState]=useState<{identity:string;page?:NativeMemberOfficeDocumentPage;error?:string}>(),[revision,setRevision]=useState(0);
@@ -50,18 +53,18 @@ export default function NativeSearchOfficeDocument({source,expectedOpenSha,expec
   return()=>controller.abort();
  },[identity,revision,expectedOpenSha,expectedOpenProof]);
  const current=state?.identity===identity?state:undefined,page=current?.page;
- return <section aria-label="原生Office结构化内容">
-  <h5>Office结构化内容</h5>
-  <p>最多读取100 MiB原生成员来源。文字和单元格沿原解析范围显示。</p>
-  {(!current||!page&&!current.error)&&<p role="status">正在核对打开来源并解析Office…</p>}
+ return <section lang={language} aria-label={t('原生Office结构化内容','Native Structured Office Content')}>
+  <h5>{t('Office结构化内容','Structured Office Content')}</h5>
+  <p>{t('最多读取100 MiB原生成员来源。文字和单元格沿原解析范围显示。','Reads up to 100 MiB from the native member source. Text and cells follow the original parsing coverage.')}</p>
+  {(!current||!page&&!current.error)&&<p role="status">{t('正在核对打开来源并解析Office…','Verifying the opening source and parsing Office…')}</p>}
   {page&&<>
-   {page.retained!==undefined&&<p role="status">{page.retained?'已留存本次打开内容，可按原版本重新打开。':'本次打开内容未留存，需要的内容可下载保存。'}</p>}
-   <p>{page.size_bytes} 字节 · SHA-256 <code>{page.sha256}</code></p>
-   <a href={nativeMemberDownloadUrl(source)+'&open_sha256='+page.open_sha256+(page.open_proof?'&open_proof='+page.open_proof:'')} download={source.member.path.split(/[\\/]/).at(-1)||'file'} onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载此结构化来源</a>
-   {page.document.truncated&&<p role="status">当前解析结果存在截断，请对照完整打开文件。</p>}
+   {page.retained!==undefined&&<p role="status">{page.retained?t('已留存本次打开内容，可按原版本重新打开。','The opened content was retained and can be reopened at its original version.'):t('本次打开内容未留存，需要的内容可下载保存。','The opened content was not retained. Download any content you need to keep.')}</p>}
+   <p>{page.size_bytes} {t('字节','bytes')} · SHA-256 <code>{page.sha256}</code></p>
+   <a href={nativeMemberDownloadUrl(source)+'&open_sha256='+page.open_sha256+(page.open_proof?'&open_proof='+page.open_proof:'')} download={source.member.path.split(/[\\/]/).at(-1)||'file'} onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>{t('下载此结构化来源','Download This Structured Source')}</a>
+   {page.document.truncated&&<p role="status">{t('当前解析结果存在截断，请对照完整打开文件。','The current parsing result is truncated. Compare with the complete opened file.')}</p>}
    <section className="jot-office-content" data-chat-search-content={JSON.stringify(['native-office',identity,page.open_sha256])}><OfficeContent key={JSON.stringify([page.open_sha256,officeFocus?.key,officeTextFocus?.key])} value={page.document} source={nativeMemberViewingSource(source,{openSha:page.open_sha256,sha256:page.sha256,size:page.size_bytes,proof:page.open_proof})} officeFocus={officeFocus} officeTextFocus={officeTextFocus}/></section>
   </>}
-  {current?.error&&<p role="alert">{current.error}</p>}
-  <button type="button" onClick={()=>setRevision(value=>value+1)}>重新解析同次打开来源</button>
+  {current?.error&&<p role="alert">{conversationUiError(current.error,language)}</p>}
+  <button type="button" onClick={()=>setRevision(value=>value+1)}>{t('重新解析同次打开来源','Parse the Same Opening Source Again')}</button>
  </section>;
 }
