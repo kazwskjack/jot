@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {terminalUiMessage} from './terminal-ui-messages';
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
 import {useMutationReceipt} from '../workbench/useMutationReceipt';
@@ -6,10 +8,9 @@ import {validateTerminalInventory,type TerminalInventory} from '../../packages/g
 import {validateTerminalOptions,validateTerminalCommand,validateTerminalReceipt,type TerminalOptions,type TerminalCommand,type TerminalReceipt} from '../../packages/gateway/src/terminal/control.js';
 import NativeTerminalView from './NativeTerminalView';
 
-const states={running:'运行中',exited:'已退出',failed:'失败'} as const;
-
 /** Native user terminals retain their original Session ownership and command receipts. */
 export default function ConversationTerminals({conversationId,runId,onInputPendingChange}:{conversationId:string;runId:string;onInputPendingChange?:(value:boolean)=>void}) {
+  const language=useApplicationLanguage();
   const [revision,setRevision]=useState(0),[notice,setNotice]=useState(''),scope=taskDraftScope();
   const [activeRuns,setActiveRuns]=useState<Set<string>>(()=>new Set()),[inputRuns,setInputRuns]=useState<Set<string>>(()=>new Set());
   const activeChanged=useCallback((id:string,value:boolean)=>setActiveRuns(previous=>{const next=new Set(previous);if(value)next.add(id);else next.delete(id);return next;}),[]);
@@ -28,13 +29,15 @@ export default function ConversationTerminals({conversationId,runId,onInputPendi
   return <>
     {[...new Set([runId,...history.runs,...activeRuns])].map(id=><TerminalPanel key={id} conversationId={conversationId} runId={id}
       historical={id!==runId} onSettled={refresh} onActiveChange={activeChanged} onInputPendingChange={inputChanged}/>)}
-    {history.error&&<p role="alert">{history.error}</p>}
-    {notice&&<p role="status">{notice}</p>}
+    {history.error&&<p lang={language} role="alert">{terminalUiMessage(history.error,language)}</p>}
+    {notice&&<p lang={language} role="status">{terminalUiMessage(notice,language)}</p>}
   </>;
 }
 
 function TerminalPanel({conversationId,runId,historical=false,onSettled,onActiveChange,onInputPendingChange}:{conversationId:string;runId:string;historical?:boolean;onSettled:(message?:string)=>void;
   onActiveChange:(runId:string,value:boolean)=>void;onInputPendingChange:(runId:string,value:boolean)=>void}) {
+  const language=useApplicationLanguage(),t=useApplicationText();
+  const states={running:t('运行中','Running'),exited:t('已退出','Exited'),failed:t('失败','Failed')};
   const [open,setOpen]=useState(false),[revision,setRevision]=useState(0);
   const [inventory,setInventory]=useState<TerminalInventory>(),[loading,setLoading]=useState(false),[error,setError]=useState('');
   const [options,setOptions]=useState<TerminalOptions>(),[optionsError,setOptionsError]=useState('');
@@ -150,50 +153,50 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled,onActive
   }
   const dimensionsValid=Boolean(options&&Number.isSafeInteger(cols)&&cols>=2&&cols<=options.environment.maxCols
     &&Number.isSafeInteger(rows)&&rows>0&&rows<=options.environment.maxRows);
-  return <details onToggle={event=>setOpen(event.currentTarget.open)}>
-    <summary>{historical?`历史运行终端 · ${runId}`:'会话终端'}</summary>
-    <button type="button" disabled={loading||recovering} onClick={()=>setRevision(value=>value+1)}>刷新终端清单</button>
-    {loading&&<p role="status">正在读取原生终端…</p>}
-    {error&&<p role="alert">{error}</p>}
-    {commandError&&<p role="alert">{commandError}</p>}
-    {journal.error&&<p role="alert">{journal.error}</p>}
-    {optionsError&&<p role="status">{optionsError}</p>}
-    {!options&&open&&!loading&&<button type="button" disabled={recovering} onClick={()=>void recover()}>{recovering?'正在加载原会话执行环境…':'加载原会话执行环境'}</button>}
+  return <details lang={language} onToggle={event=>setOpen(event.currentTarget.open)}>
+    <summary>{historical?t(`历史运行终端 · ${runId}`,`Historical Run Terminals · ${runId}`):t('会话终端','Conversation Terminals')}</summary>
+    <button type="button" disabled={loading||recovering} onClick={()=>setRevision(value=>value+1)}>{t("刷新终端清单","Refresh Terminal List")}</button>
+    {loading&&<p role="status">{t("正在读取原生终端…","Reading Native Terminals…")}</p>}
+    {error&&<p role="alert">{terminalUiMessage(error,language)}</p>}
+    {commandError&&<p role="alert">{terminalUiMessage(commandError,language)}</p>}
+    {journal.error&&<p role="alert">{terminalUiMessage(journal.error,language)}</p>}
+    {optionsError&&<p role="status">{terminalUiMessage(optionsError,language)}</p>}
+    {!options&&open&&!loading&&<button type="button" disabled={recovering} onClick={()=>void recover()}>{recovering?t("正在加载原会话执行环境…","Loading Original Session Environment…"):t("加载原会话执行环境","Load Original Session Environment")}</button>}
     {writer.pending&&<div role="status">
-      <p>原终端请求等待回执。</p>
-      {pendingCommand&&<p>请求 <code>{pendingCommand.request_id}</code> · {pendingCommand.action==='create'?'创建':'关闭'} <code>{pendingCommand.terminal_id}</code></p>}
-      <button type="button" disabled={busy||Boolean(journal.error)} onClick={()=>void submit()}>{endingWait?'重读结束等待回执':'重读原请求回执'}</button>
-      <button type="button" disabled={busy||endingWait||Boolean(journal.error)} onClick={()=>void endWait()}>保留未知并结束等待</button>
-      <p>结束等待后，原请求的执行结果继续保留。已发出的操作仍可能完成。</p>
+      <p>{t("原终端请求等待回执。","The original terminal request is awaiting its receipt.")}</p>
+      {pendingCommand&&<p>{t('请求 ','Request ')}<code>{pendingCommand.request_id}</code> · {pendingCommand.action==='create'?t("创建","Create"):t("关闭","Close")} <code>{pendingCommand.terminal_id}</code></p>}
+      <button type="button" disabled={busy||Boolean(journal.error)} onClick={()=>void submit()}>{endingWait?t("重读结束等待回执","Read End-wait Receipt Again"):t("重读原请求回执","Read Original Request Receipt Again")}</button>
+      <button type="button" disabled={busy||endingWait||Boolean(journal.error)} onClick={()=>void endWait()}>{t("保留未知并结束等待","Retain Unknown Result and End Wait")}</button>
+      <p>{t("结束等待后，原请求的执行结果继续保留。已发出的操作仍可能完成。","After waiting ends, the original request result is retained. An already dispatched operation may still complete.")}</p>
     </div>}
     {options&&<fieldset disabled={busy||writer.pending||loading||Boolean(journal.error)}>
-      <legend>创建用户终端</legend>
-      <p>用户终端使用执行环境的系统用户权限。</p>
-      <p>初始目录 <code style={{overflowWrap:'anywhere'}}>{options.environment.cwd}</code></p>
+      <legend>{t("创建用户终端","Create User Terminal")}</legend>
+      <p>{t("用户终端使用执行环境的系统用户权限。","User terminals use the execution environment system user permissions.")}</p>
+      <p>{t('初始目录 ','Initial Directory ')}<code style={{overflowWrap:'anywhere'}}>{options.environment.cwd}</code></p>
       <label>Shell <select value={shell} onChange={event=>setShell(event.currentTarget.value)}>
-        <option value="">执行环境默认 Shell</option>
+        <option value="">{t("执行环境默认 Shell","Environment Default Shell")}</option>
         {options.shells.map((item,index)=><option key={`${index}:${item.path}`} value={item.path}>{item.name} · {item.path}</option>)}
       </select></label>
-      <label>列 <input type="number" min={2} max={options.environment.maxCols} value={cols} onChange={event=>setCols(Number(event.currentTarget.value))}/></label>
-      <label>行 <input type="number" min={1} max={options.environment.maxRows} value={rows} onChange={event=>setRows(Number(event.currentTarget.value))}/></label>
+      <label>{t('列 ','Columns ')}<input type="number" min={2} max={options.environment.maxCols} value={cols} onChange={event=>setCols(Number(event.currentTarget.value))}/></label>
+      <label>{t('行 ','Rows ')}<input type="number" min={1} max={options.environment.maxRows} value={rows} onChange={event=>setRows(Number(event.currentTarget.value))}/></label>
       <button type="button" disabled={!inventory||!dimensionsValid} onClick={()=>void submit({action:'create',request_id:crypto.randomUUID(),
-        terminal_id:'jot-'+crypto.randomUUID(),host_instance:options.host_instance,cols,rows,shell_path:shell||null})}>创建终端</button>
+        terminal_id:'jot-'+crypto.randomUUID(),host_instance:options.host_instance,cols,rows,shell_path:shell||null})}>{t("创建终端","Create Terminal")}</button>
     </fieldset>}
     {inventory&&<>
-      <p>原生会话 <code>{inventory.session_id}</code> · 当前 Host 保留的终端</p>
-      {!inventory.terminals.length&&<p role="status">该原生会话当前没有保留的终端。</p>}
+      <p>{t('原生会话 ','Native Session ')}<code>{inventory.session_id}</code>{t(' · 当前 Host 保留的终端',' · Terminals Retained by the Current Host')}</p>
+      {!inventory.terminals.length&&<p role="status">{t("该原生会话当前没有保留的终端。","This native session currently has no retained terminals.")}</p>}
       <ul>{inventory.terminals.map(terminal=><li key={terminal.id}>
         <strong>{terminal.title}</strong> · {states[terminal.state]}
-        {terminal.exitCode!==null&&<> · 退出码 {terminal.exitCode}</>}
-        {options&&<button type="button" disabled={loading||selected===terminal.id} onClick={()=>setSelected(terminal.id)}>连接 {terminal.title}</button>}
+        {terminal.exitCode!==null&&<>{t(' · 退出码 ',' · Exit Code ')}{terminal.exitCode}</>}
+        {options&&<button type="button" disabled={loading||selected===terminal.id} onClick={()=>setSelected(terminal.id)}>{t('连接 ','Connect ')}{terminal.title}</button>}
         {options&&<button type="button" disabled={busy||writer.pending||loading||Boolean(journal.error)} onClick={()=>void submit({action:'close',request_id:crypto.randomUUID(),
-          terminal_id:terminal.id,host_instance:options.host_instance})}>关闭 {terminal.title}</button>}
+          terminal_id:terminal.id,host_instance:options.host_instance})}>{t('关闭 ','Close ')}{terminal.title}</button>}
         <dl>
-          <dt>终端身份</dt><dd><code>{terminal.id}</code></dd>
+          <dt>{t("终端身份","Terminal Identity")}</dt><dd><code>{terminal.id}</code></dd>
           <dt>Shell</dt><dd style={{overflowWrap:'anywhere'}}>{terminal.shell.name} <code>{terminal.shell.path}</code></dd>
-          <dt>参数</dt><dd><code style={{overflowWrap:'anywhere'}}>{JSON.stringify(terminal.shell.args)}</code></dd>
-          <dt>初始目录</dt><dd style={{overflowWrap:'anywhere'}}><code>{terminal.cwd}</code></dd>
-          <dt>尺寸</dt><dd>{terminal.cols} 列 × {terminal.rows} 行</dd>
+          <dt>{t("参数","Arguments")}</dt><dd><code style={{overflowWrap:'anywhere'}}>{JSON.stringify(terminal.shell.args)}</code></dd>
+          <dt>{t("初始目录","Initial Directory")}</dt><dd style={{overflowWrap:'anywhere'}}><code>{terminal.cwd}</code></dd>
+          <dt>{t("尺寸","Dimensions")}</dt><dd>{terminal.cols}{t(' 列 × ',' Columns × ')}{terminal.rows}{t(' 行',' Rows')}</dd>
         </dl>
       </li>)}</ul>
     </>}

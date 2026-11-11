@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {terminalUiMessage} from './terminal-ui-messages';
 import {useEffect,useRef,useState} from 'react';
 import {request,requestTerminalStream} from './client';
 import {loadTerminalAssets,type TerminalApi} from './terminal-assets';
@@ -44,6 +46,7 @@ function renderText(terminal:TerminalApi,text:string,signal:AbortSignal) {
 
 /** Browser rendering follows the native screen, ownership and provider acknowledgements. */
 export default function NativeTerminalView(props:Props) {
+  const language=useApplicationLanguage(),t=useApplicationText();
   const {conversationId,runId,terminal,options}=props;
   const callbacks=useRef(props);callbacks.current=props;
   const host=useRef<HTMLDivElement>(null),live=useRef<Live|undefined>(undefined);
@@ -228,37 +231,37 @@ export default function NativeTerminalView(props:Props) {
     }
     resetKeys();current.clearPrompt();current.sender?.write(data);current.terminal.focus();
   }
-  return <section aria-label={`交互终端 ${terminal.title}`}>
-    <p role="status">{status} · {info.cols} 列 × {info.rows} 行{pending?' · 输入等待原生确认':''}</p>
-    {notice&&<p role="status" style={{overflowWrap:'anywhere'}}>{notice}</p>}
-    <div role="group" aria-label="终端操作" style={{display:'flex',flexWrap:'wrap',gap:6}}>
-      <button type="button" onClick={()=>setRevision(value=>value+1)}>重新连接</button>
-      <button type="button" onClick={()=>live.current?.terminal.focus()}>聚焦终端</button>
-      <button type="button" onClick={()=>void copySelection()}>复制所选文本</button>
-      <button type="button" disabled={!writable} onClick={()=>void paste()}>粘贴</button>
-      <button type="button" disabled={!writable} onClick={()=>live.current?.fit()}>适应尺寸</button>
-      <button type="button" onClick={()=>live.current?.terminal.scrollToBottom()}>滚动到底部</button>
-      <button type="button" onClick={props.onClose}>断开视图</button>
+  return <section lang={language} aria-label={t(`交互终端 ${terminal.title}`,`Interactive Terminal ${terminal.title}`)}>
+    <p role="status">{terminalUiMessage(status,language)} · {info.cols}{t(' 列 × ',' Columns × ')}{info.rows}{t(' 行',' Rows')}{pending?t(' · 输入等待原生确认',' · Input Awaiting Native Acknowledgement'):''}</p>
+    {notice&&<p role="status" style={{overflowWrap:'anywhere'}}>{terminalUiMessage(notice,language)}</p>}
+    <div role="group" aria-label={t("终端操作","Terminal Actions")} style={{display:'flex',flexWrap:'wrap',gap:6}}>
+      <button type="button" onClick={()=>setRevision(value=>value+1)}>{t("重新连接","Reconnect")}</button>
+      <button type="button" onClick={()=>live.current?.terminal.focus()}>{t("聚焦终端","Focus Terminal")}</button>
+      <button type="button" onClick={()=>void copySelection()}>{t("复制所选文本","Copy Selected Text")}</button>
+      <button type="button" disabled={!writable} onClick={()=>void paste()}>{t("粘贴","Paste")}</button>
+      <button type="button" disabled={!writable} onClick={()=>live.current?.fit()}>{t("适应尺寸","Fit Dimensions")}</button>
+      <button type="button" onClick={()=>live.current?.terminal.scrollToBottom()}>{t("滚动到底部","Scroll to Bottom")}</button>
+      <button type="button" onClick={props.onClose}>{t("断开视图","Disconnect View")}</button>
     </div>
-    <div ref={host} aria-label="原生终端屏幕" style={{height:'min(55vh,480px)',minHeight:180,minWidth:0,overflow:'hidden',marginTop:8,background:'#101318'}}/>
-    {prompt&&writable&&<div role="group" aria-label="终端当前编号选项" style={{display:'flex',flexWrap:'wrap',gap:6,marginTop:8}}>
+    <div ref={host} aria-label={t("原生终端屏幕","Native Terminal Screen")} style={{height:'min(55vh,480px)',minHeight:180,minWidth:0,overflow:'hidden',marginTop:8,background:'#101318'}}/>
+    {prompt&&writable&&<div role="group" aria-label={t("终端当前编号选项","Current Terminal Numbered Options")} style={{display:'flex',flexWrap:'wrap',gap:6,marginTop:8}}>
       {prompt.options.map(option=><button type="button" key={option.number} disabled={pending} onPointerDown={event=>event.preventDefault()}
         title={`${option.number}. ${option.label}`} style={{maxWidth:'100%',overflowWrap:'anywhere'}} onClick={()=>choosePrompt(option.number)}>{option.number}. {option.label}</button>)}
       <button type="button" disabled={pending} onPointerDown={event=>event.preventDefault()} onClick={()=>choosePrompt('\x1b')}>Esc</button>
     </div>}
     {links.length>0&&<details open={linksOpen} onToggle={event=>setLinksOpen(event.currentTarget.open)}>
-      <summary>终端输出链接 · {links.length}</summary>
+      <summary>{t('终端输出链接 · ','Terminal Output Links · ')}{links.length}</summary>
       <ul>{links.map(url=><li key={url}>
-        <input aria-label="终端输出链接" value={url} readOnly onClick={event=>event.currentTarget.select()} style={{width:'100%'}}/>
-        <a href={url} target="_blank" rel="noopener noreferrer">打开链接</a>{' '}
-        <button type="button" onClick={()=>{const current=live.current;if(current)void copyText(url,current);}}>复制链接</button>
+        <input aria-label={t("终端输出链接","Terminal Output Link")} value={url} readOnly onClick={event=>event.currentTarget.select()} style={{width:'100%'}}/>
+        <a href={url} target="_blank" rel="noopener noreferrer">{t("打开链接","Open Link")}</a>{' '}
+        <button type="button" onClick={()=>{const current=live.current;if(current)void copyText(url,current);}}>{t("复制链接","Copy Link")}</button>
       </li>)}</ul>
     </details>}
-    <div role="group" aria-label="移动终端快捷键" style={{display:'flex',flexWrap:'wrap',gap:6,marginTop:8}}>
+    <div role="group" aria-label={t("移动终端快捷键","Mobile Terminal Shortcuts")} style={{display:'flex',flexWrap:'wrap',gap:6,marginTop:8}}>
       <button type="button" disabled={!writable} aria-pressed={keys.ctrl} onPointerDown={event=>event.preventDefault()} onClick={()=>toggleKey('ctrl')}>Ctrl</button>
       <button type="button" disabled={!writable} aria-pressed={keys.alt} onPointerDown={event=>event.preventDefault()} onClick={()=>toggleKey('alt')}>Alt</button>
       {([['Esc','\x1b'],['Tab','\t'],['Shift+Tab','\x1b[Z'],['↑','\x1b[A'],['↓','\x1b[B'],['←','\x1b[D'],['→','\x1b[C']] as const).map(([label,data])=>
-        <button type="button" key={label} disabled={!writable} aria-label={`发送 ${label}`} onPointerDown={event=>event.preventDefault()} onClick={()=>sendKey(data)}>{label}</button>)}
+        <button type="button" key={label} disabled={!writable} aria-label={t(`发送 ${label}`,`Send ${label}`)} onPointerDown={event=>event.preventDefault()} onClick={()=>sendKey(data)}>{label}</button>)}
     </div>
   </section>;
 }
