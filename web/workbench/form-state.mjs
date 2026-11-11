@@ -84,17 +84,18 @@ export function taskFormFromMessage(selection,agents,limits,modelLimits){
 export function taskFormFromTask(task,limits) {
  return {...Object.fromEntries(Object.entries(blankTaskForm(task.agent_id,limits)).filter(([key])=>key!=='notification_settings')),title:task.title,objective:task.objective,kind:task.trigger.kind,conversation_id:task.trigger.conversation_id??'',interval_seconds:String(task.trigger.interval_seconds??limits?.default_interval_seconds??300),url:task.trigger.url??'',expression:task.trigger.expression??'',delay_seconds:task.trigger.delay_seconds===undefined?'':String(task.trigger.delay_seconds),missed_triggers:task.trigger.kind==='cron'?task.trigger.missed_triggers:undefined,max_runs:task.budget.max_runs===null?'unlimited':String(task.budget.max_runs),run_at:task.trigger.run_at??'',time:task.trigger.time??'09:00',timezone:task.trigger.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone??'UTC',weekdays:[...(task.trigger.weekdays??[new Date().getDay()])]};
 }
-export function taskTriggerSummary(trigger) {
- if(trigger.kind==='project_discovery')return '项目发现策略';
- if(trigger.kind==='conversation_message')return '对话收到新消息';
- if(trigger.kind==='conversation_result')return '对话完成新结果';
- if(trigger.kind==='once')return '单次';
- if(trigger.kind==='page_change')return '网页变化';
+export function taskTriggerSummary(trigger,language='zh-CN') {
+ const en=language==='en';
+ if(trigger.kind==='project_discovery')return en?'Project Discovery Policy':'项目发现策略';
+ if(trigger.kind==='conversation_message')return en?'New Conversation Message':'对话收到新消息';
+ if(trigger.kind==='conversation_result')return en?'New Conversation Result':'对话完成新结果';
+ if(trigger.kind==='once')return en?'Once':'单次';
+ if(trigger.kind==='page_change')return en?'Page Change':'网页变化';
  if(trigger.kind==='cron')return `Cron ${trigger.expression} · ${trigger.timezone}`;
- if(trigger.kind==='delay')return `延迟 ${trigger.delay_seconds} 秒`;
- if(trigger.kind==='daily')return `每日 ${trigger.time} · ${trigger.timezone}`;
- if(trigger.kind==='weekly')return `每周 ${(trigger.weekdays??[]).map(day=>['周日','周一','周二','周三','周四','周五','周六'][day]).join('、')} ${trigger.time} · ${trigger.timezone}`;
- return `每 ${trigger.interval_seconds} 秒`;
+ if(trigger.kind==='delay')return en?`After ${trigger.delay_seconds} Seconds`:`延迟 ${trigger.delay_seconds} 秒`;
+ if(trigger.kind==='daily')return en?`Daily ${trigger.time} · ${trigger.timezone}`:`每日 ${trigger.time} · ${trigger.timezone}`;
+ if(trigger.kind==='weekly')return en?`Weekly ${(trigger.weekdays??[]).map(day=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day]).join(', ')} ${trigger.time} · ${trigger.timezone}`:`每周 ${(trigger.weekdays??[]).map(day=>['周日','周一','周二','周三','周四','周五','周六'][day]).join('、')} ${trigger.time} · ${trigger.timezone}`;
+ return en?`Every ${trigger.interval_seconds} Seconds`:`每 ${trigger.interval_seconds} 秒`;
 }
 export function scheduleTime(date,timezone) {
  if(!date)return '—';
@@ -113,7 +114,7 @@ export function featureReason(capabilities,feature) {
 }
 export function executionReason(capabilities) { return capabilities?.enabled===true&&capabilities?.execution_ready===true?'':'角色与任务可保存；执行宿主尚未就绪'; }
 export function canResumeTask(task) { return ['paused','budget_exhausted'].includes(task.status)&&(task.budget.max_runs===null||task.runs_used<task.budget.max_runs); }
-export function taskRunCountLabel(task){return task.budget.max_runs===null?`已运行 ${task.runs_used} 次 · 不限次数`:`已运行 ${task.runs_used} / ${task.budget.max_runs}`;}
+export function taskRunCountLabel(task,language='zh-CN'){return language==='en'?(task.budget.max_runs===null?`${task.runs_used} Runs · Unlimited`:`${task.runs_used} / ${task.budget.max_runs} Runs`):(task.budget.max_runs===null?`已运行 ${task.runs_used} 次 · 不限次数`:`已运行 ${task.runs_used} / ${task.budget.max_runs}`);}
 export function selectInitialConversation(items,initial,saved) {
  const visible=items.filter(item=>!item.archived_at);
  if(initial){if(!visible.some(item=>item.conversation_id===initial))throw new Error('此角色对话不可用或已归档，请返回角色列表刷新。');return initial;}
