@@ -1,3 +1,4 @@
+export type {DesktopTaskNotificationCandidate,DesktopTaskNotificationSettings,DesktopTaskNotificationEvent,DesktopTaskNotificationPage,DesktopTaskNotificationStatus} from '../../packages/gateway/contracts/types';
 export type {GitCheckoutReferenceSource,GitCheckoutReviewIntent,GitCheckoutReviewPrepare,GitCheckoutReviewControl,GitCheckoutPreview} from '../../packages/gateway/contracts/types';
 export type {GitInitializationStatus,GitInitializationReviewPrepare,GitInitializationReviewIntent} from '../../packages/gateway/contracts/types';
 import type {Capabilities} from '../jot/types';

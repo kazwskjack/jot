@@ -1,6 +1,7 @@
+import type {DesktopTaskNotificationEvent,DesktopTaskNotificationPage,DesktopTaskNotificationStatus,TaskNotificationEventKind} from '../../contracts/types.ts';
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
-import {withImmediateTransaction} from '../db/database.ts';
+import {withImmediateTransaction,withReadTransaction} from '../db/database.ts';
 import {TaskNotifications,normalizeNotificationEvents} from './notifications.ts';
 
 type Row=Record<string,any>;
@@ -78,6 +79,38 @@ export class DesktopTaskNotificationSource {
    JOIN ga_messages m ON m.id=f.message_id AND m.run_id=r.id AND m.conversation_id=r.conversation_id AND m.role='assistant'
    WHERE r.status='succeeded' AND ${selected('completed')}`);
   return sources;
+ }
+ private owned(owner:string,eventId:string){
+  if(!/^desktop-notice-[a-f0-9]{64}$/.test(eventId))throw Error('task_not_found');
+  const row=this.db.prepare(`SELECT e.*,s.task_id,s.generation FROM ${eventTable} e JOIN ${scopeTable} s ON s.occurrence_id=e.occurrence_id WHERE s.owner_id=? AND e.event_id=?`).get(owner,eventId) as Row|undefined;
+  if(!row)throw Error('task_not_found');return row;
+ }
+ private project(owner:string,row:Row,time:string):DesktopTaskNotificationEvent{
+  const metadata={event_id:String(row.event_id),task_id:String(row.task_id),occurrence_id:String(row.occurrence_id),generation:Number(row.generation),event_kind:row.kind as TaskNotificationEventKind,created_at:String(row.created_at)};
+  const revoked:DesktopTaskNotificationEvent={...metadata,source_status:'revoked',candidate:null,task_settings:null};
+  if(!this.has('wb_agents')||!this.has('wb_task_current_occurrences'))return revoked;
+  // The immutable event is a bookmark; only its still-current causal source can be shown.
+  const scope=this.db.prepare(`WITH live AS (${this.live()}),sources AS (${this.sources().join(' UNION ALL ')})
+   SELECT s.* FROM live s JOIN sources proof ON proof.occurrence_id=s.occurrence_id
+   WHERE s.owner_id=? AND proof.occurrence_id=? AND proof.run_id=? AND proof.kind=? AND proof.source_ref=? AND proof.source_version=?`).get(...(this.has('wb_task_wait_interactions')?[time]:[]),owner,row.occurrence_id,row.run_id,row.kind,row.source_ref,row.source_version) as Row|undefined;
+  if(!scope)return revoked;
+  const settings=this.settings.get(owner,String(scope.task_id));
+  const descriptions={changed:'监控的页面有变化，请打开本次执行查看详情。',completed:'本次执行已有确认的业务完成回执，请打开任务查看结果。',failed:'本次执行失败，请打开任务查看原因和恢复选项。',needs_confirmation:'本次执行需要你补充信息或确认操作，请打开任务查看。'};
+  return {...metadata,source_status:'current',candidate:{event_id:metadata.event_id,task_id:metadata.task_id,occurrence_id:metadata.occurrence_id,generation:metadata.generation,event_kind:metadata.event_kind,title:String(scope.title),body:descriptions[metadata.event_kind]},task_settings:{task_id:settings.task_id,version:settings.version,channel_binding_ids:settings.channel_binding_ids,events:settings.events as TaskNotificationEventKind[],delivery_policy:settings.delivery_policy}};
+ }
+ list(owner:string,afterEventId?:string):DesktopTaskNotificationPage{
+  return withReadTransaction(this.db,()=>{
+   const anchor=afterEventId===undefined?undefined:this.owned(owner,afterEventId),time=this.now();
+   const rows=this.db.prepare(`SELECT e.*,s.task_id,s.generation FROM ${eventTable} e JOIN ${scopeTable} s ON s.occurrence_id=e.occurrence_id WHERE s.owner_id=? AND e.sequence>? ORDER BY e.sequence LIMIT 51`).all(owner,anchor?.sequence??0) as Row[];
+   const page=rows.slice(0,50);
+   return {protocol:1,items:page.map(row=>this.project(owner,row,time)),after_event_id:afterEventId??null,next_event_id:page.length?String(page.at(-1)!.event_id):afterEventId??null,has_more:rows.length>50,server_time:time,execution_granted:false};
+  });
+ }
+ status(owner:string,eventId:string):DesktopTaskNotificationStatus{
+  return withReadTransaction(this.db,()=>{
+   const row=this.owned(owner,eventId),time=this.now();
+   return {protocol:1,event:this.project(owner,row,time),server_time:time,execution_granted:false};
+  });
  }
  maintain(){
   if(!this.has('wb_agents')||!this.has('wb_task_current_occurrences'))return {recorded:0};

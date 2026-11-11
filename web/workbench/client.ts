@@ -1,3 +1,4 @@
+import type {DesktopTaskNotificationPage,DesktopTaskNotificationStatus} from '../../packages/gateway/contracts/types';
 import type {GitInitializationStatus,GitInitializationReviewIntent} from './types';
 import type {BrainPublication,BrainPublicationPage} from '../../packages/gateway/contracts/types';
 import type {WorkbenchMemoryImportTarget,WorkbenchMemoryImportPreview,WorkbenchMemoryImportBundleSource,WorkbenchMemoryImportHistorySection,WorkbenchMemoryImportSourceHistory,WorkbenchMemoryImportReplacementSource} from '../../packages/gateway/contracts/types';
@@ -100,6 +101,8 @@ export const workbenchApi={
  getPushVapidPublicKey:()=>request<PushVapidPublicKey>('/push/vapid-public-key'),
  registerPushSubscription:(input:CreatePushSubscription,key:string)=>request<ChannelBinding>('/push/subscriptions','POST',input,key),
  revokePushSubscription:(binding:ChannelBinding,key:string,localEndpoint?:string)=>request<PushSubscriptionRevocation>(`/push/subscriptions/${pathId(binding.channel_binding_id)}/revoke`,'POST',{expected_version:binding.version,...(localEndpoint===undefined?{}:{local_endpoint:localEndpoint})},key),
+ desktopNotificationEvents:(afterEventId?:string,signal?:AbortSignal)=>request<DesktopTaskNotificationPage>(`/persistent-tasks/desktop-notifications/events${afterEventId?`?after_event_id=${pathId(afterEventId)}`:''}`,'GET',undefined,undefined,signal),
+ desktopNotificationStatus:(eventId:string,signal?:AbortSignal)=>request<DesktopTaskNotificationStatus>(`/persistent-tasks/desktop-notifications/events/${pathId(eventId)}`,'GET',undefined,undefined,signal),
  taskNotifications:(taskId:string,signal?:AbortSignal)=>request<TaskNotificationSettings>(`/persistent-tasks/${pathId(taskId)}/notifications`,'GET',undefined,undefined,signal),
  saveTaskNotifications:(taskId:string,input:ReadonlyNotificationInput,key:string)=>request<TaskNotificationSettings>(`/persistent-tasks/${pathId(taskId)}/notifications`,'PATCH',input,key),
  taskDeliveries:(taskId:string,occurrenceId:string,signal?:AbortSignal)=>request<{items:TaskNotificationDelivery[]}>(`/persistent-tasks/${pathId(taskId)}/occurrences/${pathId(occurrenceId)}/deliveries`,'GET',undefined,undefined,signal),

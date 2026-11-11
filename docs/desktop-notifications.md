@@ -36,4 +36,16 @@ Gateway 在原任务 admission 事务内为新 occurrence 保存单独的桌面�
 
 扫描只接受当前原任务版本/代际、角色 epoch、活动角色和原通知设置版本；暂停、归档、变更角色或通知设置后，不把旧 scope 当作新发送授权。历史不可改写事件本身不能证明当前仍允许发送；后续 feed、发送前核对及撤销必须复用同一来源与 scope 条件。
 
-此增量尚未公开任务事件 feed，也未连接 renderer 的 showTaskNotification。旧 occurrence、同一 occurrence 多个待确认/失败事件的原生去重身份、跨账户/文档撤销、完整 OS 权限和 M24 范围仍待接续；不得用四字段旧去重键吞掉后续真实事件，或回写历史 seen 伪造已通知。仅审阅和修改源码，未执行 SQL、迁移、任务维护或产品。
+原事件账本已增加只读任务事件 feed 与逐事件状态查询，尚未连接 renderer 的 showTaskNotification。旧 occurrence、同一 occurrence 多个待确认/失败事件的原生去重身份、跨账户/文档撤销、完整 OS 权限和 M24 范围仍待接续；不得用四字段旧去重键吞掉后续真实事件，或回写历史 seen 伪造已通知。仅审阅和修改源码，未执行 SQL、迁移、任务维护或产品。
+
+## 只读事件分页与当前来源查询
+
+`GET /v1/persistent-tasks/desktop-notifications/events?after_event_id=...` 从当前账户的已保留事件账本按内部不可改写 sequence 升序读取，每页至多 50 项，另读一项判断 has_more。游标只能是同一账户的原 event_id；任务后来失效不会使其历史游标失效。原生序号不在公共接口返回，不用其他账户事件或数量作为游标。没有游标时从本账户保留账本起点读取，这不是自动发送历史通知的指令。
+
+`GET /v1/persistent-tasks/desktop-notifications/events/:eventId` 在同一只读快照中重新读取同一事件及原任务/角色/settings/current occurrence/因果来源。两个接口复用相同的来源检查，不调用维护、不创建事件、不发通知、不取得执行资格。不存在或其他账户的原事件/游标均为 task_not_found，格式错误由原路由校验拒绝。
+
+事件始终保留原 event_id、task_id、occurrence_id、generation、event_kind 和来源 created_at。仍有效时提供最小任务标题、固定说明与明确投影的五字段 task_settings；不传最终消息、页面正文、交互内容或外部渠道授权。失效时 source_status=revoked，candidate/task_settings 均为空，原身份仍可用于撤销。即使一页全部失效也可按 next_event_id 前进，不反复卡在旧记录。
+
+响应含协议1、当前服务端时间及 execution_granted=false。Gateway 和工作台代理均加 private, no-store；公共 types、JSON/YAML API 声明和原 workbench client 已接入。事件读取结果只是该快照的来源状态，不能替代真正发送前的重新核对，也不承诺 OS 会显示通知。
+
+后续 renderer 仍须处理首次连接/历史基线、原生持久去重、同一 occurrence 的多个真实事件、未知结果、源失效及账户/文档撤销。新 candidate 带原 event_id，当前旧原生通知 parser 尚未接收此字段，因此此阶段不把新 DTO 直接送给原生 show。旧 occurrence 没有出生 scope 时不伪造历史授权，完整 OS/M24 范围也未结束。本次未运行 HTTP、SQL、任务维护、浏览器、Electron、构建或测试。

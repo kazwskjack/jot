@@ -885,3 +885,9 @@ export type TerminalSessionCatalog=import('../src/terminal/session-catalog').Ter
 export type StandaloneTerminalAdmission=import('../src/terminal/standalone-admissions').StandaloneTerminalAdmission;
 export type StandaloneTerminalAdmissionCatalog=import('../src/terminal/standalone-admissions').StandaloneTerminalAdmissionCatalog;
 export type {StandaloneTerminalCommandRecord,StandaloneTerminalCommandCatalog} from '../src/terminal/standalone-commands';
+
+export type DesktopTaskNotificationCandidate={event_id:string;task_id:string;occurrence_id:string;generation:number;event_kind:TaskNotificationEventKind;title:string;body:string};
+export type DesktopTaskNotificationSettings=Pick<TaskNotificationSettings,'task_id'|'version'|'channel_binding_ids'|'events'|'delivery_policy'>;
+export type DesktopTaskNotificationEvent={event_id:string;task_id:string;occurrence_id:string;generation:number;event_kind:TaskNotificationEventKind;created_at:string}&({source_status:'current';candidate:DesktopTaskNotificationCandidate;task_settings:DesktopTaskNotificationSettings}|{source_status:'revoked';candidate:null;task_settings:null});
+export type DesktopTaskNotificationPage={protocol:1;items:DesktopTaskNotificationEvent[];after_event_id:string|null;next_event_id:string|null;has_more:boolean;server_time:string;execution_granted:false};
+export type DesktopTaskNotificationStatus={protocol:1;event:DesktopTaskNotificationEvent;server_time:string;execution_granted:false};

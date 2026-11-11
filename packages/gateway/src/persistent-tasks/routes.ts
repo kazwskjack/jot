@@ -45,6 +45,15 @@ export function registerPersistentTaskRoutes(app: FastifyInstance, service: Pers
       ...Object.fromEntries(['occurrence_id','subtask_id','recipient_agent_id','client_message_id'].map(key=>[key,{type:'string',minLength:1,maxLength:200}])),
       expected_subtask_version:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER}}}}},async(request,reply)=>
       reply.code(201).send(atomicCommand(request,201,()=>delegations.delegate(actor(request),taskId(request),body(request) as Parameters<TaskDelegationService['delegate']>[2]))));
+  const desktopEventId={type:'string',pattern:'^desktop-notice-[a-f0-9]{64}$',minLength:79,maxLength:79};
+  app.get('/v1/persistent-tasks/desktop-notifications/events',{validatorCompiler,schema:{querystring:{type:'object',additionalProperties:false,properties:{after_event_id:desktopEventId}}}},async(request,reply)=>{
+    reply.header('cache-control','private, no-store');
+    return service.desktopNotificationEvents(actor(request),(request.query as {after_event_id?:string}).after_event_id);
+  });
+  app.get('/v1/persistent-tasks/desktop-notifications/events/:eventId',{validatorCompiler,schema:{params:{type:'object',additionalProperties:false,required:['eventId'],properties:{eventId:desktopEventId}}}},async(request,reply)=>{
+    reply.header('cache-control','private, no-store');
+    return service.desktopNotificationStatus(actor(request),(request.params as {eventId:string}).eventId);
+  });
   app.get('/v1/persistent-tasks',async request=>service.list(actor(request)));
   app.post('/v1/persistent-tasks/preview',{validatorCompiler,schema:{body:{type:'object',additionalProperties:false,required:['trigger'],properties:{trigger}}}},async request=>{
     actor(request);return service.previewTrigger(body(request).trigger);

@@ -661,6 +661,8 @@ export class PersistentTaskService {
     this.discoverySourceCursor=String(rows.at(-1)!.policy_id);
     return {policies:rows.length,recorded,pending};
   }
+  desktopNotificationEvents(owner:string,afterEventId?:string){return this.desktopNotifications.list(owner,afterEventId);}
+  desktopNotificationStatus(owner:string,eventId:string){return this.desktopNotifications.status(owner,eventId);}
   maintainNotifications(){
     const signals=this.notificationSignals.maintain();
     const desktop=this.desktopNotifications.maintain();
