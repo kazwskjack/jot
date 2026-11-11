@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import React,{useEffect,useRef,useState} from 'react';
 import {request} from './client';
 import type {Activity,ActivityHistoryPage} from './types';
@@ -30,6 +32,7 @@ function validatePage(page:ActivityHistoryPage,conversationId:string,asOf:string
 export default function ActivityHistory({conversationId,snapshotSeq,requestVersion,onLoaded,runId}:{
  conversationId:string;snapshotSeq?:string;runId?:string;requestVersion:number;onLoaded:(activities:Activity[])=>void;
 }){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const [enabled,setEnabled]=useState(false),[loading,setLoading]=useState(false),[error,setError]=useState('');
  const [loadedCount,setLoadedCount]=useState(0),[finished,setFinished]=useState(false),[gap,setGap]=useState(false);
  const cursor=useRef<string>(),states=useRef(new Map<string,Activity>()),finishedRef=useRef(false),coverageComplete=useRef(true);
@@ -75,11 +78,11 @@ export default function ActivityHistory({conversationId,snapshotSeq,requestVersi
   }
   setEnabled(true);
  };
- return <section aria-label="公开步骤历史" className="jot-activity-history">
-  <button type="button" disabled={!snapshotSeq||loading} onClick={start}>{finished?'重新读取公开步骤':loadedCount?'继续加载公开步骤':'加载全部公开步骤'}</button>
-  {loading&&<button type="button" onClick={()=>setEnabled(false)}>停止加载步骤</button>}
-  <span role="status">{loading?'正在读取步骤历史':finished?'可用步骤已载入':'完整步骤历史尚未加载'} · 本轮已读 {loadedCount} 个工具步骤</span>
-  {gap&&<p role="status">原事件历史存在保留缺口，当前结果仅覆盖可用记录。</p>}
-  {error&&<p role="alert">{error} 已加载的时间线会保留，可继续读取。</p>}
+ return <section lang={language} aria-label={t("公开步骤历史","Public Step History")} className="jot-activity-history">
+  <button type="button" disabled={!snapshotSeq||loading} onClick={start}>{finished?t('重新读取公开步骤','Read Public Steps Again'):loadedCount?t('继续加载公开步骤','Continue Loading Public Steps'):t('加载全部公开步骤','Load All Public Steps')}</button>
+  {loading&&<button type="button" onClick={()=>setEnabled(false)}>{t('停止加载步骤','Stop Loading Steps')}</button>}
+  <span role="status">{loading?t('正在读取步骤历史','Reading step history'):finished?t('可用步骤已载入','Available steps loaded'):t('完整步骤历史尚未加载','Full step history has not loaded')} · {t(`本轮已读 ${loadedCount} 个工具步骤`,`${loadedCount} tool steps read in this load`)}</span>
+  {gap&&<p role="status">{t('原事件历史存在保留缺口，当前结果仅覆盖可用记录。','Original event history has retention gaps. Current results cover only available records.')}</p>}
+  {error&&<p role="alert">{conversationUiError(error,language)}{' '}{t('已加载的时间线会保留，可继续读取。','The loaded timeline is retained. You can continue reading.')}</p>}
  </section>;
 }

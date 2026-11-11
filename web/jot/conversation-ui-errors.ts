@@ -1,6 +1,13 @@
 // Fixed owned conversation UI failures; unknown/raw content stays unchanged.
 import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
 const english:Record<string,string>={
+ "公开步骤历史序号尚未确认": "The public step-history sequence is unconfirmed.",
+ "公开步骤历史结果尚未确认": "The public step-history result is unconfirmed.",
+ "公开步骤历史区间尚未确认": "The public step-history interval is unconfirmed.",
+ "公开步骤历史顺序或身份尚未确认": "The public step-history order or identity is unconfirmed.",
+ "公开步骤历史分页尚未确认": "The public step-history page is unconfirmed.",
+ "公开步骤历史覆盖范围尚未确认": "The public step-history coverage is unconfirmed.",
+ "公开步骤历史加载失败": "Unable to load public step history.",
  "快照未提供更早历史边界，请刷新会话后继续": "The snapshot did not provide an earlier history boundary. Refresh the conversation before continuing.",
  "历史分页结果尚未确认": "The history page result is unconfirmed.",
  "历史分页出现重复消息，请刷新会话后继续": "The history pages contain duplicate messages. Refresh the conversation before continuing.",
