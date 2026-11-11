@@ -334,3 +334,5 @@ PilotDeck integration notices apply. Native selection/reference snapshot
 integration is tracked in the execution worklist.
 
 Native member reference snapshots reuse the retained PilotDeck selection schemas through Jot’s strict content-reference codec. Native source revision and server receipts remain separate from numeric workspace versions; original attribution and AGPL terms above apply.
+
+Native member PDF and retained Office-PDF text/region quote actions reuse Jot’s attributed PilotDeck selection and PNG upload recovery flows. Source-pinned reopening uses the native member read path, with opened-source and derived-PDF receipts retained through drafts and message snapshots.

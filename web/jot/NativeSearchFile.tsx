@@ -1,10 +1,12 @@
+import type {PdfReferenceFocus} from './pdf-file-view-state';
+import type {NativeOfficePrintPin} from './native-office-print-client';
 import {officePreviewFormat} from '../../packages/gateway/src/artifacts/office-preview-format.js';
 import React,{useEffect,useRef,useState,lazy,Suspense} from 'react';
 import {taskDraftScope} from './client';
 import {listedFileImageType} from './ActivityToolFileImage';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
-import {readNativeMemberPreviewBytes,type NativeMemberPreviewSource,type NativeMemberOpenedBytes} from './activity-file-preview-client';
+import {nativeMemberReferenceSource,readNativeMemberPreviewBytes,type NativeMemberPreviewSource,type NativeMemberOpenedBytes} from './activity-file-preview-client';
 
 const NativeSearchOfficePrint=lazy(()=>import('./NativeSearchOfficePrint'));
 const NativeSearchOfficeDocument=lazy(()=>import('./NativeSearchOfficeDocument'));
@@ -12,14 +14,14 @@ const NativeSearchFileOffice=lazy(()=>import('./NativeSearchFileOffice'));
 const NativeSearchFilePdf=lazy(()=>import('./NativeSearchFilePdf'));
 type Opened=NativeMemberOpenedBytes&{downloadUrl:string;imageUrl?:string;text?:string};
 
-export default function NativeSearchFile({source}:{source:NativeMemberPreviewSource}){
- const owner=taskDraftScope(),identity=JSON.stringify([owner,source]);
+export default function NativeSearchFile({source,expected,printPin,focus}:{source:NativeMemberPreviewSource;expected?:{openSha:string;proof:string;sha256:string;size:number};printPin?:NativeOfficePrintPin|undefined;focus?:PdfReferenceFocus|undefined}){
+ const owner=taskDraftScope(),identity=JSON.stringify([owner,source,expected,printPin]);
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;opened?:Opened;error?:string}>(),[revision,setRevision]=useState(0);
  const openPin=useRef<{identity:string;sha:string;proof?:string}>();
- const [printMode,setPrintMode]=useState(false),[structured,setStructured]=useState(false);
+ const [printMode,setPrintMode]=useState(!!printPin),[structured,setStructured]=useState(false);
  const captureOpen=(sha:string,proof?:string)=>{
-  if(taskDraftScope()!==owner||openPin.current?.identity===identity&&(openPin.current.sha!==sha||openPin.current.proof!==undefined&&openPin.current.proof!==proof))return false;
+  if(taskDraftScope()!==owner||expected&&(sha!==expected.openSha||proof!==expected.proof)||openPin.current?.identity===identity&&(openPin.current.sha!==sha||openPin.current.proof!==undefined&&openPin.current.proof!==proof))return false;
   openPin.current={identity,sha,...(proof?{proof}:{})};return true;
  };
  const [raw,setRaw]=useState(false),[byteOffset,setByteOffset]=useState(0);
@@ -31,9 +33,10 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
   active.current=controller;
   setState({identity});
   const load=async()=>{
-   const expected=openPin.current?.identity===identity?{openSha:openPin.current.sha,...(openPin.current.proof?{proof:openPin.current.proof}:{})}:undefined;
-   const value=await readNativeMemberPreviewBytes(source,owner,controller.signal,expected);
+   const pin=openPin.current?.identity===identity?{openSha:openPin.current.sha,...(openPin.current.proof?{proof:openPin.current.proof}:{})}:expected;
+   const value=await readNativeMemberPreviewBytes(source,owner,controller.signal,pin);
    controller.signal.throwIfAborted();
+   if(expected&&(value.sha256!==expected.sha256||value.size!==expected.size))throw Error('原引用文件摘要或大小已变化');
    if(!captureOpen(value.openSha,value.proof))throw Error('原打开来源已变化，请重新打开文件');
    const downloadUrl=URL.createObjectURL(new Blob([value.bytes.slice()],{type:'application/octet-stream'}));
    urls.push(downloadUrl);
@@ -53,8 +56,8 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
  },[identity,revision]);
  const current=state?.identity===identity?state:undefined,opened=current?.opened;
  const currentCursor=opened&&cursor?.sha===opened.openSha?cursor:undefined,offset=currentCursor?.offset??0;
- const sourceOpenSha=opened?.openSha??(openPin.current?.identity===identity?openPin.current.sha:undefined);
- const sourceOpenProof=opened?.proof??(openPin.current?.identity===identity?openPin.current.proof:undefined);
+ const sourceOpenSha=opened?.openSha??(openPin.current?.identity===identity?openPin.current.sha:expected?.openSha);
+ const sourceOpenProof=opened?.proof??(openPin.current?.identity===identity?openPin.current.proof:expected?.proof);
  const text=opened?.text;
  let end=Math.min(offset+16384,text?.length??0);
  if(text&&end<text.length&&/[\uD800-\uDBFF]/.test(text[end-1]!)&&/[\uDC00-\uDFFF]/.test(text[end]!))end--;
@@ -65,7 +68,7 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
   <h4>{source.member.path}</h4>
   {office?.native&&<button type="button" onClick={()=>{setPrintMode(false);setStructured(!structured);}}>{structured?'关闭结构化内容':'查看Office结构化内容'}</button>}
   {office&&<button type="button" onClick={()=>{setStructured(false);setPrintMode(!printMode);}}>{printMode?'关闭转换PDF':'查看Office转换PDF'}</button>}
-  {printMode&&office&&<ConversationDisplayBoundary label="原生Office转换预览"><Suspense fallback={<p role="status">正在载入转换PDF查看器…</p>}><NativeSearchOfficePrint source={source} expectedOpenSha={sourceOpenSha} expectedOpenProof={sourceOpenProof} onOpened={captureOpen}/></Suspense></ConversationDisplayBoundary>}
+  {printMode&&office&&<ConversationDisplayBoundary label="原生Office转换预览"><Suspense fallback={<p role="status">正在载入转换PDF查看器…</p>}><NativeSearchOfficePrint source={source} expectedOpenSha={sourceOpenSha} expectedOpenProof={sourceOpenProof} expectedPreview={printPin} focus={focus} onOpened={captureOpen}/></Suspense></ConversationDisplayBoundary>}
   {structured&&office?.native&&<ConversationDisplayBoundary label="原生Office结构化预览"><Suspense fallback={<p role="status">正在载入Office结构化查看器…</p>}><NativeSearchOfficeDocument source={source} expectedOpenSha={sourceOpenSha} expectedOpenProof={sourceOpenProof} onOpened={captureOpen}/></Suspense></ConversationDisplayBoundary>}
   {!structured&&!printMode&&(!current||!opened&&!current.error)&&<p role="status">正在读取并核对完整打开内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'本次读取已取消。'});}}>取消读取</button></p>}
   {opened&&<>
@@ -84,7 +87,7 @@ export default function NativeSearchFile({source}:{source:NativeMemberPreviewSou
     </nav>
    </>:office?.native?<ConversationDisplayBoundary key={opened.openSha} label="原生Office预览"><Suspense fallback={<p role="status">正在载入Office查看器…</p>}><NativeSearchFileOffice key={JSON.stringify([opened.openSha,office.kind])} kind={office.kind} bytes={opened.bytes}/></Suspense></ConversationDisplayBoundary>
     :opened.imageUrl?<img src={opened.imageUrl} alt={source.member.path} style={{maxWidth:'100%',height:'auto'}} onError={()=>{setRaw(true);setState({identity,opened,error:'浏览器无法显示此图片格式，当前显示原始字节。'});}}/>
-    :pdf?<ConversationDisplayBoundary key={opened.openSha} label="原生PDF预览"><Suspense fallback={<p role="status">正在载入PDF查看器…</p>}><NativeSearchFilePdf key={opened.openSha} bytes={opened.bytes}/></Suspense></ConversationDisplayBoundary>
+    :pdf?<ConversationDisplayBoundary key={opened.openSha} label="原生PDF预览"><Suspense fallback={<p role="status">正在载入PDF查看器…</p>}><NativeSearchFilePdf key={opened.openSha} bytes={opened.bytes} source={nativeMemberReferenceSource(source,opened)} focus={focus}/></Suspense></ConversationDisplayBoundary>
     :text!==undefined?<>
      <pre data-chat-search-content={JSON.stringify(['native-opened-file',identity,opened.openSha,offset])}>{text.slice(offset,end)}</pre>
      <nav aria-label="打开文件正文翻页" data-chat-search-ignore>

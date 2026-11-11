@@ -1,3 +1,5 @@
+import type {PdfReferenceFocus} from './pdf-file-view-state';
+import {nativeMemberReferenceSource} from './activity-file-preview-client';
 import React,{lazy,Suspense,useEffect,useRef,useState} from 'react';
 import {ApiError,taskDraftScope} from './client';
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
@@ -6,8 +8,8 @@ import {readNativeOfficePdf,type NativeOfficePrintPin,type NativeOfficePrintPrev
 import type {NativeMemberPreviewSource} from './activity-file-preview-client';
 const PdfViewer=lazy(()=>import('./NativeSearchFilePdf'));
 
-export default function NativeSearchOfficePrint({source,expectedOpenSha,expectedOpenProof,onOpened}:{source:NativeMemberPreviewSource;expectedOpenSha?:string|undefined;expectedOpenProof?:string|undefined;onOpened?:(sha:string,proof?:string)=>boolean}){
- const owner=taskDraftScope(),identity=JSON.stringify([owner,source]);
+export default function NativeSearchOfficePrint({source,expectedOpenSha,expectedOpenProof,expectedPreview,focus,onOpened}:{source:NativeMemberPreviewSource;expectedOpenSha?:string|undefined;expectedOpenProof?:string|undefined;expectedPreview?:NativeOfficePrintPin|undefined;focus?:PdfReferenceFocus|undefined;onOpened?:(sha:string,proof?:string)=>boolean}){
+ const owner=taskDraftScope(),identity=JSON.stringify([owner,source,expectedPreview]);
  const pin=useRef<{identity:string;value:NativeOfficePrintPin;revision:number}>(),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;preview?:NativeOfficePrintPreview;error?:string}>(),[revision,setRevision]=useState(0);
  const [download,setDownload]=useState<{preview:NativeOfficePrintPreview;url:string}>();
@@ -16,7 +18,7 @@ export default function NativeSearchOfficePrint({source,expectedOpenSha,expected
   const controller=new AbortController();active.current=controller;setState({identity});
   const timer=window.setTimeout(()=>{controller.abort();if(taskDraftScope()===owner)setState({identity,error:'转换PDF读取超时，请稍后重试。'});},180000);
   const load=async()=>{
-   const expected=pin.current?.identity===identity?pin.current.value:undefined;
+   const expected=pin.current?.identity===identity?pin.current.value:expectedPreview;
    const preview=await readNativeOfficePdf(source,owner,controller.signal,expectedOpenSha,expected,expectedOpenProof);
    controller.signal.throwIfAborted();
    if(taskDraftScope()!==owner||onOpened&&!onOpened(preview.openSha,preview.openProof))throw Error('原打开来源已变化，请重新打开文件');
@@ -46,7 +48,7 @@ export default function NativeSearchOfficePrint({source,expectedOpenSha,expected
    <p>原文件 {preview.sourceSize} 字节 · 源SHA-256 <code>{preview.sourceSha}</code></p>
    <p>PDF {preview.size} 字节 · {preview.pageCount} 页 · SHA-256 <code>{preview.sha256}</code></p>
    {download?.preview===preview&&<a href={download.url} download="office-preview.pdf" onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载此转换PDF</a>}
-   <ConversationDisplayBoundary key={preview.sha256} label="原生Office转换PDF"><Suspense fallback={<p role="status">正在载入PDF查看器…</p>}><PdfViewer bytes={preview.bytes} expectedPageCount={preview.pageCount}/></Suspense></ConversationDisplayBoundary>
+   <ConversationDisplayBoundary key={preview.sha256} label="原生Office转换PDF"><Suspense fallback={<p role="status">正在载入PDF查看器…</p>}><PdfViewer bytes={preview.bytes} expectedPageCount={preview.pageCount} source={preview.pdfProof?nativeMemberReferenceSource(source,{openSha:preview.openSha,sha256:preview.sourceSha,size:preview.sourceSize,proof:preview.openProof}):undefined} printView={preview.pdfProof?{protocol:1,sha256:preview.sha256,size:preview.size,pageCount:preview.pageCount,proof:preview.pdfProof}:undefined} focus={focus}/></Suspense></ConversationDisplayBoundary>
   </>}
   {current?.error&&<p role="alert">{current.error}</p>}
   <button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取此转换预览</button>

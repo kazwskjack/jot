@@ -115,3 +115,12 @@ export async function readNativeMemberPreviewBytes(source:NativeMemberPreviewSou
   return {bytes,sha256,size,openSha,...(proof?{proof}:{})};
  }catch(error){await response.body?.cancel().catch(()=>{});throw error;}
 }
+
+/** Only a verified opened source with a server receipt can enter native quote actions. */
+export function nativeMemberReferenceSource(source:NativeMemberPreviewSource,opened:{openSha:string;sha256:string;size:number;proof?:string|undefined}):import('./FileTextReferences').FileReferenceIdentity|undefined{
+ if(!opened.proof)return;
+ return {conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,
+  file:{path:source.member.path,sha256:opened.sha256,size:opened.size},
+  native_source:{protocol:1,membersSha:source.membersSha,memberIndex:source.member.index,openSha:opened.openSha,proof:opened.proof,
+   ...(source.asOfSeq!==undefined?{asOfSeq:source.asOfSeq}:{})}};
+}

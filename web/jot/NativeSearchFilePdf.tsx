@@ -1,3 +1,8 @@
+import PdfFileTextReferenceAction from './PdfFileTextReferenceAction';
+import PdfFileRegionReference from './PdfFileRegionReference';
+import type {FileReferenceIdentity} from './FileTextReferences';
+import type {OfficePrintView} from '../../packages/gateway/contracts/types';
+import type {PdfReferenceFocus} from './pdf-file-view-state';
 import {taskDraftScope} from './client';
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import * as pdfjs from 'pdfjs-dist';
@@ -11,7 +16,7 @@ pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const assets=new URL('pdfjs/6.1.200/',new URL(workerUrl,document.baseURI)).href;
 
 /** Reuse the existing PDF page renderer and outline/search over the same opened bytes. */
-export default function NativeSearchFilePdf({bytes,expectedPageCount}:{bytes:Uint8Array;expectedPageCount?:number|undefined}){
+export default function NativeSearchFilePdf({bytes,expectedPageCount,source,printView,focus}:{bytes:Uint8Array;expectedPageCount?:number|undefined;source?:FileReferenceIdentity|undefined;printView?:OfficePrintView|undefined;focus?:PdfReferenceFocus|undefined}){
  const root=useRef<HTMLDivElement>(null),owner=taskDraftScope();
  const [document,setDocument]=useState<pdfjs.PDFDocumentProxy>(),[error,setError]=useState('');
  const [challenge,setChallenge]=useState<{update:(password:string)=>void;invalid:boolean}>(),[password,setPassword]=useState('');
@@ -28,6 +33,12 @@ export default function NativeSearchFilePdf({bytes,expectedPageCount}:{bytes:Uin
   return()=>{cancelled=true;void loading.destroy().catch(()=>{});};
  },[bytes,owner,expectedPageCount]);
  useEffect(()=>{
+  if(!document||!focus)return;
+  const first=focus.pages.find(item=>item.page>=1&&item.page<=document.numPages);
+  if(first)setPage(first.page);
+  if(focus.rotation!==undefined)setRotation(focus.rotation);
+ },[document,focus?.key]);
+ useEffect(()=>{
   const element=root.current!;
   const update=()=>setWidth(element.clientWidth||800);
   update();
@@ -42,6 +53,7 @@ export default function NativeSearchFilePdf({bytes,expectedPageCount}:{bytes:Uin
   </form>}
   {!document&&!error&&!challenge&&<p role="status">正在解析PDF…</p>}
   {error&&<p role="alert">{error}</p>}
+  {document&&source&&<><PdfFileTextReferenceAction root={root} source={source} rotation={rotation} printView={printView}/><PdfFileRegionReference root={root} source={source} page={page} rotation={rotation} printView={printView}/></>}
   {document&&<>
    <nav aria-label="PDF页面和缩放" data-chat-search-ignore>
     <button type="button" disabled={page===1} onClick={()=>setPage(page-1)}>上一页</button>
@@ -54,10 +66,11 @@ export default function NativeSearchFilePdf({bytes,expectedPageCount}:{bytes:Uin
     <button type="button" onClick={()=>setZoom('page')}>适合页面</button>
     <button type="button" onClick={()=>setRotation((rotation+90)%360)}>旋转90°</button>
    </nav>
+   {focus&&<nav aria-label="原引用页码" data-chat-search-ignore>{focus.pages.filter(item=>item.page>=1&&item.page<=document.numPages).map(item=><button key={item.page} type="button" onClick={()=>{setPage(item.page);if(focus.rotation!==undefined)setRotation(focus.rotation);}}>原引用第 {item.page} 页</button>)}</nav>}
    <PdfFileNavigation document={document} page={page} onNavigate={setPage} onMatches={onMatches}/>
    <div style={{maxHeight:'70vh',overflow:'auto'}}>
     <PdfFilePage key={page} document={document} pageNumber={page} zoom={zoom} rotation={rotation} width={width} onScale={setScale}
-     matches={search.matches.filter(match=>match.pageNumber===page)} selected={search.selected}/>
+     matches={search.matches.filter(match=>match.pageNumber===page)} selected={search.selected} referenceRect={focus?.rotation===rotation?focus.pages.find(item=>item.page===page)?.rect:undefined}/>
    </div>
   </>}
  </div>;

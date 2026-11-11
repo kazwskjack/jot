@@ -1,4 +1,4 @@
-import type {OfficePrintView} from '../../packages/gateway/contracts/types';
+import type {NativeFileReferenceProvenance,NativeFileReferenceFile,OfficePrintView} from '../../packages/gateway/contracts/types';
 // Quote review flow adapted from Jot AssistantReplyQuote.tsx and its attributed PilotDeck source.
 // Adapted portions retain GNU AGPL v3 terms.
 // Complete license retained at packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt
@@ -7,7 +7,8 @@ import {CONTENT_REFERENCE_PROMPT_MARKER,type TextContentReference,type ImageRegi
 import type {Artifact,ActivityToolResultFile} from './types';
 import './assistant-reply-quote.css';
 
-export type FileTextReference={print_view?:OfficePrintView;text_view?:1|2;rotation?:number;owner:string;conversationId:string;runId:string;activityId:string;resultSha:string;file:Pick<ActivityToolResultFile,'path'|'version'|'sha256'|'size'>;reference:TextContentReference};
+export type FileReferenceIdentity={conversationId:string;runId:string;activityId:string;resultSha:string;native_source?:NativeFileReferenceProvenance;file:Pick<ActivityToolResultFile,'path'|'version'|'sha256'|'size'>|(NativeFileReferenceFile&{version?:never})};
+export type FileTextReference=FileReferenceIdentity&{print_view?:OfficePrintView;text_view?:1|2;rotation?:number;owner:string;reference:TextContentReference};
 export type FileCellReference=Omit<FileTextReference,'reference'|'rotation'|'text_view'|'print_view'>&{print_view?:never;cell_view?:1|2;reference:CellRangeContentReference};
 export type FileSelectionReference=FileTextReference|FileCellReference;
 export type OfficeTextFocus={key:string;value:FileTextReference};
@@ -22,7 +23,7 @@ export type FileReference=FileSelectionReference|FileRegionReference;
 export type FileSourceReference=FileSelectionReference|FileRegionDraft;
 export function isFileRegion<T extends FileSourceReference>(value:T):value is Extract<T,FileRegionDraft>{return value.reference.selectionMode==='region';}
 export function isFileCells<T extends FileSourceReference>(value:T):value is Extract<T,FileCellReference>{return value.reference.selectionMode==='cells';}
-export const FileTextReferenceContext=createContext<{owner:string;conversationId:string;disabled:boolean;regionDisabled:boolean;cellViews?:Array<1|2>;printViews?:Array<1>;regionRenderers?:Array<'pdf'|'docx'|'pptx'|'xlsx'|'office-pdf'>;onAdd:(reference:FileSelectionReference)=>boolean;onAddMany?:(references:FileTextReference[])=>boolean;onAddRegion:(reference:FileRegionDraft,file:File)=>Promise<boolean>}|null>(null);
+export const FileTextReferenceContext=createContext<{owner:string;conversationId:string;disabled:boolean;regionDisabled:boolean;cellViews?:Array<1|2>;printViews?:Array<1>;nativeSources?:Array<1>;regionRenderers?:Array<'pdf'|'docx'|'pptx'|'xlsx'|'office-pdf'>;onAdd:(reference:FileSelectionReference)=>boolean;onAddMany?:(references:FileTextReference[])=>boolean;onAddRegion:(reference:FileRegionDraft,file:File)=>Promise<boolean>}|null>(null);
 export function resolveRegionArtifact(value:FileRegionReference,resolve:(entryId:string)=>Artifact|undefined){
  const artifact=resolve(value.uploadEntryId);
  return artifact&&artifact.conversation_id===value.conversationId&&artifact.origin==='upload'&&artifact.status==='ready'&&artifact.version===1
@@ -58,7 +59,7 @@ export function FileReferenceDetails({value,file,ready}:{value:FileSourceReferen
   :`第 ${isFileRegion(value)?value.reference.locator.pageNumber:value.reference.locator.pageNumbers?.join('、')} 页`;
  return <details onToggle={event=>setOpen(event.currentTarget.open)}><summary>{value.file.path} · {location}</summary>
   {value.print_view&&<p>转换PDF · {value.print_view.pageCount}页 · 摘要 <code>{value.print_view.sha256}</code> · {isFileRegion(value)?'视觉区域定位':'近似文字定位'}</p>}
-  <p>原版本 {value.file.version} · SHA-256 <code>{value.file.sha256}</code></p>
+  <p>原版本 {value.native_source?.openSha??value.file.version} · SHA-256 <code>{value.file.sha256}</code></p>
   {isFileRegion(value)?<>
    <p>图片区域 · {value.reference.image.name} · {value.reference.image.width} × {value.reference.image.height} · 图片摘要 <code>{value.reference.image.sha256}</code></p>
    {value.reference.renderer.id==='xlsx'&&value.region_view&&<details><summary>原工作表视口、缩放及滚动状态</summary><pre>{JSON.stringify(value.region_view,null,2)}</pre></details>}
