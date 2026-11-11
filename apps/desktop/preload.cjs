@@ -7,7 +7,8 @@ const validIdentity=value=>value&&typeof value.task_id==='string'&&value.task_id
 let openTaskListeners=new Set(),queuedOpenTasks=[],openNotificationSettingsListeners=new Set(),queuedOpenNotificationSettings=false;
 const updateOperationIdPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const updatePhases=new Set(['available','downloading','downloaded','verified','staged','awaiting-activation','activating','active','cancelled','failed','unknown']);
-const updateProgressListeners=new Set();
+const updateProgressListeners=new Set(),menuRefreshListeners=new Set();
+ipcRenderer.on('desktop:menu-refresh',()=>{for(const listener of menuRefreshListeners)try{listener();}catch{}});
 const notificationPermissionStatuses=new Set(['granted','denied','default','unsupported','unknown']);
 const notificationPermissionListeners=new Set();
 ipcRenderer.on('desktop:notification-permission',(_event,status)=>{
@@ -78,6 +79,7 @@ ipcRenderer.on('desktop:window-chrome',(_event,value)=>{const state=windowChrome
 const invoke=(channel,payload)=>ipcRenderer.invoke(channel,payload);
 const bridge=Object.freeze({
  platform:process.platform,
+ onMenuRefresh(listener){if(typeof listener!=='function')throw new TypeError('desktop_listener_invalid');menuRefreshListeners.add(listener);return()=>menuRefreshListeners.delete(listener);},
  getAppearance:()=>ipcRenderer.sendSync('appearance.read'),
  getAppearanceCapabilities:()=>invoke('appearance.capabilities'),
  setAppearance:value=>invoke('appearance.write',value),

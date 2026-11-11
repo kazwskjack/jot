@@ -3,7 +3,7 @@ import {useEffect,useRef,type RefObject} from 'react';
 import {desktopMenuCommands,type DesktopMenuCommand,type DesktopMenuState} from '../../packages/desktop/src/menu-commands.mjs';
 import {taskDraftScope} from './client';
 export type DesktopUiCommand=DesktopMenuCommand;
-type Bridge={platform?:string;onCommand?:(listener:(value:{protocol:1;command:DesktopUiCommand;owner_scope:string})=>void)=>()=>void;setMenuState?:(state:DesktopMenuState)=>Promise<unknown>};
+type Bridge={platform?:string;onMenuRefresh?:(listener:()=>void)=>()=>void;onCommand?:(listener:(value:{protocol:1;command:DesktopUiCommand;owner_scope:string})=>void)=>()=>void;setMenuState?:(state:DesktopMenuState)=>Promise<unknown>};
 export function useDesktopCommands(options:{owner:string;surface:RefObject<HTMLElement|null>;sidebarVisible:boolean;enabled:(command:DesktopUiCommand)=>boolean;execute:(command:DesktopUiCommand)=>void}){
  const latest=useRef(options);latest.current=options;
  useEffect(()=>{
@@ -37,6 +37,7 @@ export function useDesktopCommands(options:{owner:string;surface:RefObject<HTMLE
   const resize=bridge.platform==='darwin'&&typeof ResizeObserver!=='undefined'?new ResizeObserver(schedule):null;
   const rootObserver=new MutationObserver(schedule);rootObserver.observe(root,{attributes:true,attributeFilter:['data-jot-desktop-platform','data-jot-desktop-fullscreen']});
   window.addEventListener('resize',schedule);
+  const stopRefresh=bridge.onMenuRefresh?.(()=>{last='';schedule();});
   const stop=bridge.onCommand(value=>{
    const current=state();
    if(!disposed&&value?.protocol===1&&value.owner_scope===current.owner_scope&&desktopMenuCommands.includes(value.command)&&!current.blocked&&current.ready&&current.enabled_commands.includes(value.command))latest.current.execute(value.command);
@@ -55,7 +56,7 @@ export function useDesktopCommands(options:{owner:string;surface:RefObject<HTMLE
   const observer=new MutationObserver(records=>{if(records.some(record=>record.type==='attributes'?affects(record.target):[...record.addedNodes,...record.removedNodes].some(affects)))schedule();});
   observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled','hidden','aria-hidden','aria-modal','inert','class','data-desktop-files-ready','data-desktop-workspace']});
   document.addEventListener('focusin',schedule);document.addEventListener('focusout',schedule);document.addEventListener('keydown',keydown);window.addEventListener('jot:desktop-menu-refresh',sync);sync();
-  return()=>{disposed=true;cancelAnimationFrame(frame);observer.disconnect();rootObserver.disconnect();resize?.disconnect();window.removeEventListener('resize',schedule);stop();
+  return()=>{disposed=true;cancelAnimationFrame(frame);observer.disconnect();rootObserver.disconnect();resize?.disconnect();stopRefresh?.();window.removeEventListener('resize',schedule);stop();
    root.removeAttribute('data-jot-desktop-toolbar');root.removeAttribute('data-jot-desktop-integrated');for(const name of ['--jot-desktop-toolbar-left','--jot-desktop-toolbar-column'])root.style.removeProperty(name);document.removeEventListener('focusin',schedule);document.removeEventListener('focusout',schedule);document.removeEventListener('keydown',keydown);window.removeEventListener('jot:desktop-menu-refresh',sync);
    void bridge.setMenuState!({protocol:1,owner_scope:null,ready:false,blocked:true,enabled_commands:[],sidebar_visible:false}).catch(()=>{});};
  },[]);

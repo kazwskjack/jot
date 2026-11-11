@@ -1,3 +1,4 @@
+import {desktopLanguage,desktopText} from './desktop-text.mjs';
 import * as electron from 'electron';
 import {startDesktop,prepareDesktopHardware} from './main.mjs';
 import {desktopUpdateHostConfig} from './host-update-config.mjs';
@@ -10,6 +11,6 @@ void (async()=>{
  return startDesktop(electron,{updateHostConfig:desktopUpdateHostConfig,supervisorBootstrap:bootstrap,startupAppearance});
 })().catch(error=>{
  console.error('[Jot desktop]',error);
- if(electron.app.isReady())electron.dialog.showErrorBox('无法启动 Jot 桌面版',error instanceof Error?error.message:String(error));
- electron.app.quit();
+ try{if(electron.app.isReady()){const language=desktopLanguage(electron.app);electron.dialog.showErrorBox(desktopText('startupTitle',language),desktopText('startupFailure',language));}}
+ finally{electron.app.quit();}
 });

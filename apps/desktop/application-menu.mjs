@@ -2,11 +2,11 @@
 import {desktopMenuCommands,emptyDesktopMenuState,parseDesktopMenuState,desktopMenuCommandEnabled} from '../../packages/desktop/src/menu-commands.mjs';
 import {isDesktopAppUrl} from './desktop-security.mjs';
 
-export function createDesktopCommandMenu({Menu,getWindow,appOrigin,restoreWindow,openNotificationSettings,requestQuit,help=null,platform=process.platform}){
+export function createDesktopCommandMenu({Menu,getWindow,appOrigin,restoreWindow,openNotificationSettings,requestQuit,help=null,isUnavailable=()=>false,platform=process.platform}){
  let state=emptyDesktopMenuState,menuEpoch=0;const windowIdentity=getWindow();
  const dispatch=command=>{
   const window=getWindow(),contents=window?.webContents;
-  if(!desktopMenuCommandEnabled(command,state)||!window||window!==windowIdentity||window.isDestroyed()||!contents||contents.isDestroyed?.()
+  if(isUnavailable()||!desktopMenuCommandEnabled(command,state)||!window||window!==windowIdentity||window.isDestroyed()||!contents||contents.isDestroyed?.()
    ||contents.isCrashed?.()||(contents.isLoadingMainFrame?.()??contents.isLoading())||!isDesktopAppUrl(contents.getURL(),appOrigin))return;
   restoreWindow();
   if(getWindow()!==window||window.isDestroyed()||contents.isDestroyed?.())return;
