@@ -7,6 +7,7 @@ import {useLayoutDisplayPreferences,useMessageDisplayPreferences,useToolDisplayP
 import HostCredentialsPanel from './HostCredentialsPanel';
 import PluginProfilesPanel from './PluginProfilesPanel';
 import DesktopUpdatesPanel from './DesktopUpdatesPanel';
+import DesktopAboutPanel from './DesktopAboutPanel';
 import HostReadinessPanel from './HostReadinessPanel';
 import HostSettingsPanel from './HostSettingsPanel';
 import HostSettingsReadPanel from './HostSettingsReadPanel';
@@ -195,6 +196,7 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
   <h2 data-desktop-target="settings" tabIndex={-1}>模型、凭据与安装设置</h2>
   <p className="wb-page-intro">查看模型目录、宿主状态及凭据入口，管理当前 Host profile 的设置与插件包。</p>
   <div className="wb-settings-grid">
+   <DesktopAboutPanel key={currentTaskScope} scopeKey={currentTaskScope}/>
    <DesktopUpdatesPanel key={currentTaskScope} scopeKey={currentTaskScope} onPendingChange={reportUpdatePending} canBeginAction={canBeginUpdate}/>
    <section className="wb-form" aria-labelledby="wb-tool-display">
     <h3 id="wb-tool-display">会话显示</h3>
