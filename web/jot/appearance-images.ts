@@ -159,6 +159,28 @@ export async function saveBackgroundImage(file:File,canContinue:()=>boolean):Pro
  if(!canContinue()){await deleteBackgroundImage(id).catch(()=>{});throw canceled();}return id;
 }
 
+// Copy only this origin's legacy blob; its browser reference and original data stay intact.
+export async function copyBrowserBackgroundImage(id:string,canContinue:()=>boolean):Promise<string|null>{
+ if(!isImageId(id))throw Error('appearance_image_invalid');
+ const bridge=native();if(!bridge||typeof bridge.saveAppearanceImage!=='function'||typeof bridge.readAppearanceImage!=='function')throw Error('appearance_image_unavailable');
+ const source=await transaction<Blob|null>('readonly',(store,done,fail)=>{const request=store.get(id);request.onsuccess=()=>{
+  if(request.result===undefined){done(null);return;}const blob=imageBlob(request.result);if(blob)done(blob);else fail(Error('appearance_image_storage_invalid'));
+ };});
+ if(!canContinue())throw canceled();if(!source)return null;
+ if(source.size<=0||source.size>MAX_BACKGROUND_BYTES)throw Error('appearance_image_invalid');
+ const mime=id.toLowerCase().endsWith('.png')?'image/png':'image/webp',bytes=new Uint8Array(await source.arrayBuffer());
+ if(!canContinue())throw canceled();if(!appearanceImageSize(bytes,mime,{stored:true}))throw Error('appearance_image_invalid');
+ const prepared=await prepareBackgroundImage(new File([bytes],id,{type:mime}),canContinue),encoded=new Uint8Array(await prepared.arrayBuffer());
+ if(!canContinue())throw canceled();
+ const result=await bridge.saveAppearanceImage(encoded);
+ if(!isImageId(result)||!result.endsWith('.png'))throw Error('appearance_image_reply_invalid');
+ try{
+  if(!canContinue())throw canceled();const readback=await bridge.readAppearanceImage(result);
+  if(!(readback instanceof Uint8Array)||readback.byteLength!==encoded.byteLength||!encoded.every((byte,index)=>byte===readback[index]))throw Error('appearance_image_reply_invalid');
+  if(!canContinue())throw canceled();return result;
+ }catch(error){await deleteBackgroundImage(result).catch(()=>{});throw error;}
+}
+
 export async function recoverBackgroundImages():Promise<ImageRecovery>{
  const bridge=native();
  if(bridge){if(typeof bridge.recoverAppearanceImages!=='function')throw Error('appearance_image_unavailable');return recoveryResult(await bridge.recoverAppearanceImages());}
