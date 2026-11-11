@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import React,{useEffect,useRef,useState} from 'react';
 import {base} from './client';
 import {reviewOutputPage,reviewOutputPath,reviewOutputPreview,reviewOutputBytes,reviewPreviewKind} from './review-output-client';
@@ -5,6 +7,7 @@ import type {TaskReviewOutput,TaskWorkReview} from './types';
 import TaskWorkReviewView from './TaskWorkReview';
 
 export default function TaskReviewFiles({id,version,disabled,onRefresh}:{id:string;version:number;disabled:boolean;onRefresh:()=>Promise<void>}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const [requestedFor,setRequestedFor]=useState(''),identity=id+':'+version,opened=requestedFor===identity;
  const [files,setFiles]=useState<TaskReviewOutput[]>([]),[loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(''),[preview,setPreview]=useState<{name:string;text?:string;url?:string}>();
  const [work,setWork]=useState<TaskWorkReview>();
@@ -28,15 +31,15 @@ export default function TaskReviewFiles({id,version,disabled,onRefresh}:{id:stri
   finally{if(active.current===controller){active.current=null;locked.current=false;if(!controller.signal.aborted)setBusy(false);}}
  };
  if(disabled)return null;
- if(!opened)return <button type="button" onClick={()=>setRequestedFor(identity)}>查看待验收文件</button>;
+ if(!opened)return <button lang={language} type="button" onClick={()=>setRequestedFor(identity)}>{t('查看待验收文件','View Files Awaiting Review')}</button>;
  if(!loading&&!files.length&&!work&&!error)return null;
- return <section className="jot-review-files"><h4>核对冻结文件</h4>{loading&&<p role="status">正在读取文件清单</p>}
+ return <section lang={language} className="jot-review-files"><h4>{t('核对冻结文件','Review Frozen Files')}</h4>{loading&&<p role="status">{t('正在读取文件清单','Reading file list')}</p>}
  {work&&<TaskWorkReviewView key={identity+':'+work.inspection_sha256} value={work}/>}
- {files.map(file=><div key={file.output_index} className="jot-review-file"><strong>{file.file_name}</strong><small>固定版本 {file.version} · {file.size_bytes} 字节</small><code title="SHA-256">{file.sha256}</code>
- {reviewPreviewKind(file)!=='download'&&<button type="button" disabled={disabled||busy} onClick={()=>void show(file)}>查看文件</button>}
- <a href={base+'/v1'+reviewOutputPath(id,file.output_index)} download rel="noreferrer" aria-disabled={disabled||busy} onClick={event=>{if(file.size_bytes<=20*1024*1024){event.preventDefault();void show(file,true);}else if(disabled||busy)event.preventDefault();}}>下载核对</a>
+ {files.map(file=><div key={file.output_index} className="jot-review-file"><strong>{file.file_name}</strong><small>{t(`固定版本 ${file.version} · ${file.size_bytes} 字节`,`Pinned Version ${file.version} · ${file.size_bytes} bytes`)}</small><code title="SHA-256">{file.sha256}</code>
+ {reviewPreviewKind(file)!=='download'&&<button type="button" disabled={disabled||busy} onClick={()=>void show(file)}>{t('查看文件','View File')}</button>}
+ <a href={base+'/v1'+reviewOutputPath(id,file.output_index)} download rel="noreferrer" aria-disabled={disabled||busy} onClick={event=>{if(file.size_bytes<=20*1024*1024){event.preventDefault();void show(file,true);}else if(disabled||busy)event.preventDefault();}}>{t('下载核对','Download for Review')}</a>
  </div>)}
- {preview&&<div className="jot-review-preview"><strong>{preview.name}</strong><button type="button" onClick={clear}>关闭预览</button>{preview.text!==undefined?<pre>{preview.text}</pre>:<img src={preview.url} alt={preview.name}/>}</div>}
- {error&&<p role="alert">{error} <button type="button" disabled={disabled} onClick={()=>void onRefresh()}>刷新验收卡</button></p>}
+ {preview&&<div className="jot-review-preview"><strong>{preview.name}</strong><button type="button" onClick={clear}>{t('关闭预览','Close Preview')}</button>{preview.text!==undefined?<pre>{preview.text}</pre>:<img src={preview.url} alt={preview.name}/>}</div>}
+ {error&&<p role="alert">{conversationUiError(error,language)} <button type="button" disabled={disabled} onClick={()=>void onRefresh()}>{t('刷新验收卡','Refresh Review Card')}</button></p>}
  </section>;
 }

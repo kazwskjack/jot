@@ -87,7 +87,7 @@ export default function InteractionSearch({conversationId,runId,query}:{conversa
    {current?.error&&<p role="alert">{conversationUiError(current.error,language)} <button type="button" onClick={()=>setRevision(value=>value+1)}>{t('重新搜索本批','Search This Batch Again')}</button></p>}
    {hit&&<button type="button" onClick={()=>setSelected(undefined)}>{t('关闭命中交互','Close Matching Interaction')}</button>}
   </div>
-  {hit&&<ConversationDisplayBoundary key={JSON.stringify([batchIdentity,hit.interaction_id,hit.version])} label={t('命中交互详情','Matching Interaction Details')}><div lang="zh-CN"><InteractionHistorySelection
+  {hit&&<ConversationDisplayBoundary key={JSON.stringify([batchIdentity,hit.interaction_id,hit.version])} label={t('命中交互详情','Matching Interaction Details')}><div lang={language}><InteractionHistorySelection
    conversationId={conversationId} interactionId={hit.interaction_id} runId={hit.run_id} version={hit.version} highlight={q}/></div></ConversationDisplayBoundary>}
  </section>;
 }

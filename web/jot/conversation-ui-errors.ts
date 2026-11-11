@@ -1,6 +1,17 @@
 // Fixed owned conversation UI failures; unknown/raw content stays unchanged.
 import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
 const english:Record<string,string>={
+ "记录已更新，请刷新搜索后重新打开。": "The record has changed. Refresh search and open it again.",
+ "原交互记录的身份或版本尚未确认": "The original interaction record identity or version is unconfirmed.",
+ "问题历史来源尚未确认": "The question-history source is unconfirmed.",
+ "问题历史顺序或身份尚未确认": "The question-history order or identity is unconfirmed.",
+ "问题历史游标尚未确认": "The question-history cursor is unconfirmed.",
+ "状态或权限已更新，请核对最新卡片。": "The state or permissions have changed. Check the latest card.",
+ "请检查回答内容后重试。": "Check the answer content before retrying.",
+ "提交结果尚未确认；可用同一回答重试。": "The submission result is unconfirmed. You can retry with the same answer.",
+ "验收状态已变化，请刷新卡片。": "The review state has changed. Refresh the card.",
+ "暂时无法读取冻结文件，请重试。": "Frozen files are temporarily unavailable. Retry reading them.",
+ "文件内容未能核验，请刷新后重试。": "The file content could not be verified. Refresh before retrying.",
  "成员更新来源尚未确认，请刷新原成员记录。": "The member update source is unconfirmed. Refresh the original member record.",
  "成员更新出现记录间隙，请刷新原成员记录。": "Member updates contain a record gap. Refresh the original member record.",
  "成员步骤身份尚未确认，请刷新原成员记录。": "The member step identity is unconfirmed. Refresh the original member record.",

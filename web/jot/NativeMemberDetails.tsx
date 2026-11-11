@@ -87,7 +87,7 @@ function MemberTimeline({view,onOpenMember}:{view:View;onOpenMember:(target:Nati
    renderedRevision={activities} ready/></ConversationDisplayBoundary>
   <ConversationDisplayBoundary label={t('成员步骤历史','Member Step History')}><ActivityHistory conversationId={view.source.child_conversation_id}
    runId={view.source.child_run_id} snapshotSeq={view.source.child_as_of_seq} requestVersion={historyRequest} onLoaded={retainHistory}/></ConversationDisplayBoundary>
-  <ConversationDisplayBoundary label={t('成员交互历史','Member Interaction History')}><div lang="zh-CN"><InteractionHistory key={view.source.child_run_id} conversationId={view.source.child_conversation_id} runId={view.source.child_run_id}/></div></ConversationDisplayBoundary>
+  <ConversationDisplayBoundary label={t('成员交互历史','Member Interaction History')}><div lang={language}><InteractionHistory key={view.source.child_run_id} conversationId={view.source.child_conversation_id} runId={view.source.child_run_id}/></div></ConversationDisplayBoundary>
   <ConversationDisplayBoundary label={t('成员时间线','Member Timeline')}><ActivityTimeline conversationId={view.source.child_conversation_id} activities={activities} runs={runs} onOpenMember={onOpenMember} {...(activityReveal?{reveal:activityReveal}:{})}/></ConversationDisplayBoundary>
   {history!==null&&!activities.length&&<p role="status">{t('此子运行暂未记录公开工具步骤。','No public tool steps have been recorded for this child run yet.')}</p>}
  </section>;
