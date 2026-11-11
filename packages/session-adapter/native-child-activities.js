@@ -5,23 +5,24 @@ import {nativeChildLogJson as json,updateNativeChildLogHash} from './native-chil
 function projectionRevision(source){
  if(!source||typeof source!=='object'||Array.isArray(source))throw Error('native_activity_source_invalid');
  const revision=source.projection_revision===undefined?1:source.projection_revision;
- if(![1,2,3].includes(revision))throw Error('native_activity_source_invalid');
+ if(![1,2,3,4].includes(revision))throw Error('native_activity_source_invalid');
  return revision;
 }
 
 function preferredRevision(source){
  const current=projectionRevision(source),supported=source.supported_projection_revision===undefined?current:source.supported_projection_revision;
- if(![1,2,3].includes(supported))throw Error('native_activity_source_invalid');
+ if(![1,2,3,4].includes(supported))throw Error('native_activity_source_invalid');
  const available=source.available_projection_revisions;
  if(available===undefined)return supported;
- if(!Array.isArray(available)||!available.length||available.length>3||new Set(available).size!==available.length
-  ||available.some(value=>![1,2,3].includes(value))||!available.includes(current)||!available.includes(supported))throw Error('native_activity_source_invalid');
- return Math.max(...available);
+ if(!Array.isArray(available)||!available.length||available.length>4||new Set(available).size!==available.length
+  ||available.some(value=>![1,2,3,4].includes(value))||!available.includes(current)||!available.includes(supported))throw Error('native_activity_source_invalid');
+ if(source.native_todo_projection_revision!==undefined&&source.native_todo_projection_revision!==4)throw Error('native_activity_source_invalid');
+ return source.native_todo_projection_revision===4?4:Math.max(...available);
 }
 
 async function sendNativeChildActivity({binding,event,bridge,metadata,signal,observationRevision=1}){
  const sha=updateNativeChildLogHash(createHash('sha256'),event).digest('hex');
- const call=event.type==='tool/call'?nativeToolCallObservation(event):null;
+ const call=event.type==='tool/call'?nativeToolCallObservation(event,observationRevision):null;
  const observation=event.type==='tool/result'?nativeToolResultObservation(event,observationRevision):call??{event};
  const revisionFields=observationRevision>=3?{projection_revision:observationRevision}:{};
  if(event.type==='tool/result'&&observationRevision<2)delete observation.public_result.artifact_receipts;
@@ -71,6 +72,7 @@ export async function replayNativeChildActivities({binding,bridge,persistence,si
  const revision=projectionRevision(source);
  if(revision>=2&&(typeof source.refresh_tool_results!=='boolean'||typeof source.replay_complete!=='boolean'
   ||source.complete&&(!source.replay_complete||source.refresh_tool_results)))throw Error('native_activity_source_invalid');
+ if(revision===4&&(typeof source.refresh_tool_calls!=='boolean'||source.complete&&source.refresh_tool_calls))throw Error('native_activity_source_invalid');
  if(source.complete)return source;
  const settled=source.settled_web_call_ids;
  if(settled!==undefined&&(!Array.isArray(settled)||settled.some(id=>typeof id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(id))
@@ -93,14 +95,15 @@ export async function replayNativeChildActivities({binding,bridge,persistence,si
    if(result?.events?.length!==1||event?.seq!==seq)throw Error('native_activity_prefix_changed');
    if(!['tool/call','tool/result'].includes(event.type)
     ||event.type==='tool/result'&&event.surfaceOp!==undefined&&event.surfaceOp!=='append')continue;
-   if(seq<=Number(source.last_event_seq??-1)&&(event.type!=='tool/result'||refreshResults!==null&&!refreshResults.has(sessionToolCallId(event.data))))continue;
+   if(seq<=Number(source.last_event_seq??-1)&&!(event.type==='tool/call'&&revision===4&&source.refresh_tool_calls)
+     &&(event.type!=='tool/result'||refreshResults!==null&&!refreshResults.has(sessionToolCallId(event.data))))continue;
    await sendNativeChildActivity({binding,event,bridge,metadata:{action:'append',source_log_sha256:source.log_sha256},signal,observationRevision:revision});
    last=Math.max(last??-1,seq);
   }
   signal?.throwIfAborted();const completed=await bridge.request('native-child-activities',binding,{action:'complete',source_log_sha256:source.log_sha256,expected_last_event_seq:last,...(revision>=2?{expected_projection_revision:revision}:{})},signal);
   if(!completed||completed.complete!==true||completed.execution_authorized!==false||completed.run_id!==binding.runId||completed.session_ref!==binding.sessionRef
    ||completed.log_sha256!==source.log_sha256||completed.source_start!==source.source_start||completed.source_end!==source.source_end
-   ||completed.last_event_seq!==last||revision>=2&&(completed.projection_revision!==revision||completed.refresh_tool_results!==false))throw Error('native_activity_receipt_invalid');
+   ||completed.last_event_seq!==last||revision>=2&&(completed.projection_revision!==revision||completed.refresh_tool_results!==false)||revision===4&&completed.refresh_tool_calls!==false)throw Error('native_activity_receipt_invalid');
   return completed;
  }finally{await handle.close();}
 }

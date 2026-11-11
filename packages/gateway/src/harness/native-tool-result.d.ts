@@ -15,11 +15,12 @@ export interface PublicNativeToolResult {
   };
 }
 export function publicNativeToolResult(data: Record<string, unknown>, includeBrowse?: boolean): PublicNativeToolResult;
-export function parsePublicNativeToolResult(value: unknown,projectionRevision?:1|2|3): PublicNativeToolResult;
+export function parsePublicNativeToolResult(value: unknown,projectionRevision?:1|2|3|4): PublicNativeToolResult;
 export function sessionToolCallId(data: Record<string, unknown>): unknown;
 export function nativeBatchWebCall(data: Record<string, unknown>): {name: 'universe_read_page' | 'universe_browse' | 'universe_execute'} | null;
 
 export interface PublicNativeToolCall {
+  todo_input?:import('../../contracts/types.js').NativeTodoInput|null;
   query_count: number;
   urls: string[];
   requested_action_types: string[];
@@ -28,5 +29,5 @@ export interface PublicNativeToolCall {
   native_batch_web?: 'universe_read_page' | 'universe_browse' | 'universe_execute';
 }
 export function publicNativeToolCall(data: Record<string, unknown>): PublicNativeToolCall;
-export function parsePublicNativeToolCall(value: unknown): PublicNativeToolCall;
+export function parsePublicNativeToolCall(value: unknown,projectionRevision?:1|2|3|4): PublicNativeToolCall;
 export function safeWebOperationUrl(value: unknown): string | null;

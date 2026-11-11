@@ -115,8 +115,8 @@ function toolActivity(data: Record<string, unknown>, context: ProjectionContext,
     const name = data.name ?? data.toolName ?? data.tool
     if (typeof name === 'string' && name) detail.tool_name = name
     const observed = publicCall ?? publicNativeToolCall(data)
-    // Summarized member calls retain their existing immutable vocabulary until a negotiated projection upgrade.
-    if(tool.kind==='subagent'&&!completed&&!publicCall){const todo=publicNativeTodoInput(data);if(todo)detail.todo_input=todo;}
+    // Only a negotiated member projection or the original raw call can publish todo input.
+    if(tool.kind==='subagent'&&!completed){const todo=publicCall?publicCall.todo_input:publicNativeTodoInput(data);if(todo)detail.todo_input=todo;}
     if (tool.kind === 'subagent' && name === 'jot_workspace' && observed.delegates
       && typeof rawCallId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(rawCallId)
       && context.sessionRef) {

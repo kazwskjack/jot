@@ -162,12 +162,12 @@ export function parsePublicNativeToolResult(value, projectionRevision = 2) {
   const result = record(value)
   const fields=['evidence','failed'];
   if(result?.artifact_receipts!==undefined)fields.push('artifact_receipts');
-  if(projectionRevision===3)fields.push('file_search');
-  if (![1,2,3].includes(projectionRevision)||!result||Object.keys(result).sort().join(',')!==fields.sort().join(',')
-    ||typeof result.failed!=='boolean'||projectionRevision===3&&result.artifact_receipts===undefined) {
+  if(projectionRevision>=3)fields.push('file_search');
+  if (![1,2,3,4].includes(projectionRevision)||!result||Object.keys(result).sort().join(',')!==fields.sort().join(',')
+    ||typeof result.failed!=='boolean'||projectionRevision>=3&&result.artifact_receipts===undefined) {
     throw Error('native_activity_public_result_invalid')
   }
-  if(projectionRevision===3&&result.file_search!==null){
+  if(projectionRevision>=3&&result.file_search!==null){
     const search=record(result.file_search);
     if(!search)throw Error('native_activity_public_result_invalid');
     if(search.shape==='source_limit'){
@@ -211,7 +211,7 @@ export function parsePublicNativeToolResult(value, projectionRevision = 2) {
 
 /** Source digest is carried separately from this bounded public observation. */
 export function nativeToolResultObservation(event, projectionRevision = 1) {
-  if (event?.type !== 'tool/result' || !record(event.data)||![1,2,3].includes(projectionRevision)) throw Error('native_activity_event_invalid')
+  if (event?.type !== 'tool/result' || !record(event.data)||![1,2,3,4].includes(projectionRevision)) throw Error('native_activity_event_invalid')
   const result=publicNativeToolResult(event.data);
   if(projectionRevision>=3)result.file_search=result.failed?null:publicNativeFileSearch(event.data.meta)??null;
   return { event: { type: event.type, seq: event.seq, time: event.time, data: { callId: sessionToolCallId(event.data) } },
@@ -319,10 +319,12 @@ export function publicNativeToolCall(data) {
   }
 }
 
-export function parsePublicNativeToolCall(value) {
+export function parsePublicNativeToolCall(value, projectionRevision = 2) {
   const call = record(value)
   const keys = ['query_count', 'urls', 'requested_action_types', 'delegates', 'action', 'native_batch_web']
-  if (!call || Object.keys(call).some(key => !keys.includes(key))
+  if(projectionRevision===4)keys.push('todo_input');
+  if (![1,2,3,4].includes(projectionRevision)||!call || Object.keys(call).some(key => !keys.includes(key))
+    ||projectionRevision===4&&!Object.hasOwn(call,'todo_input')
     || !Number.isSafeInteger(call.query_count) || call.query_count < 0 || call.query_count > 50
     || typeof call.delegates !== 'boolean'
     || !Array.isArray(call.urls) || new Set(call.urls).size !== call.urls.length
@@ -334,18 +336,27 @@ export function parsePublicNativeToolCall(value) {
     || call.native_batch_web !== undefined && !['universe_read_page', 'universe_browse', 'universe_execute'].includes(call.native_batch_web)) {
     throw Error('native_activity_public_call_invalid')
   }
+  if(projectionRevision===4&&call.todo_input!==null){
+    const todo=record(call.todo_input);let selected;
+    if(todo?.format==='source_limit'&&Object.keys(todo).length===1)selected=todo;
+    else if(todo?.format==='items'&&Object.keys(todo).sort().join(',')==='format,items')
+      selected=publicNativeTodoInput({name:'todo_write',arguments:{todos:todo.items}});
+    else if(todo?.format==='markdown'&&Object.keys(todo).sort().join(',')==='format,text')
+      selected=publicNativeTodoInput({name:'TodoWrite',arguments:{markdown:todo.text}});
+    if(!selected||selected.format!==todo?.format)throw Error('native_activity_public_call_invalid');
+  }
   return call
 }
 
 /** Original event identity is hashed separately from the public observation. */
-export function nativeToolCallObservation(event) {
+export function nativeToolCallObservation(event, projectionRevision = 1) {
   const data = record(event?.data)
-  if (event?.type !== 'tool/call' || !data) throw Error('native_activity_event_invalid')
+  if (event?.type !== 'tool/call' || !data||![1,2,3,4].includes(projectionRevision)) throw Error('native_activity_event_invalid')
   const name = data.name ?? data.toolName ?? data.tool
   // Keep compatibility with non-SDK legacy records using their original format.
   if (typeof name !== 'string') return null
   return {event: {type: event.type, seq: event.seq, time: event.time, data: {callId: sessionToolCallId(data), name}},
-    public_call: publicNativeToolCall(data)}
+    public_call: {...publicNativeToolCall(data),...(projectionRevision===4?{todo_input:publicNativeTodoInput(data)??null}:{})}}
 }
 
 export function collectArtifactRefs(value, output, receipts) {
