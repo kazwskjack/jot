@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import ArtifactEditedDiff from './ArtifactEditedDiff';
 import {isDocumentPreviewMediaType} from './document-preview-content.mjs';
 import React,{useState} from 'react';
@@ -7,6 +9,7 @@ import type {Artifact,ArtifactVersionPage} from './types';
 import type {ActivityArtifactTarget} from './activity-presentation';
 
 export default function ArtifactVersionHistory({conversationId,artifactId,onOpen}:{conversationId:string;artifactId:string;onOpen:(target:ActivityArtifactTarget)=>void}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),[open,setOpen]=useState(false),[cursors,setCursors]=useState<Array<number|undefined>>([undefined]);
  const [before,setBefore]=useState<Artifact>(),[after,setAfter]=useState<Artifact>();
  const [edited,setEdited]=useState<Artifact>();
@@ -29,36 +32,36 @@ export default function ArtifactVersionHistory({conversationId,artifactId,onOpen
  },identity,open&&!!owner);
  const page=resource.data?.identity===identity&&taskDraftScope()===owner?resource.data.page:undefined;
  const comparable=before&&after&&before.version<after.version;
- return <><details open={open} onToggle={event=>setOpen(event.currentTarget.open)} data-chat-search-ignore>
-  <summary>文件版本历史</summary>
+ return <><details lang={language} open={open} onToggle={event=>setOpen(event.currentTarget.open)} data-chat-search-ignore>
+  <summary>{t('文件版本历史','File Version History')}</summary>
   {open&&<>
-   <p>每页20个固定版本，当前第 {cursors.length} 页。</p>
-   <button type="button" disabled={resource.loading} onClick={()=>{setCursors([undefined]);setBefore(undefined);setAfter(undefined);setEdited(undefined);resource.reload();}}>刷新版本目录</button>
-   {resource.loading&&<p role="status">正在读取版本目录…</p>}
-   {resource.error&&<p role="alert">{resource.error} <button type="button" onClick={resource.reload}>重试读取目录</button></p>}
+   <p>{t(`每页20个固定版本，当前第 ${cursors.length} 页。`,`20 pinned versions per page. Current page: ${cursors.length}.`)}</p>
+   <button type="button" disabled={resource.loading} onClick={()=>{setCursors([undefined]);setBefore(undefined);setAfter(undefined);setEdited(undefined);resource.reload();}}>{t('刷新版本目录','Refresh Version Catalog')}</button>
+   {resource.loading&&<p role="status">{t('正在读取版本目录…','Reading version catalog…')}</p>}
+   {resource.error&&<p role="alert">{conversationUiError(resource.error,language)} <button type="button" onClick={resource.reload}>{t('重试读取目录','Retry Reading Catalog')}</button></p>}
    {page&&!resource.loading&&!resource.error&&<>
-    <p>当前版本 {page.current_version}</p>
+    <p>{t('当前版本','Current Version')} {page.current_version}</p>
     <ol>{page.items.map(file=><li key={file.version}>
-     <span>版本 {file.version} · {file.file_name} · {file.created_at} · {file.size_bytes} 字节</span>
+     <span>{t('版本','Version')} {file.version} · {file.file_name} · {file.created_at} · {file.size_bytes} {t('字节','bytes')}</span>
      {file.status==='ready'?<>
-      <button type="button" onClick={()=>onOpen({kind:'file',artifactId,label:file.file_name,version:file.version,sha256:file.sha256})}>查看版本 {file.version}</button>
-      {file.origin==='edited'&&!file.part_count&&isDocumentPreviewMediaType(file.media_type)&&<button type="button" onClick={()=>setEdited(file)}>查看原编辑差异</button>}
+      <button type="button" onClick={()=>onOpen({kind:'file',artifactId,label:file.file_name,version:file.version,sha256:file.sha256})}>{t('查看版本','View Version')} {file.version}</button>
+      {file.origin==='edited'&&!file.part_count&&isDocumentPreviewMediaType(file.media_type)&&<button type="button" onClick={()=>setEdited(file)}>{t('查看原编辑差异','View Original Edit Diff')}</button>}
       {!file.part_count&&file.media_type.startsWith('text/')&&<>
-       <button type="button" aria-pressed={before?.version===file.version} onClick={()=>setBefore(file)}>选为比较起点</button>
-       <button type="button" aria-pressed={after?.version===file.version} onClick={()=>setAfter(file)}>选为比较终点</button>
+       <button type="button" aria-pressed={before?.version===file.version} onClick={()=>setBefore(file)}>{t('选为比较起点','Select as Comparison Start')}</button>
+       <button type="button" aria-pressed={after?.version===file.version} onClick={()=>setAfter(file)}>{t('选为比较终点','Select as Comparison End')}</button>
       </>}
-     </>:<span> · 此版本当前不可读取</span>}
+     </>:<span>{t(' · 此版本当前不可读取',' · This version is currently unreadable')}</span>}
     </li>)}</ol>
-    <button type="button" disabled={cursors.length===1} onClick={()=>setCursors(values=>values.slice(0,-1))}>上一页</button>
-    <button type="button" disabled={page.next_before_version===undefined} onClick={()=>setCursors(values=>[...values,page.next_before_version])}>下一页</button>
+    <button type="button" disabled={cursors.length===1} onClick={()=>setCursors(values=>values.slice(0,-1))}>{t('上一页','Previous Page')}</button>
+    <button type="button" disabled={page.next_before_version===undefined} onClick={()=>setCursors(values=>[...values,page.next_before_version])}>{t('下一页','Next Page')}</button>
    </>}
-   {(before||after)&&<p>比较起点 {before?`版本 ${before.version}`:'待选择'} → 终点 {after?`版本 ${after.version}`:'待选择'}</p>}
-   <button type="button" disabled={!comparable} onClick={()=>{if(before&&after&&comparable)onOpen({kind:'diff',artifactId,label:after.file_name,fromVersion:before.version,toVersion:after.version,beforeSha256:before.sha256,afterSha256:after.sha256});}}>查看所选版本差异</button>
-   {before&&after&&!comparable&&<p role="status">请选择两个不同版本，比较起点需要早于终点。</p>}
+   {(before||after)&&<p>{t('比较起点','Comparison Start')} {before?t(`版本 ${before.version}`,`Version ${before.version}`):t('待选择','Not Selected')} → {t('终点','End')} {after?t(`版本 ${after.version}`,`Version ${after.version}`):t('待选择','Not Selected')}</p>}
+   <button type="button" disabled={!comparable} onClick={()=>{if(before&&after&&comparable)onOpen({kind:'diff',artifactId,label:after.file_name,fromVersion:before.version,toVersion:after.version,beforeSha256:before.sha256,afterSha256:after.sha256});}}>{t('查看所选版本差异','View Selected Version Diff')}</button>
+   {before&&after&&!comparable&&<p role="status">{t('请选择两个不同版本，比较起点需要早于终点。','Select two different versions, with the comparison start earlier than the end.')}</p>}
   </>}
  </details>
  {open&&edited&&edited.artifact_id===artifactId&&edited.conversation_id===conversationId&&<>
-  <button type="button" data-chat-search-ignore onClick={()=>setEdited(undefined)}>关闭原编辑差异</button>
+  <button lang={language} type="button" data-chat-search-ignore onClick={()=>setEdited(undefined)}>{t('关闭原编辑差异','Close Original Edit Diff')}</button>
   <ArtifactEditedDiff key={JSON.stringify([owner,artifactId,edited.version,edited.sha256])} conversationId={conversationId} file={edited}/>
  </>}</>;
 }

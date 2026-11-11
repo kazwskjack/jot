@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import React,{useEffect,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
 import type {Artifact,ArtifactDocumentTextSource,ArtifactEditedDiff as EditedDiff,ArtifactEditedDiffMatch} from './types';
@@ -13,6 +15,7 @@ type Props={conversationId:string;file:Pick<Artifact,'artifact_id'|'version'|'sh
 type Cursor={identity:string;offset:number;previous:number[];page?:EditedDiff};
 
 export default function ArtifactEditedDiff({conversationId,file,runId,expected,match,startOffset=0}:Props){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,file.artifact_id,file.version,file.sha256,runId,expected,match,startOffset]);
  const paged=expected===undefined||expected.diff_protocol===2;
  const [cursor,setCursor]=useState<Cursor>({identity,offset:startOffset,previous:[]});
@@ -65,21 +68,21 @@ export default function ArtifactEditedDiff({conversationId,file,runId,expected,m
  useEffect(()=>{if(state?.identity===identity&&state.offset===offset&&state.diff&&match)region.current?.querySelector('mark')?.scrollIntoView({block:'nearest'});},[state,identity,offset]);
  const current=state?.identity===identity&&state.offset===offset?state:undefined,diff=current?.diff;
  const at=match?match.offset-offset:-1,marked=diff&&match&&at>=0&&diff.unified_diff.slice(at,at+match.text.length)===match.text;
- return <section ref={region} tabIndex={-1} className="jot-activity-content" aria-label="原文档编辑差异">
-  <h4>{file.file_name} · 原编辑差异</h4>
-  {(!current||!diff&&!current.error)&&<p role="status">正在核对原编辑及前后文档文本…</p>}
+ return <section lang={language} ref={region} tabIndex={-1} className="jot-activity-content" aria-label={t('原文档编辑差异','Original Document Edit Diff')}>
+  <h4>{file.file_name} · {t('原编辑差异','Original Edit Diff')}</h4>
+  {(!current||!diff&&!current.error)&&<p role="status">{t('正在核对原编辑及前后文档文本…','Verifying the original edit and before/after document text…')}</p>}
   {diff&&<>
-   <p>版本 {diff.from_version} → {diff.to_version} · 已保存原文档文本</p>
+   <p>{t('版本','Version')} {diff.from_version} → {diff.to_version} · {t('已保存原文档文本','Saved Original Document Text')}</p>
    <section data-chat-search-content={JSON.stringify(['edited-document-diff',identity,diff.edit_result_sha256,diff.diff_sha256,offset])}><pre>{marked&&match?<>{diff.unified_diff.slice(0,at)}<mark>{match.text}</mark>{diff.unified_diff.slice(at+match.text.length)}</>:diff.unified_diff}</pre></section>
-   {(diff.before.source_truncated||diff.after.source_truncated)&&<p role="status">原文档文本存在覆盖缺口或截断，差异覆盖已保存的文本。</p>}
-   {diff.truncated&&<p role="status">差异已显示前200000个字符。</p>}
-   {paged&&<nav aria-label="原编辑差异正文翻页" data-chat-search-ignore>
-    <button type="button" disabled={!currentCursor.previous.length} onClick={()=>setCursor({identity,offset:currentCursor.previous.at(-1)!,previous:currentCursor.previous.slice(0,-1),page:diff})}>上一页差异</button>
-    <span>{Math.min(offset+1,Number(diff.total_chars))}–{offset+diff.unified_diff.length} / {diff.total_chars}（UTF-16 位置）</span>
-    <button type="button" disabled={diff.next_offset_chars===undefined} onClick={()=>{if(diff.next_offset_chars!==undefined)setCursor({identity,offset:diff.next_offset_chars,previous:[...currentCursor.previous,offset],page:diff});}}>下一页差异</button>
-    {offset>0&&<button type="button" onClick={()=>setCursor({identity,offset:0,previous:[],page:diff})}>从差异开头阅读</button>}
+   {(diff.before.source_truncated||diff.after.source_truncated)&&<p role="status">{t('原文档文本存在覆盖缺口或截断，差异覆盖已保存的文本。','The original document text has coverage gaps or truncation. This diff covers the saved text.')}</p>}
+   {diff.truncated&&<p role="status">{t('差异已显示前200000个字符。','The first 200000 characters of the diff are shown.')}</p>}
+   {paged&&<nav aria-label={t('原编辑差异正文翻页','Original Edit Diff Body Pages')} data-chat-search-ignore>
+    <button type="button" disabled={!currentCursor.previous.length} onClick={()=>setCursor({identity,offset:currentCursor.previous.at(-1)!,previous:currentCursor.previous.slice(0,-1),page:diff})}>{t('上一页差异','Previous Diff Page')}</button>
+    <span>{Math.min(offset+1,Number(diff.total_chars))}–{offset+diff.unified_diff.length} / {diff.total_chars}{t('（UTF-16 位置）',' (UTF-16 positions)')}</span>
+    <button type="button" disabled={diff.next_offset_chars===undefined} onClick={()=>{if(diff.next_offset_chars!==undefined)setCursor({identity,offset:diff.next_offset_chars,previous:[...currentCursor.previous,offset],page:diff});}}>{t('下一页差异','Next Diff Page')}</button>
+    {offset>0&&<button type="button" onClick={()=>setCursor({identity,offset:0,previous:[],page:diff})}>{t('从差异开头阅读','Read from the Beginning of the Diff')}</button>}
    </nav>}
   </>}
-  {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试读取</button></p>}
+  {current?.error&&<p role="alert">{conversationUiError(current.error,language)} <button type="button" onClick={()=>setRevision(value=>value+1)}>{t('重试读取','Retry Reading')}</button></p>}
  </section>;
 }

@@ -1,6 +1,19 @@
 // Fixed owned conversation UI failures; unknown/raw content stays unchanged.
 import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
 const english:Record<string,string>={
+ "文件版本目录来源尚未确认": "The file version catalog source is unconfirmed.",
+ "文件版本分页尚未确认": "File version pagination is unconfirmed.",
+ "原编辑差异来源尚未确认": "The original edit diff source is unconfirmed.",
+ "原编辑差异分页尚未确认": "Original edit diff pagination is unconfirmed.",
+ "原编辑差异来源已变化，请刷新搜索或版本目录。": "The original edit diff source changed. Refresh the search or version catalog.",
+ "原文档文本来源已变化，请刷新搜索或版本目录。": "The original document text source changed. Refresh the search or version catalog.",
+ "原编辑差异正文长度尚未确认": "The original edit diff body length is unconfirmed.",
+ "原编辑差异命中位置尚未确认": "The original edit diff match position is unconfirmed.",
+ "原编辑基准版本尚未确认": "The original edit baseline version is unconfirmed.",
+ "原编辑差异正文摘要尚未确认": "The original edit diff body digest is unconfirmed.",
+ "该版本暂无完整可确认的原编辑作业及前后文档文本。": "This version has no complete verifiable original edit job and before/after document text.",
+ "原编辑来源已变化，请刷新搜索或版本目录。": "The original edit source changed. Refresh the search or version catalog.",
+ "原编辑差异读取失败": "Reading the original edit diff failed.",
  "此格式的原生结构化解析尚未确认": "Native structured parsing for this format is unconfirmed.",
  "原生Office结构化来源尚未确认": "The native structured Office source is unconfirmed.",
  "本次打开来源已变化，请重新打开文件。": "The source for this opening changed. Open the file again.",
