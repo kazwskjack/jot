@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import React,{lazy,Suspense,useEffect,useState} from 'react';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import {ApiError,request,taskDraftScope} from './client';
@@ -12,6 +14,7 @@ const exact=(value:object,required:string[],optional:string[]=[])=>required.ever
 const seq=(value:unknown)=>typeof value==='string'&&value.length<=19&&/^(0|[1-9][0-9]{0,18})$/.test(value)&&String(BigInt(value))===value&&BigInt(value)<=9223372036854775807n;
 
 export default function NativeFileOpenings({conversationId,target}:{conversationId:string;target:Target}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,target]);
  const [cursor,setCursor]=useState<{identity:string;offset:number;previous:number[];sha?:string}>({identity,offset:0,previous:[]});
  const [state,setState]=useState<{identity:string;offset:number;page?:ActivityNativeFileOpeningsPage;error?:string}>(),[revision,setRevision]=useState(0);
@@ -50,27 +53,27 @@ export default function NativeFileOpenings({conversationId,target}:{conversation
  const source=(item:Opening):NativeMemberPreviewSource=>({conversationId,runId:target.runId,activityId:target.activityId,resultSha:item.result_sha256,membersSha:item.members_sha256,
   member:{index:item.member_index,path:item.path},...(item.source_as_of_seq!==undefined?{asOfSeq:item.source_as_of_seq}:{})});
  const refresh=()=>{setCursor({identity,offset:0,previous:[]});setRevision(value=>value+1);};
- return <><section aria-label="已留存的原生打开版本" data-chat-search-ignore>
-  <h4>已留存的打开版本</h4>
-  <p>这些是曾经打开并留存的内容，不代表任务执行时的文件状态。打开时会再次核对完整内容和原活动权限。</p>
-  <button type="button" onClick={refresh}>刷新留存版本</button>
-  {(!current||!page&&!current.error)&&<p role="status">正在读取留存版本…</p>}
+ return <><section lang={language} aria-label={t('已留存的原生打开版本','Retained Native Opened Versions')} data-chat-search-ignore>
+  <h4>{t('已留存的打开版本','Retained Opened Versions')}</h4>
+  <p>{t('这些是曾经打开并留存的内容，不代表任务执行时的文件状态。打开时会再次核对完整内容和原活动权限。','These contents were opened and retained previously. They do not represent file state at task execution time. Opening them rechecks the complete content and original activity permissions.')}</p>
+  <button type="button" onClick={refresh}>{t('刷新留存版本','Refresh Retained Versions')}</button>
+  {(!current||!page&&!current.error)&&<p role="status">{t('正在读取留存版本…','Reading retained versions…')}</p>}
   {page&&<>
-   {page.total_openings===0?<p role="status">此步骤没有可核对的留存打开版本。</p>:<ol start={offset+1} style={{maxHeight:'24rem',overflow:'auto'}}>
+   {page.total_openings===0?<p role="status">{t('此步骤没有可核对的留存打开版本。','This step has no verifiable retained opened versions.')}</p>:<ol start={offset+1} style={{maxHeight:'24rem',overflow:'auto'}}>
     {page.items.map(item=><li key={item.open_sha256}><code style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{item.path}</code>
-     <p>打开版本 <code>{item.open_sha256.slice(0,12)}</code> · {item.size_bytes} 字节 · 内容摘要 <code>{item.sha256}</code></p>
-     <button type="button" onClick={()=>setSelected({identity,item})}>预览此留存版本</button>{' '}
-     <a href={nativeMemberDownloadUrl(source(item))+'&open_sha256='+item.open_sha256} download={item.path.split(/[\\/]/).at(-1)||'file'} onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载此原版本</a>
+     <p>{t('打开版本','Opened Version')} <code>{item.open_sha256.slice(0,12)}</code> · {t(`${item.size_bytes} 字节`,`${item.size_bytes} bytes`)} · {t('内容摘要','Content Digest')} <code>{item.sha256}</code></p>
+     <button type="button" onClick={()=>setSelected({identity,item})}>{t('预览此留存版本','Preview This Retained Version')}</button>{' '}
+     <a href={nativeMemberDownloadUrl(source(item))+'&open_sha256='+item.open_sha256} download={item.path.split(/[\\/]/).at(-1)||'file'} onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>{t('下载此原版本','Download This Original Version')}</a>
     </li>)}
    </ol>}
-   <nav aria-label="留存打开版本翻页"><button type="button" disabled={!currentCursor.previous.length} onClick={()=>setCursor({identity,offset:currentCursor.previous.at(-1)!,previous:currentCursor.previous.slice(0,-1),sha:page.openings_sha256})}>上一页版本</button>
+   <nav aria-label={t('留存打开版本翻页','Retained Opened Version Pages')}><button type="button" disabled={!currentCursor.previous.length} onClick={()=>setCursor({identity,offset:currentCursor.previous.at(-1)!,previous:currentCursor.previous.slice(0,-1),sha:page.openings_sha256})}>{t('上一页版本','Previous Version Page')}</button>
     <span>{Math.min(offset+1,page.total_openings)}–{offset+page.items.length} / {page.total_openings}</span>
-    <button type="button" disabled={page.next_offset_openings===undefined} onClick={()=>{if(page.next_offset_openings!==undefined)setCursor({identity,offset:page.next_offset_openings,previous:[...currentCursor.previous,offset],sha:page.openings_sha256});}}>下一页版本</button></nav>
+    <button type="button" disabled={page.next_offset_openings===undefined} onClick={()=>{if(page.next_offset_openings!==undefined)setCursor({identity,offset:page.next_offset_openings,previous:[...currentCursor.previous,offset],sha:page.openings_sha256});}}>{t('下一页版本','Next Version Page')}</button></nav>
   </>}
-  {current?.error&&<p role="alert">{current.error}</p>}
+  {current?.error&&<p role="alert">{conversationUiError(current.error,language)}</p>}
  </section>
- {selected?.identity===identity&&<><button type="button" onClick={()=>setSelected(undefined)}>关闭留存版本预览</button>
-  <ConversationDisplayBoundary key={selected.item.open_sha256} label="留存原版本预览"><Suspense fallback={<p role="status">正在载入原版本查看器…</p>}><NativeSearchFile key={selected.item.open_sha256} source={source(selected.item)} expected={{openSha:selected.item.open_sha256,sha256:selected.item.sha256,size:selected.item.size_bytes}}/></Suspense></ConversationDisplayBoundary>
+ {selected?.identity===identity&&<><button lang={language} type="button" onClick={()=>setSelected(undefined)}>{t('关闭留存版本预览','Close Retained Version Preview')}</button>
+  <ConversationDisplayBoundary key={selected.item.open_sha256} label={t('留存原版本预览','Retained Original Version Preview')}><Suspense fallback={<p lang={language} role="status">{t('正在载入原版本查看器…','Loading original version viewer…')}</p>}><NativeSearchFile key={selected.item.open_sha256} source={source(selected.item)} expected={{openSha:selected.item.open_sha256,sha256:selected.item.sha256,size:selected.item.size_bytes}}/></Suspense></ConversationDisplayBoundary>
  </>}
  </>;
 }

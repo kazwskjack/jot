@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import {nativeMemberDownloadUrl,type NativeMemberPreviewSource} from './activity-file-preview-client';
 import React,{useEffect,useState,lazy,Suspense} from 'react';
@@ -9,6 +11,7 @@ const NativeSearchFile=lazy(()=>import('./NativeSearchFile'));
 const sha=/^[a-f0-9]{64}$/;
 
 export default function NativeSearchMembers({conversationId,target}:{conversationId:string;target:Target}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,target]);
  const [cursor,setCursor]=useState<{identity:string;offset:number;previous:number[];resultSha?:string;membersSha?:string}>({identity,offset:0,previous:[]});
  const [state,setState]=useState<{identity:string;offset:number;page?:ActivityNativeSearchMembersPage;error?:string}>();
@@ -48,29 +51,29 @@ export default function NativeSearchMembers({conversationId,target}:{conversatio
  const current=state?.identity===identity&&state.offset===offset?state:undefined,page=current?.page;
  const fileSource=(member:{index:number;path:string}):NativeMemberPreviewSource=>({conversationId,runId:target.runId,activityId:target.activityId,
   resultSha:page!.result_sha256,membersSha:page!.members_sha256,member,...(target.asOfSeq?{asOfSeq:target.asOfSeq}:{})});
- return <><section aria-label="原生搜索文件成员" data-chat-search-ignore>
-  <h4>原生搜索文件成员</h4>
-  {(!current||!page&&!current.error)&&<p role="status">正在读取原搜索成员…</p>}
+ return <><section lang={language} aria-label={t('原生搜索文件成员','Native Search File Members')} data-chat-search-ignore>
+  <h4>{t('原生搜索文件成员','Native Search File Members')}</h4>
+  {(!current||!page&&!current.error)&&<p role="status">{t('正在读取原搜索成员…','Reading original search members…')}</p>}
   {page&&<>
-   <p>按原结果顺序保留路径，合并连续重复路径。原结果共 {page.original_total} {target.toolName==='grep'?'条命中':'条路径'}，保留 {page.total_members} 个成员。</p>
-   <p>下载前按原生权限读取并固定打开时的完整内容。原生成员下载共享 512 MiB 临时内容预算，最多同时处理 4 个。</p>
-   {page.total_members===0?<p role="status">原搜索没有文件成员。</p>:<ol start={offset+1} style={{maxHeight:'24rem',overflow:'auto'}}>
-    {page.items.map(item=><li key={item.index}><code style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{item.path}</code> <button type="button" onClick={()=>setSelected({identity,source:fileSource(item)})}>预览打开内容</button> <a href={nativeMemberDownloadUrl(fileSource(item))} download={item.path.split(/[\\/]/).at(-1)||'file'}
-     onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载打开时内容</a></li>)}
+   <p>{t('按原结果顺序保留路径，合并连续重复路径。','Paths retain original result order; consecutive duplicates are merged.')} {t(`原结果共 ${page.original_total}`,`Original result: ${page.original_total}`)} {target.toolName==='grep'?t('条命中','matches'):t('条路径','paths')}{t(`，保留 ${page.total_members} 个成员。`,`, ${page.total_members} members retained.`)}</p>
+   <p>{t('下载前按原生权限读取并固定打开时的完整内容。原生成员下载共享 512 MiB 临时内容预算，最多同时处理 4 个。','Before download, native permissions are checked and the complete opened content is pinned. Native member downloads share a 512 MiB temporary-content budget, with at most 4 processed at a time.')}</p>
+   {page.total_members===0?<p role="status">{t('原搜索没有文件成员。','The original search has no file members.')}</p>:<ol start={offset+1} style={{maxHeight:'24rem',overflow:'auto'}}>
+    {page.items.map(item=><li key={item.index}><code style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{item.path}</code> <button type="button" onClick={()=>setSelected({identity,source:fileSource(item)})}>{t('预览打开内容','Preview Opened Content')}</button> <a href={nativeMemberDownloadUrl(fileSource(item))} download={item.path.split(/[\\/]/).at(-1)||'file'}
+     onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>{t('下载打开时内容','Download Content from Opening')}</a></li>)}
    </ol>}
-   <nav aria-label="原搜索成员翻页">
-    <button type="button" disabled={!currentCursor.previous.length} onClick={()=>setCursor({identity,offset:currentCursor.previous.at(-1)!,previous:currentCursor.previous.slice(0,-1),resultSha:page.result_sha256,membersSha:page.members_sha256})}>上一页成员</button>
+   <nav aria-label={t('原搜索成员翻页','Original Search Member Pages')}>
+    <button type="button" disabled={!currentCursor.previous.length} onClick={()=>setCursor({identity,offset:currentCursor.previous.at(-1)!,previous:currentCursor.previous.slice(0,-1),resultSha:page.result_sha256,membersSha:page.members_sha256})}>{t('上一页成员','Previous Member Page')}</button>
     <span>{Math.min(offset+1,page.total_members)}–{offset+page.items.length} / {page.total_members}</span>
     <button type="button" disabled={page.next_offset_members===undefined} onClick={()=>{
      if(page.next_offset_members!==undefined)setCursor({identity,offset:page.next_offset_members,previous:[...currentCursor.previous,offset],resultSha:page.result_sha256,membersSha:page.members_sha256});
-    }}>下一页成员</button>
+    }}>{t('下一页成员','Next Member Page')}</button>
    </nav>
   </>}
-  {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试读取成员</button></p>}
+  {current?.error&&<p role="alert">{conversationUiError(current.error,language)} <button type="button" onClick={()=>setRevision(value=>value+1)}>{t('重试读取成员','Retry Reading Members')}</button></p>}
  </section>
   {selected?.identity===identity&&<>
-   <button type="button" onClick={()=>setSelected(undefined)}>关闭打开内容预览</button>
-   <ConversationDisplayBoundary key={JSON.stringify(selected.source)} label="原生成员文件预览"><Suspense fallback={<p role="status">正在载入文件查看器…</p>}><NativeSearchFile source={selected.source}/></Suspense></ConversationDisplayBoundary>
+   <button lang={language} type="button" onClick={()=>setSelected(undefined)}>{t('关闭打开内容预览','Close Opened Content Preview')}</button>
+   <ConversationDisplayBoundary key={JSON.stringify(selected.source)} label={t('原生成员文件预览','Native Member File Preview')}><Suspense fallback={<p lang={language} role="status">{t('正在载入文件查看器…','Loading file viewer…')}</p>}><NativeSearchFile source={selected.source}/></Suspense></ConversationDisplayBoundary>
   </>}
  </>;
 }

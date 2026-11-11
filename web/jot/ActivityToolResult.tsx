@@ -86,8 +86,8 @@ export default function ActivityToolResult({conversationId,target}:{conversation
   {(target.toolName==='glob'||target.toolName==='grep')&&<>
    <button type="button" data-chat-search-ignore aria-expanded={membersIdentity===identity} onClick={()=>{setOpeningsIdentity(undefined);setMembersIdentity(membersIdentity===identity?undefined:identity);}}>{membersIdentity===identity?t('关闭文件成员','Close File Members'):t('查看文件成员','View File Members')}</button>
    <button type="button" data-chat-search-ignore aria-expanded={openingsIdentity===identity} onClick={()=>{setMembersIdentity(undefined);setOpeningsIdentity(openingsIdentity===identity?undefined:identity);}}>{openingsIdentity===identity?t('关闭留存版本','Close Retained Versions'):t('查看留存打开版本','View Retained Opened Versions')}</button>
-   {openingsIdentity===identity&&<div lang="zh-CN"><NativeFileOpenings key={identity} conversationId={conversationId} target={{runId:target.runId,activityId:target.activityId,toolName:target.toolName,...(target.asOfSeq!==undefined?{asOfSeq:target.asOfSeq}:{})}}/></div>}
-   {membersIdentity===identity&&<div lang="zh-CN"><NativeSearchMembers key={identity} conversationId={conversationId} target={{runId:target.runId,activityId:target.activityId,toolName:target.toolName,...(target.asOfSeq?{asOfSeq:target.asOfSeq}:{})}}/></div>}
+   {openingsIdentity===identity&&<div lang={language}><NativeFileOpenings key={identity} conversationId={conversationId} target={{runId:target.runId,activityId:target.activityId,toolName:target.toolName,...(target.asOfSeq!==undefined?{asOfSeq:target.asOfSeq}:{})}}/></div>}
+   {membersIdentity===identity&&<div lang={language}><NativeSearchMembers key={identity} conversationId={conversationId} target={{runId:target.runId,activityId:target.activityId,toolName:target.toolName,...(target.asOfSeq?{asOfSeq:target.asOfSeq}:{})}}/></div>}
   </>}
   {(!current||!page&&!current.error)&&<p role="status">{t('正在读取原工具结果…','Reading original tool result…')}</p>}
   {page&&<>
