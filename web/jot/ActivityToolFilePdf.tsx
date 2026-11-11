@@ -1,3 +1,4 @@
+import type {FileReferenceIdentity} from './FileTextReferences';
 import PdfFileRegionReference from './PdfFileRegionReference';
 import PdfFileTextReferenceAction from './PdfFileTextReferenceAction';
 import {capturePdfView,defaultPdfView,pdfViewIdentity,readPdfView,writePdfView,type PdfViewState,type PdfReferenceFocus} from './pdf-file-view-state';
@@ -12,17 +13,17 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import {taskDraftScope} from './client';
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
-import {readListedFilePreviewBytes,type ListedFilePreviewSource,type OfficePrintPreview} from './activity-file-preview-client';
+import {readFileVisualSourceBytes,type FileVisualSource,type OfficePrintPreview} from './activity-file-preview-client';
 import ActivityToolFileBytes from './ActivityToolFileBytes';
 
 pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const assets=new URL('pdfjs/6.1.200/',new URL(workerUrl,document.baseURI)).href;
 
-export default function ActivityToolFilePdf(props:ListedFilePreviewSource&{focus?:PdfReferenceFocus;officePrint?:OfficePrintPreview&{onRetry:()=>void;focus?:PdfReferenceFocus}}){
+export default function ActivityToolFilePdf(props:FileVisualSource&{focus?:PdfReferenceFocus;officePrint?:OfficePrintPreview&{onRetry:()=>void;focus?:PdfReferenceFocus}}){
  const {conversationId,runId,activityId,resultSha,file,officePrint}=props,owner=taskDraftScope();
  const identity=pdfViewIdentity(props,owner,officePrint);
  const sourceFocus=officePrint?officePrint.focus:props.focus;
- const source=useMemo(()=>({conversationId,runId,activityId,resultSha,file:{path:file.path,version:file.version,sha256:file.sha256,size:file.size}}),[conversationId,runId,activityId,resultSha,file.path,file.version,file.sha256,file.size]);
+ const source=useMemo<FileReferenceIdentity>(()=>({conversationId,runId,activityId,resultSha,...(props.native_source?{native_source:props.native_source,file:{path:file.path,sha256:file.sha256,size:file.size}}:{file:{path:file.path,version:file.version!,sha256:file.sha256,size:file.size}})}),[conversationId,runId,activityId,resultSha,file.path,file.version,file.sha256,file.size,identity,props.native_source?.proof]);
  const printView=useMemo(()=>officePrint?{protocol:1 as const,sha256:officePrint.sha256,size:officePrint.size,pageCount:officePrint.pageCount,proof:officePrint.proof}:undefined,[officePrint?.sha256,officePrint?.size,officePrint?.pageCount,officePrint?.proof]);
  const focus=useRef(sourceFocus);focus.current=sourceFocus;
  const referenceJump=useRef<{key:string;page:number}|undefined>(undefined);
@@ -86,7 +87,7 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource&{focus
   ready.current=false;searchJump.current=null;restoreSelection.current=null;referenceJump.current=undefined;
   setState({identity});setChallenge(undefined);setPassword('');setActionError('');
   const load=async()=>{
-   const bytes=officePrint?officePrint.bytes.slice():await readListedFilePreviewBytes(props,owner,controller.signal);controller.signal.throwIfAborted();
+   const bytes=officePrint?officePrint.bytes.slice():await readFileVisualSourceBytes(props,owner,controller.signal,20*1024*1024);controller.signal.throwIfAborted();
    if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');
    loading=pdfjs.getDocument({data:bytes,cMapUrl:assets+'cmaps/',cMapPacked:true,standardFontDataUrl:assets+'standard_fonts/',wasmUrl:assets+'wasm/'});
    loading.onPassword=(update,reason)=>{if(!cancelled){setPassword('');setChallenge({identity,update,invalid:reason===pdfjs.PasswordResponses.INCORRECT_PASSWORD});}};
@@ -146,16 +147,16 @@ export default function ActivityToolFilePdf(props:ListedFilePreviewSource&{focus
   try{if(window.document.fullscreenElement===root.current)await window.document.exitFullscreen();else await root.current?.requestFullscreen();}
   catch(error){setActionError(error instanceof Error?error.message:'暂时无法切换全屏');}
  };
- return <section ref={root} tabIndex={-1} className="jot-activity-content" aria-label={officePrint?"原Office固定版本的转换PDF":"原列表固定PDF版本"} data-chat-search-scope="" style={{background:'var(--jot-background,white)',overflow:'auto'}} onKeyDown={event=>{
+ return <section ref={root} tabIndex={-1} className="jot-activity-content" aria-label={officePrint?"原Office固定版本的转换PDF":props.native_source?"原生固定打开PDF":"原列表固定PDF版本"} data-chat-search-scope="" style={{background:'var(--jot-background,white)',overflow:'auto'}} onKeyDown={event=>{
    if(document&&!event.defaultPrevented&&!event.nativeEvent.isComposing&&event.keyCode!==229&&(event.ctrlKey||event.metaKey)&&!event.altKey&&event.key.toLowerCase()==='f'){
     event.preventDefault();event.stopPropagation();const input=root.current?.querySelector<HTMLInputElement>('[data-pdf-file-search]');input?.focus();input?.select();
    }
   }}>
-  <h4>{file.path} · 版本 {file.version}</h4>
+  <h4>{file.path} · 版本 {props.native_source?.openSha??file.version}</h4>
   {officePrint&&<p role="status">LibreOffice转换PDF · {officePrint.pageCount}页 · 摘要 <code>{officePrint.sha256}</code>。文字引用按近似页定位保存。</p>}
   {officePrint&&<details><summary>转换来源证明</summary><code>{officePrint.proof}</code></details>}
   {document&&<><PdfFileTextReferenceAction root={root} source={source} rotation={currentView.rotation} printView={printView}/><PdfFileRegionReference root={viewport} source={source} page={page} rotation={currentView.rotation} printView={printView}/></>}
-  <ActivityToolFileBytes key={identity} conversationId={conversationId} runId={runId} activityId={activityId} resultSha={resultSha} file={file}/>
+  {!props.native_source&&typeof file.version==='number'&&<ActivityToolFileBytes key={identity} conversationId={conversationId} runId={runId} activityId={activityId} resultSha={resultSha} file={{path:file.path,version:file.version,sha256:file.sha256,size:file.size}}/>}
   {challenge?.identity===identity&&<form onSubmit={event=>{event.preventDefault();challenge.update(password);setPassword('');setChallenge(undefined);}}>
    <label>PDF密码<input type="password" autoComplete="current-password" value={password} onChange={event=>setPassword(event.target.value)}/></label>
    <button type="submit">解锁PDF</button>{challenge.invalid&&<p role="alert">密码未匹配，请重试。</p>}

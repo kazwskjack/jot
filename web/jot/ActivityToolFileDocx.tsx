@@ -1,6 +1,6 @@
 import React,{useContext,useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
-import {readOfficeVisualSourceBytes,readOfficeViewerUrl,type OfficeVisualSource} from './activity-file-preview-client';
+import {readFileVisualSourceBytes,readOfficeViewerUrl,type FileVisualSource} from './activity-file-preview-client';
 import {FileTextReferenceContext,nativeReferenceIdentity,type FileReferenceIdentity,type FileTextReference,type OfficeTextFocus,type OfficeRegionFocus} from './FileTextReferences';
 import OfficeFileRegionReference,{type OfficeRegionSession} from './OfficeFileRegionReference';
 import {createTextContentReference} from './vendor/pilotdeck-content-reference';
@@ -38,7 +38,7 @@ function originalVisualFocus(focus:OfficeTextFocus|undefined,source:FileReferenc
  return {selectedText:value.reference.selectedText,occurrenceIndex:locator.occurrenceIndex!,prefix:locator.quote.prefix??'',suffix:locator.quote.suffix??''};
 }
 
-function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{source:OfficeVisualSource;owner:string;identity:string;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
+function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{source:FileVisualSource;owner:string;identity:string;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
  const context=useContext(FileTextReferenceContext),currentContext=useRef(context);currentContext.current=context;
  const frame=useRef<HTMLIFrameElement>(null),loaded=useRef<HTMLIFrameElement|null>(null);
  const notify=useRef<(frame:HTMLIFrameElement)=>void>(()=>{});
@@ -137,7 +137,7 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
    pendingTimer.current=window.setTimeout(()=>{if(live()){resetPending();setNotice('视觉选区复核未完成，请重新选择后引用。');}},2000);
    target.contentWindow.postMessage({type:'jot-docx-commit',protocol:1,token,serial:original.selection.serial},viewerOrigin);
   };
-  void readOfficeVisualSourceBytes(source,owner,controller.signal).then(value=>{
+  void readFileVisualSourceBytes(source,owner,controller.signal).then(value=>{
    if(!live())return;
    bytes=value.buffer as ArrayBuffer;if(target)send(target);
   }).catch(error=>{if(live())fail(error instanceof Error?error.message:'原Word文件读取失败');});
@@ -156,7 +156,7 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
  </section>;
 }
 
-export default function ActivityToolFileDocx(source:OfficeVisualSource&{officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
+export default function ActivityToolFileDocx(source:FileVisualSource&{officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
  const owner=taskDraftScope(),[revision,setRevision]=useState(0);
  const identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,nativeReferenceIdentity(source.native_source),source.officeTextFocus?.key,source.officeRegionFocus?.key,revision]);
  return <><button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取Word视觉内容</button><DocxAttempt key={identity} source={source} owner={owner} identity={identity} officeTextFocus={source.officeTextFocus} officeRegionFocus={source.officeRegionFocus}/></>;

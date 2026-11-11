@@ -1,10 +1,10 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
-import {readOfficeViewerUrl,readOfficeVisualSourceBytes,type OfficeVisualSource} from './activity-file-preview-client';
+import {readOfficeViewerUrl,readFileVisualSourceBytes,type FileVisualSource} from './activity-file-preview-client';
 import {nativeReferenceIdentity,type OfficeRegionFocus} from './FileTextReferences';
 import OfficeFileRegionReference,{type OfficeRegionSession} from './OfficeFileRegionReference';
 
-function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:OfficeVisualSource;owner:string;identity:string;officeRegionFocus?:OfficeRegionFocus}){
+function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:FileVisualSource;owner:string;identity:string;officeRegionFocus?:OfficeRegionFocus}){
  const frame=useRef<HTMLIFrameElement>(null),probe=useRef<(element:HTMLIFrameElement)=>void>(()=>{}),cancel=useRef<()=>void>(()=>{});
  const regionSession=useRef<OfficeRegionSession|undefined>(undefined);
  const [url,setUrl]=useState<string>(),[state,setState]=useState<{phase:'loading'|'ready'|'error';message:string;working?:boolean}>({phase:'loading',message:'正在核对原幻灯片并读取视觉内容…'});
@@ -47,7 +47,7 @@ function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:OfficeVis
   const load=async()=>{
    const value=await readOfficeViewerUrl('pptx',controller.signal);if(!live())return;
    origin=new URL(value).origin;setUrl(value);
-   const verified=await readOfficeVisualSourceBytes(source,owner,controller.signal);if(!live())return;bytes=verified.buffer as ArrayBuffer;send();
+   const verified=await readFileVisualSourceBytes(source,owner,controller.signal);if(!live())return;bytes=verified.buffer as ArrayBuffer;send();
   };
   void load().catch(error=>{if(!controller.signal.aborted)fail(error instanceof Error?error.message:'原幻灯片读取失败');});
   return()=>{dispose();regionSession.current=undefined;probe.current=()=>{};cancel.current=()=>{};};
@@ -58,7 +58,7 @@ function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:OfficeVis
   {state.phase==='ready'&&regionSession.current&&<OfficeFileRegionReference kind="pptx" source={source} owner={owner} session={regionSession.current} focus={officeRegionFocus}/>}
  </section>;
 }
-export default function ActivityToolFilePptx(source:OfficeVisualSource&{officeRegionFocus?:OfficeRegionFocus}){
+export default function ActivityToolFilePptx(source:FileVisualSource&{officeRegionFocus?:OfficeRegionFocus}){
  const owner=taskDraftScope(),[revision,setRevision]=useState(0),identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,nativeReferenceIdentity(source.native_source),source.officeRegionFocus?.key,revision]);
  return <><button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取幻灯片视觉内容</button><PptxAttempt key={identity} source={source} owner={owner} identity={identity} officeRegionFocus={source.officeRegionFocus}/></>;
 }

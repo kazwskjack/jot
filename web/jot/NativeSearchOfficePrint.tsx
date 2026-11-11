@@ -48,7 +48,7 @@ export default function NativeSearchOfficePrint({source,expectedOpenSha,expected
    <p>原文件 {preview.sourceSize} 字节 · 源SHA-256 <code>{preview.sourceSha}</code></p>
    <p>PDF {preview.size} 字节 · {preview.pageCount} 页 · SHA-256 <code>{preview.sha256}</code></p>
    {download?.preview===preview&&<a href={download.url} download="office-preview.pdf" onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载此转换PDF</a>}
-   <ConversationDisplayBoundary key={preview.sha256} label="原生Office转换PDF"><Suspense fallback={<p role="status">正在载入PDF查看器…</p>}><PdfViewer bytes={preview.bytes} expectedPageCount={preview.pageCount} source={preview.pdfProof?nativeMemberReferenceSource(source,{openSha:preview.openSha,sha256:preview.sourceSha,size:preview.sourceSize,proof:preview.openProof}):undefined} printView={preview.pdfProof?{protocol:1,sha256:preview.sha256,size:preview.size,pageCount:preview.pageCount,proof:preview.pdfProof}:undefined} focus={focus}/></Suspense></ConversationDisplayBoundary>
+   <ConversationDisplayBoundary key={preview.sha256} label="原生Office转换PDF"><Suspense fallback={<p role="status">正在载入PDF查看器…</p>}><PdfViewer bytes={preview.bytes} expectedPageCount={preview.pageCount} source={preview.pdfProof?nativeMemberReferenceSource(source,{openSha:preview.openSha,sha256:preview.sourceSha,size:preview.sourceSize,proof:preview.openProof}):undefined} printView={preview.pdfProof?{protocol:1,sha256:preview.sha256,size:preview.size,pageCount:preview.pageCount,proof:preview.pdfProof}:undefined} focus={focus} onRetry={()=>setRevision(value=>value+1)}/></Suspense></ConversationDisplayBoundary>
   </>}
   {current?.error&&<p role="alert">{current.error}</p>}
   <button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取此转换预览</button>

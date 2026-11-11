@@ -1,3 +1,4 @@
+import ActivityToolFilePdf from './ActivityToolFilePdf';
 import PdfFileTextReferenceAction from './PdfFileTextReferenceAction';
 import PdfFileRegionReference from './PdfFileRegionReference';
 import type {FileReferenceIdentity} from './FileTextReferences';
@@ -16,7 +17,7 @@ pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const assets=new URL('pdfjs/6.1.200/',new URL(workerUrl,document.baseURI)).href;
 
 /** Reuse the existing PDF page renderer and outline/search over the same opened bytes. */
-export default function NativeSearchFilePdf({bytes,expectedPageCount,source,printView,focus}:{bytes:Uint8Array;expectedPageCount?:number|undefined;source?:FileReferenceIdentity|undefined;printView?:OfficePrintView|undefined;focus?:PdfReferenceFocus|undefined}){
+function UnsignedNativeSearchFilePdf({bytes,expectedPageCount,source,printView,focus}:{bytes:Uint8Array;expectedPageCount?:number|undefined;source?:FileReferenceIdentity|undefined;printView?:OfficePrintView|undefined;focus?:PdfReferenceFocus|undefined}){
  const root=useRef<HTMLDivElement>(null),owner=taskDraftScope();
  const [document,setDocument]=useState<pdfjs.PDFDocumentProxy>(),[error,setError]=useState('');
  const [challenge,setChallenge]=useState<{update:(password:string)=>void;invalid:boolean}>(),[password,setPassword]=useState('');
@@ -74,4 +75,12 @@ export default function NativeSearchFilePdf({bytes,expectedPageCount,source,prin
    </div>
   </>}
  </div>;
+}
+
+/** Signed native openings share the original complete PDF controls and durable view-state lifecycle. */
+export default function NativeSearchFilePdf(props:{bytes:Uint8Array;expectedPageCount?:number|undefined;source?:FileReferenceIdentity|undefined;printView?:OfficePrintView|undefined;focus?:PdfReferenceFocus|undefined;onRetry?:()=>void}){
+ const {source,printView,bytes,focus,onRetry}=props;
+ if(source?.native_source&&(props.expectedPageCount===undefined||printView?.pageCount===props.expectedPageCount))return <ActivityToolFilePdf {...source} openedBytes={bytes} focus={focus}
+  officePrint={printView?{...printView,bytes,onRetry:onRetry??(()=>{}),focus}:undefined}/>;
+ return <UnsignedNativeSearchFilePdf {...props}/>;
 }

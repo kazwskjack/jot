@@ -340,3 +340,5 @@ Native member PDF and retained Office-PDF text/region quote actions reuse Jot’
 Native structured Office DOCX/PPTX text and XLSX saved-cell/range references reuse the attributed OfficeContent and OfficeTextReferenceAction flows with signed native opened-source provenance, original matrix/text confirmation and source-specific focus.
 
 Signed native Office openings also reuse the original isolated Word visual text, XLSX native cell-view2 and DOCX/PPTX/XLSX region PNG reference controllers. The viewer receives one private copy of the same verified native bytes; original window/origin/token, commit/focus, bounded matrix/PNG and upload recovery checks apply.
+
+Signed native PDF and retained Office-PDF openings reuse the original complete Jot/PilotDeck PDF controller, including virtual continuous pages, thumbnails, outline/search, fullscreen, source references and owner-scoped bounded view-state retention. Native state identities bind original member/opened-source and optional derived PDF metadata.

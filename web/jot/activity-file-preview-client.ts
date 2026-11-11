@@ -125,18 +125,18 @@ export function nativeMemberReferenceSource(source:NativeMemberPreviewSource,ope
    ...(source.asOfSeq!==undefined?{asOfSeq:source.asOfSeq}:{})}};
 }
 
-export type OfficeVisualSource=import('./FileTextReferences').FileReferenceIdentity&{openedBytes?:Uint8Array};
-/** Isolated visual frames take a private copy of the same verified native opening. */
-export async function readOfficeVisualSourceBytes(source:OfficeVisualSource,owner:string,signal:AbortSignal):Promise<Uint8Array>{
+export type FileVisualSource=import('./FileTextReferences').FileReferenceIdentity&{openedBytes?:Uint8Array};
+/** Visual readers take a private copy of the same verified native opening. */
+export async function readFileVisualSourceBytes(source:FileVisualSource,owner:string,signal:AbortSignal,maxBytes=OFFICE_NATIVE_SOURCE_MAX_BYTES):Promise<Uint8Array>{
  const check=()=>{signal.throwIfAborted();if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');};
  check();
  if(source.openedBytes!==undefined){
-  if(!source.native_source||source.openedBytes.byteLength!==source.file.size||source.file.size>OFFICE_NATIVE_SOURCE_MAX_BYTES)throw Error('原生Office打开内容尚未确认');
+  if(!source.native_source||source.openedBytes.byteLength!==source.file.size||source.file.size>maxBytes)throw Error('原生打开内容尚未确认');
   const bytes=source.openedBytes.slice();
   const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),byte=>byte.toString(16).padStart(2,'0')).join('');check();
-  if(digest!==source.file.sha256)throw Error('原生Office打开摘要已变化');
+  if(digest!==source.file.sha256)throw Error('原生打开摘要已变化');
   return bytes;
  }
- if(source.native_source||typeof source.file.version!=='number')throw Error('原生Office打开内容暂不可用');
+ if(source.native_source||typeof source.file.version!=='number')throw Error('原生打开内容暂不可用');
  return readListedFilePreviewBytes({...source,file:{...source.file,version:source.file.version}},owner,signal);
 }
