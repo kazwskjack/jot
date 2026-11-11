@@ -92,6 +92,11 @@
     {
       "path": "web/public/docx-preview/0.4.0/frame.js",
       "changes": "Adds original-window/origin/protocol/token-bound view-probe and bounded view reports. Parent retains32 owner/source-keyed views. Word keeps zoom/outline/scroll, PPTX keeps slide/zoom/thumbnails/scroll, XLSX keeps actual sheet/zoom/scroll through original native API commands and serialized renderer queue. Explicit quote focus suppresses older saved viewport restoration. Frame timers/scroll subscriptions are released on closure; reports coalesce scroll updates at160ms. Original library and renderer assets remain unchanged."
+    },
+    {
+      "path": "web/public/docx-preview/0.4.0/frame.js",
+      "upstream_path": "ui/src/components/code-editor/view/subcomponents/DocxBuiltinPreview.tsx",
+      "changes": "Adapts pinned useTranslation presentation to saved Jot language through an exact-window/origin/protocol/token-bound display-only language message after original initialization. Binds only original toolbar/outline/status/region UI nodes and fixed known notices, retaining original document text/heading titles, offsets, search matches/cursors/generations, view/selection/capture state and all original source/boot/byte/session protocols. Existing static assets and CSP allowlist remain unchanged. Unknown errors retain original text; no runtime execution performed."
     }
   ]
 }

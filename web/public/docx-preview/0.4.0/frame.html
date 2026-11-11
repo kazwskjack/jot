@@ -3,7 +3,7 @@
 <head>
  <meta charset="utf-8">
  <meta name="viewport" content="width=device-width,initial-scale=1">
- <title>Word视觉查看器</title>
+ <title data-jot-ui-en="Word Visual Viewer">Word视觉查看器</title>
  <style>
   body { margin: 0; font-family: system-ui, sans-serif; background: #eee; color: #222; }
   #toolbar { position: sticky; top: 0; z-index: 1; background: #fff; border-bottom: 1px solid #ccc; }
@@ -28,17 +28,17 @@
 </head>
 <body>
  <header id="toolbar">
-  <nav aria-label="Word缩放"><button type="button" id="out" aria-label="缩小">−</button><output id="zoom" aria-live="polite">100%</output><button type="button" id="in" aria-label="放大">＋</button><span id="status" role="status">等待原文件</span></nav>
-  <nav aria-label="Word文内搜索"><label>查找 <input id="query" type="search" maxlength="200" disabled></label><button id="previous" type="button" disabled>上一处</button><button id="next" type="button" disabled>下一处</button><output id="matches" aria-live="polite">尚未搜索</output><button id="search-batch-previous" type="button" disabled>上一批结果</button><button id="search-batch-next" type="button" disabled>下一批结果</button><small id="coverage" role="status"></small></nav>
-  <nav id="region-controls" aria-label="Word区域截图"><button id="region-start" type="button" disabled>框选区域</button><button id="region-whole" type="button" disabled>当前可见分段</button><button id="region-cancel" type="button" disabled>取消区域</button>
-   <label>左% <input id="region-x" type="number" min="0" max="100" step="0.1" disabled></label><label>上% <input id="region-y" type="number" min="0" max="100" step="0.1" disabled></label>
-   <label>宽% <input id="region-width" type="number" min="0" max="100" step="0.1" disabled></label><label>高% <input id="region-height" type="number" min="0" max="100" step="0.1" disabled></label><span id="region-status" role="status"></span>
+  <nav aria-label="Word缩放" data-jot-ui-aria-en="Word Zoom"><button type="button" id="out" aria-label="缩小" data-jot-ui-aria-en="Zoom Out">−</button><output id="zoom" aria-live="polite">100%</output><button type="button" id="in" aria-label="放大" data-jot-ui-aria-en="Zoom In">＋</button><span id="status" role="status" data-jot-ui-en="Waiting for original file">等待原文件</span></nav>
+  <nav aria-label="Word文内搜索" data-jot-ui-aria-en="Search Within Word"><label><span data-jot-ui-en="Find ">查找 </span><input id="query" type="search" maxlength="200" disabled></label><button id="previous" type="button" disabled data-jot-ui-en="Previous Match">上一处</button><button id="next" type="button" disabled data-jot-ui-en="Next Match">下一处</button><output id="matches" aria-live="polite" data-jot-ui-en="Not searched">尚未搜索</output><button id="search-batch-previous" type="button" disabled data-jot-ui-en="Previous Result Batch">上一批结果</button><button id="search-batch-next" type="button" disabled data-jot-ui-en="Next Result Batch">下一批结果</button><small id="coverage" role="status"></small></nav>
+  <nav id="region-controls" aria-label="Word区域截图" data-jot-ui-aria-en="Word Region Screenshot"><button id="region-start" type="button" disabled data-jot-ui-en="Select Region">框选区域</button><button id="region-whole" type="button" disabled data-jot-ui-en="Currently Visible Section">当前可见分段</button><button id="region-cancel" type="button" disabled data-jot-ui-en="Cancel Region">取消区域</button>
+   <label><span data-jot-ui-en="Left % ">左% </span><input id="region-x" type="number" min="0" max="100" step="0.1" disabled></label><label><span data-jot-ui-en="Top % ">上% </span><input id="region-y" type="number" min="0" max="100" step="0.1" disabled></label>
+   <label><span data-jot-ui-en="Width % ">宽% </span><input id="region-width" type="number" min="0" max="100" step="0.1" disabled></label><label><span data-jot-ui-en="Height % ">高% </span><input id="region-height" type="number" min="0" max="100" step="0.1" disabled></label><span id="region-status" role="status"></span>
   </nav>
  </header>
- <details id="outline"><summary>目录</summary><p id="outline-status" role="status">等待渲染</p>
-  <nav aria-label="文档目录分页"><button id="outline-previous" type="button" disabled>上一页标题</button><label>跳至目录页 <input id="outline-page" type="number" min="1" value="1" disabled></label><output id="outline-pages" aria-live="polite">0 / 0</output><button id="outline-next" type="button" disabled>下一页标题</button></nav><ol id="headings"></ol>
+ <details id="outline"><summary data-jot-ui-en="Outline">目录</summary><p id="outline-status" role="status" data-jot-ui-en="Waiting to render">等待渲染</p>
+  <nav aria-label="文档目录分页" data-jot-ui-aria-en="Document Outline Pagination"><button id="outline-previous" type="button" disabled data-jot-ui-en="Previous Heading Page">上一页标题</button><label><span data-jot-ui-en="Go to Outline Page ">跳至目录页 </span><input id="outline-page" type="number" min="1" value="1" disabled></label><output id="outline-pages" aria-live="polite">0 / 0</output><button id="outline-next" type="button" disabled data-jot-ui-en="Next Heading Page">下一页标题</button></nav><ol id="headings"></ol>
  </details>
- <div id="styles"></div><main id="content" aria-label="Word文档内容"></main>
+ <div id="styles"></div><main id="content" aria-label="Word文档内容" data-jot-ui-aria-en="Word Document Content"></main>
  <script nonce="__JOT_DOCX_NONCE__" src="./jszip.min.js"></script>
  <script nonce="__JOT_DOCX_NONCE__" src="./docx-preview.js"></script>
  <script nonce="__JOT_DOCX_NONCE__" src="./word-region.js"></script>

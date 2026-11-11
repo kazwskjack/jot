@@ -109,9 +109,53 @@ function findTextSearchMatches(text, query, limit) {
   return matches;
 }
 
+ // Keep language changes on owned UI nodes, outside document text and view/search state.
+ let language='zh-CN';
+ const labels=new Map();
+ const showLabel=entry=>{
+  const text=language==='en'?entry.en:entry.zh;
+  if(entry.attribute)entry.element.setAttribute(entry.attribute,text);else entry.element.textContent=text;
+ };
+ const ui=(element,zh,en,attribute='')=>{
+  let fields=labels.get(element);if(!fields){fields=new Map();labels.set(element,fields);}
+  const entry={element,zh,en,attribute};fields.set(attribute,entry);showLabel(entry);
+ };
+ for(const element of document.querySelectorAll('[data-jot-ui-en]'))ui(element,element.textContent,element.dataset.jotUiEn);
+ for(const element of document.querySelectorAll('[data-jot-ui-aria-en]'))ui(element,element.getAttribute('aria-label'),element.dataset.jotUiAriaEn,'aria-label');
+ const setLanguage=value=>{
+  if(language===value)return;language=value;document.documentElement.lang=value;
+  for(const fields of labels.values())for(const entry of fields.values())showLabel(entry);
+ };
+ const notices={
+  'Word视图恢复未完成，请手动定位。':'Word view restoration did not complete. Locate the position manually.',
+  '引用文字超出100000字符范围，请缩小选区。':'The reference exceeds 100000 characters. Select less text.',
+  '文字选区尚未确认':'The text selection is unconfirmed.',
+  '此文档没有可截图分段。':'This document has no sections available for screenshots.',
+  '区域边长至少需要8个显示像素，文档尺寸须在当前范围内。':'Region sides must be at least 8 display pixels and document dimensions must be within current limits.',
+  '区域已选中，请在查看器下方确认截图引用。':'The region is selected. Confirm the screenshot reference below the viewer.',
+  '截图区域已取消。':'The screenshot region was cancelled.',
+  '在Word分段内拖动框选，或选择当前可见分段。':'Drag within a Word section or select the currently visible section.',
+  '文档位置已变化，请重新选择区域。':'The document position changed. Select the region again.',
+  '正在生成有界PNG截图…':'Generating a bounded PNG screenshot…',
+  '截图引擎尚未就绪。':'The screenshot engine is not ready.',
+  '截图引擎读取失败，请重试。':'Loading the screenshot engine failed. Retry.',
+  '文档布局已变化，请重新选择区域。':'The document layout changed. Select the region again.',
+  '截图编码失败。':'Screenshot encoding failed.',
+  '截图超出当前8 MiB范围，请缩小区域。':'The screenshot exceeds the 8 MiB limit. Select a smaller region.',
+  'PNG已生成，正在交给原草稿上传入口。':'The PNG was generated and is being handed to the original draft upload entry.',
+  '区域截图失败。':'Region screenshot capture failed.'
+ };
+ const notice=(element,message)=>ui(element,message,Object.hasOwn(notices,message)?notices[message]:message);
  const content=document.getElementById('content'),styles=document.getElementById('styles'),status=document.getElementById('status');
  const instance=crypto.randomUUID();
  let closed=false,started=false,zoom=1,sessionToken,visualView,selectionSerial=0,proposal,focusRange,regionController;
+ window.addEventListener('message',event=>{
+  const value=event.data;
+  if(closed||!started||event.source!==window.parent||event.origin!==parentOrigin||!value||typeof value!=='object'||Array.isArray(value)
+   ||Object.keys(value).sort().join(',')!=='language,protocol,token,type'||value.type!=='jot-docx-language'||value.protocol!==1||value.token!==sessionToken
+   ||!['zh-CN','en'].includes(value.language))return;
+  setLanguage(value.language);
+ });
  const boot=()=>{if(!closed)window.parent.postMessage({type:'jot-docx-boot',protocol:1,started,instance},parentOrigin);};
  window.addEventListener('message',event=>{
   if(event.source===window.parent&&event.origin===parentOrigin&&event.data?.type==='jot-docx-probe'&&event.data.protocol===1&&Object.keys(event.data).length===2)boot();
@@ -132,7 +176,7 @@ function findTextSearchMatches(text, query, limit) {
   const generation=++viewGeneration;viewEnabled=true;viewRestoring=false;
   if(!validView(view)){reportView();return;}
   viewRestoring=true;zoom=view.zoom;content.style.zoom=String(zoom);document.getElementById('zoom').textContent=Math.round(zoom*100)+'%';renderOutlinePage(view.outlinePage);
-  void Promise.resolve(document.fonts?.ready).then(()=>{if(closed||generation!==viewGeneration)return;requestAnimationFrame(()=>requestAnimationFrame(()=>{if(closed||generation!==viewGeneration)return;content.scrollTo({top:view.top,left:view.left});window.scrollTo({top:view.pageTop,left:view.pageLeft});viewRestoring=false;reportView();}));}).catch(()=>{if(!closed&&generation===viewGeneration){viewRestoring=false;status.textContent='Word视图恢复未完成，请手动定位。';reportView();}});
+  void Promise.resolve(document.fonts?.ready).then(()=>{if(closed||generation!==viewGeneration)return;requestAnimationFrame(()=>requestAnimationFrame(()=>{if(closed||generation!==viewGeneration)return;content.scrollTo({top:view.top,left:view.left});window.scrollTo({top:view.pageTop,left:view.pageLeft});viewRestoring=false;reportView();}));}).catch(()=>{if(!closed&&generation===viewGeneration){viewRestoring=false;notice(status,'Word视图恢复未完成，请手动定位。');reportView();}});
  };
  // text_view 2 pins docx-preview 0.4.0 raw DOM text order. A renderer upgrade needs a new locator protocol.
  const indexVisualText=()=>{
@@ -186,7 +230,7 @@ function findTextSearchMatches(text, query, limit) {
     }
    }
    report({type:'jot-docx-selection',selection:proposal?.data??null});
-  }catch(error){status.textContent=error instanceof Error?error.message:'文字选区尚未确认';report({type:'jot-docx-selection',selection:null});}
+  }catch(error){notice(status,error instanceof Error?error.message:'文字选区尚未确认');report({type:'jot-docx-selection',selection:null});}
  };
  const restoreFocus=focus=>{
   let confirmed=false;
@@ -256,8 +300,8 @@ function findTextSearchMatches(text, query, limit) {
  const navigate=delta=>{
   if(searchBusy||closed||regionController?.busy)return;
   searchControls();
-  if(!matches.length){counter.textContent=query.value.trim()?'没有匹配':'尚未搜索';return;}
-  active=(active+delta+matches.length)%matches.length;counter.textContent=`第 ${batch+1} 批 · ${active+1} / ${matches.length}`;
+  if(!matches.length){ui(counter,query.value.trim()?'没有匹配':'尚未搜索',query.value.trim()?'No matches':'Not searched');return;}
+  active=(active+delta+matches.length)%matches.length;ui(counter,`第 ${batch+1} 批 · ${active+1} / ${matches.length}`,`Batch ${batch+1} · ${active+1} / ${matches.length}`);
   const current=matches[active];
   if(globalThis.CSS?.highlights&&globalThis.Highlight){globalThis.CSS.highlights.set('jot-docx-search-active',new Highlight(current.range));}
   else{clearHighlights();const selection=window.getSelection();selection?.removeAllRanges();selection?.addRange(current.range);fallbackRange=current.range;}
@@ -266,8 +310,8 @@ function findTextSearchMatches(text, query, limit) {
  const search=async(page=0)=>{
   if(closed||regionController?.busy)return;
   cancelSearch();const generation=searchGeneration,value=query.value,found=[];
-  clearHighlights();matches=[];active=0;hasNextBatch=false;searchBusy=true;searchControls();counter.textContent='正在搜索…';
-  document.getElementById('coverage').textContent='';
+  clearHighlights();matches=[];active=0;hasNextBatch=false;searchBusy=true;searchControls();ui(counter,'正在搜索…','Searching…');
+  ui(document.getElementById('coverage'),'','');
   try{
    if(value.length>200)throw Error('SEARCH_QUERY_LIMIT');
    if(value.trim()){
@@ -299,7 +343,7 @@ function findTextSearchMatches(text, query, limit) {
       if(original.charCodeAt(offset)>=0xdc00&&original.charCodeAt(offset)<=0xdfff)offset--;
      }
      if(++chunks%8===0){
-      counter.textContent=`正在搜索第 ${page+1} 批 · 已找到 ${found.length} 处`;
+      ui(counter,`正在搜索第 ${page+1} 批 · 已找到 ${found.length} 处`,`Searching batch ${page+1} · ${found.length} matches found`);
       await new Promise(resolve=>window.setTimeout(resolve,0));
      }
     }
@@ -308,17 +352,17 @@ function findTextSearchMatches(text, query, limit) {
    }
    if(closed||generation!==searchGeneration)return;
    matches=found;batch=page;
-   document.getElementById('coverage').textContent=hasNextBatch?'当前批最多1000处，可继续搜索后续全部已渲染文字。':value.trim()?'已搜索至文档末尾。':'';
+   ui(document.getElementById('coverage'),hasNextBatch?'当前批最多1000处，可继续搜索后续全部已渲染文字。':value.trim()?'已搜索至文档末尾。':'',hasNextBatch?'Up to 1000 matches in this batch. Continue to search all remaining rendered text.':value.trim()?'Searched to the end of the document.':'');
    if(globalThis.CSS?.highlights&&globalThis.Highlight&&matches.length)globalThis.CSS.highlights.set('jot-docx-search',new Highlight(...matches.map(match=>match.range)));
    searchBusy=false;navigate(0);
   }catch{
    if(closed||generation!==searchGeneration)return;
-   clearHighlights();matches=[];hasNextBatch=false;counter.textContent='搜索未完成，请重新输入后重试。';
+   clearHighlights();matches=[];hasNextBatch=false;ui(counter,'搜索未完成，请重新输入后重试。','Search did not complete. Enter the query again and retry.');
   }finally{if(!closed&&generation===searchGeneration){searchBusy=false;searchControls();}}
  };
  const resetSearch=()=>{
   cancelSearch();clearHighlights();matches=[];batch=0;batchStarts=[null];hasNextBatch=false;searchControls();
-  document.getElementById('coverage').textContent='';counter.textContent='等待搜索';
+  ui(document.getElementById('coverage'),'','');ui(counter,'等待搜索','Waiting to search');
  };
  query.addEventListener('input',()=>{resetSearch();searchTimer=window.setTimeout(()=>void search(),180);});
  previous.addEventListener('click',()=>navigate(-1));next.addEventListener('click',()=>navigate(1));
@@ -327,7 +371,7 @@ function findTextSearchMatches(text, query, limit) {
  document.addEventListener('keydown',event=>{
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='f'&&!query.disabled){event.preventDefault();query.focus();query.select();}
   if(event.target!==query||query.disabled)return;
-  if(event.key==='Escape'){event.preventDefault();query.value='';resetSearch();counter.textContent='尚未搜索';}
+  if(event.key==='Escape'){event.preventDefault();query.value='';resetSearch();ui(counter,'尚未搜索','Not searched');}
   if(event.key==='Enter'){event.preventDefault();window.clearTimeout(searchTimer);if(!matches.length)void search();else navigate(event.shiftKey?-1:1);}
  });
  let outlineItems=[],outlinePage=0;
@@ -337,7 +381,7 @@ function findTextSearchMatches(text, query, limit) {
   outlinePage=Math.max(0,Math.min(count-1,page));list.replaceChildren();
   outlineInput.disabled=count===0;outlineInput.value=count?String(outlinePage+1):'0';outlineInput.max=String(Math.max(1,count));
   outlinePrevious.disabled=count===0||outlinePage===0;outlineNext.disabled=count===0||outlinePage+1>=count;
-  document.getElementById('outline-pages').textContent=count?`第 ${outlinePage+1} / ${count} 页`:'0 / 0';
+  ui(document.getElementById('outline-pages'),count?`第 ${outlinePage+1} / ${count} 页`:'0 / 0',count?`Page ${outlinePage+1} / ${count}`:'0 / 0');
   list.start=outlinePage*100+1;scheduleView();
   for(const item of outlineItems.slice(outlinePage*100,(outlinePage+1)*100)){
    const row=document.createElement('li'),button=document.createElement('button');button.type='button';
@@ -347,7 +391,7 @@ function findTextSearchMatches(text, query, limit) {
    row.append(button);list.append(row);
   }
  };
- const clearOutline=message=>{outlineItems=[];renderOutlinePage(0);document.getElementById('outline-status').textContent=message;};
+ const clearOutline=(zh,en)=>{outlineItems=[];renderOutlinePage(0);ui(document.getElementById('outline-status'),zh,en);};
  outlinePrevious.addEventListener('click',()=>renderOutlinePage(outlinePage-1));
  outlineNext.addEventListener('click',()=>renderOutlinePage(outlinePage+1));
  outlineInput.addEventListener('change',()=>{
@@ -363,12 +407,12 @@ function findTextSearchMatches(text, query, limit) {
    outlineItems.push({element,level,title});element.dataset.docxOutlineTarget=String(outlineItems.length);element.tabIndex=-1;
   }
   renderOutlinePage(0);
-  document.getElementById('outline-status').textContent=outlineItems.length?`识别到 ${outlineItems.length} 个标题，每页最多100项。`:'此文档没有可识别的标题。';
+  ui(document.getElementById('outline-status'),outlineItems.length?`识别到 ${outlineItems.length} 个标题，每页最多100项。`:'此文档没有可识别的标题。',outlineItems.length?`${outlineItems.length} headings found, up to 100 per page.`:'No recognizable headings in this document.');
  };
  window.addEventListener('pagehide',()=>{
   reportView();viewGeneration++;clearTimeout(viewTimer);window.removeEventListener('scroll',scheduleView,true);window.removeEventListener('blur',reportView);for(const type of ['pointerdown','wheel','keydown'])window.removeEventListener(type,cancelViewRestore,true);
   if(started)report({type:'jot-docx-closed',reason:'pagehide'});cancelSearch();closed=true;batchStarts=[];
-  window.clearTimeout(searchTimer);window.clearTimeout(selectionTimer);clearHighlights();matches=[];clearOutline('目录已关闭');
+  window.clearTimeout(searchTimer);window.clearTimeout(selectionTimer);clearHighlights();matches=[];clearOutline('目录已关闭','Outline closed');
   visualView=undefined;proposal=undefined;focusRange=undefined;regionController=undefined;content.replaceChildren();styles.replaceChildren();
  },{once:true});
  content.addEventListener('click',event=>{if(event.target instanceof Element&&event.target.closest('a'))event.preventDefault();},true);
@@ -379,7 +423,7 @@ function findTextSearchMatches(text, query, limit) {
    ||typeof value.token!=='string'||!/^[a-f0-9-]{36}$/.test(value.token)||Object.keys(value).some(key=>!['type','protocol','token','bytes','focus'].includes(key))
    ||!(value.bytes instanceof ArrayBuffer)||value.bytes.byteLength>32*1024*1024)return;
   started=true;sessionToken=value.token;
-  status.textContent='正在渲染…';
+  ui(status,'正在渲染…','Rendering…');
   try{
    let nodes=0,textUnits=0;
    await window.docx.renderAsync(value.bytes,content,styles,{
@@ -399,14 +443,14 @@ function findTextSearchMatches(text, query, limit) {
    const sections=content.querySelectorAll('section.jot-docx').length;
    visualView=indexVisualText();
    buildOutline();query.disabled=false;
-   regionController=window.JotWordRegion({content,report,isWorking:()=>searchBusy,onCaptureStart:cancelSearch});
-   status.textContent='Word视觉内容';report({type:'jot-docx-ready',sections});
+   regionController=window.JotWordRegion({content,report,notice,isWorking:()=>searchBusy,onCaptureStart:cancelSearch});
+   ui(status,'Word视觉内容','Word visual content');report({type:'jot-docx-ready',sections});
    if(value.focus)restoreFocus(value.focus);
   }catch(error){
    if(closed){content.replaceChildren();styles.replaceChildren();return;}
    window.clearTimeout(searchTimer);window.clearTimeout(selectionTimer);clearHighlights();matches=[];visualView=undefined;proposal=undefined;query.disabled=true;
-   clearOutline('视觉内容未能渲染');
-   content.replaceChildren();styles.replaceChildren();status.textContent='视觉内容未能渲染';
+   clearOutline('视觉内容未能渲染','Visual content could not be rendered');
+   content.replaceChildren();styles.replaceChildren();ui(status,'视觉内容未能渲染','Visual content could not be rendered');
    report({type:'jot-docx-error',code:error instanceof Error&&error.message==='DOCX_VIEW_LIMIT'?'DOCX_VIEW_LIMIT':'DOCX_RENDER_FAILED'});
   }finally{value.bytes=null;}
  });

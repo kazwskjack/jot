@@ -44,6 +44,9 @@ function originalVisualFocus(focus:OfficeTextFocus|undefined,source:FileReferenc
 
 function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{source:FileViewingSource;owner:string;identity:string;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
  const language=useApplicationLanguage(),t=useApplicationText();
+ const currentLanguage=useRef(language);currentLanguage.current=language;
+ const setViewerLanguage=useRef<()=>void>(()=>{});
+ useEffect(()=>{setViewerLanguage.current();},[language]);
  const referenceSource=fileViewingReferenceSource(source);
  const context=useContext(FileTextReferenceContext),currentContext=useRef(context);currentContext.current=context;
  const frame=useRef<HTMLIFrameElement>(null),loaded=useRef<HTMLIFrameElement|null>(null);
@@ -80,10 +83,13 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
   const resetPending=()=>{pending.current=undefined;window.clearTimeout(pendingTimer.current);setCommitting(false);};
   const dispose=()=>{closed=true;controller.abort();bytes=undefined;selected.current=undefined;pending.current=undefined;window.clearTimeout(timeout);window.clearTimeout(pendingTimer.current);window.removeEventListener('message',message);window.document.removeEventListener('securitypolicyviolation',policyViolation);};
   const fail=(text:string)=>{if(!live())return;dispose();setProposal(undefined);setCommitting(false);if(officeTextFocus)setFocused(false);setState({phase:'error',message:text});};
+  setViewerLanguage.current=()=>{
+   if(live()&&sent)target?.contentWindow?.postMessage({type:'jot-docx-language',protocol:1,token,language:currentLanguage.current},viewerOrigin);
+  };
   const send=(element:HTMLIFrameElement)=>{
    if(!live()||sent||!booted||!bytes||!target||element!==target||!target.contentWindow)return;
    sent=true;
-   try{target.contentWindow.postMessage({type:'jot-docx-init',protocol:1,token,bytes,...(focus?{focus}:{})},viewerOrigin,[bytes]);bytes=undefined;}
+   try{target.contentWindow.postMessage({type:'jot-docx-init',protocol:1,token,bytes,...(focus?{focus}:{})},viewerOrigin,[bytes]);bytes=undefined;setViewerLanguage.current();}
    catch{fail('Word查看器未能接收原文件，请重试。');}
   };
   const probe=(element:HTMLIFrameElement)=>{
@@ -147,7 +153,7 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
    if(!live())return;
    bytes=value.buffer as ArrayBuffer;if(target)send(target);
   }).catch(error=>{if(live())fail(error instanceof Error?error.message:'原Word文件读取失败');});
-  return()=>{dispose();regionSession.current=undefined;notify.current=()=>{};commit.current=()=>{};cancel.current=()=>{};};
+  return()=>{dispose();regionSession.current=undefined;setViewerLanguage.current=()=>{};notify.current=()=>{};commit.current=()=>{};cancel.current=()=>{};};
  },[identity,owner,viewerUrl]);
  return <section lang={language} className="jot-docx-preview" aria-label={t('Word视觉内容','Word Visual Content')}>
   <p role={state.phase==='error'?'alert':'status'}>{state.phase==='ready'&&state.sections!==undefined?t(state.message,`Rendered ${state.sections} Word sections, following original file page markers.`):conversationUiError(state.message,language)}

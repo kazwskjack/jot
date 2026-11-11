@@ -12,12 +12,12 @@
   });return engine;
  };
  const sameView=(a,b)=>Math.abs(a.width-b.width)<=1&&Math.abs(a.height-b.height)<=1;
- window.JotWordRegion=({content,report,isWorking=()=>false,onCaptureStart=()=>{}})=>{
+ window.JotWordRegion=({content,report,notice,isWorking=()=>false,onCaptureStart=()=>{}})=>{
   const wrapper=content.querySelector('.jot-docx-wrapper')??content,sections=Array.from(content.querySelectorAll('section.jot-docx'));
   let surface=sections[0];
   const startButton=document.getElementById('region-start'),whole=document.getElementById('region-whole'),cancel=document.getElementById('region-cancel'),status=document.getElementById('region-status');
   const inputs=['x','y','width','height'].map(key=>[key,document.getElementById('region-'+key)]);
-  if(!surface){status.textContent='此文档没有可截图分段。';return {command(value){if(value.type==='jot-docx-region-probe'){report({type:'jot-docx-region-ready',available:false});if(value.focus)report({type:'jot-docx-region-focus',confirmed:false});}}};}
+  if(!surface){notice(status,'此文档没有可截图分段。');return {command(value){if(value.type==='jot-docx-region-probe'){report({type:'jot-docx-region-ready',available:false});if(value.focus)report({type:'jot-docx-region-focus',confirmed:false});}}};}
   const box=document.createElement('div');box.className='jot-word-region-box';box.setAttribute('data-html2canvas-ignore','true');box.hidden=true;surface.append(box);
   let enabled=false,active=false,busy=false,start,selection,serial=0,confirmed;
   const zoom=()=>Number.parseFloat(content.style.zoom)||1;
@@ -34,14 +34,14 @@
   const choose=rect=>{
    const bounds=surface.getBoundingClientRect(),stamp=view(bounds);
    if(!Number.isFinite(stamp.width)||!Number.isFinite(stamp.height)||stamp.width<=0||stamp.height<=0||stamp.width>33554432||stamp.height>33554432
-    ||rect.width*bounds.width<8||rect.height*bounds.height<8){clear();status.textContent='区域边长至少需要8个显示像素，文档尺寸须在当前范围内。';return;}
-   selection={serial:++serial,rect,view:stamp};draw(rect);controls();status.textContent='区域已选中，请在查看器下方确认截图引用。';send();
+    ||rect.width*bounds.width<8||rect.height*bounds.height<8){clear();notice(status,'区域边长至少需要8个显示像素，文档尺寸须在当前范围内。');return;}
+   selection={serial:++serial,rect,view:stamp};draw(rect);controls();notice(status,'区域已选中，请在查看器下方确认截图引用。');send();
   };
   const stop=()=>{
    if(busy){report({type:'jot-docx-capture-cancel',reason:'cancelled'});return;}
-   active=false;wrapper.style.touchAction='';clear();status.textContent='截图区域已取消。';
+   active=false;wrapper.style.touchAction='';clear();notice(status,'截图区域已取消。');
   };
-  startButton.addEventListener('click',()=>{if(!enabled||busy||isWorking())return;active=true;wrapper.style.touchAction='none';window.getSelection()?.removeAllRanges();clear();status.textContent='在Word分段内拖动框选，或选择当前可见分段。';});
+  startButton.addEventListener('click',()=>{if(!enabled||busy||isWorking())return;active=true;wrapper.style.touchAction='none';window.getSelection()?.removeAllRanges();clear();notice(status,'在Word分段内拖动框选，或选择当前可见分段。');});
   whole.addEventListener('click',()=>{
    if(!active||busy||isWorking())return;
    const top=document.getElementById('toolbar').getBoundingClientRect().bottom;
@@ -64,14 +64,14 @@
   wrapper.addEventListener('pointermove',event=>{const rect=drag(event);if(rect)draw(rect);});
   wrapper.addEventListener('pointerup',event=>{if(start&&event.pointerId!==start.pointerId)return;const rect=drag(event);start=undefined;if(wrapper.hasPointerCapture(event.pointerId))wrapper.releasePointerCapture(event.pointerId);if(rect)choose(rect);});
   wrapper.addEventListener('pointercancel',()=>{if(!busy)clear();});
-  const moved=event=>{if(busy||!active||event?.target instanceof Element&&event.target.closest('#region-controls'))return;clear();status.textContent='文档位置已变化，请重新选择区域。';};
+  const moved=event=>{if(busy||!active||event?.target instanceof Element&&event.target.closest('#region-controls'))return;clear();notice(status,'文档位置已变化，请重新选择区域。');};
   window.addEventListener('scroll',moved,true);window.addEventListener('resize',moved);
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&(active||busy)){event.preventDefault();stop();}});
   const capture=async expected=>{
    if(!enabled||busy||!selection||selection.serial!==expected)return;
    if(isWorking()){report({type:'jot-docx-capture-error',reason:'capture_failed'});return;}
    onCaptureStart();
-   const original=selection;busy=true;box.hidden=true;controls();status.textContent='正在生成有界PNG截图…';
+   const original=selection;busy=true;box.hidden=true;controls();notice(status,'正在生成有界PNG截图…');
    const old={zoom:content.style.zoom,width:surface.style.width,minWidth:surface.style.minWidth},replaced=[];let canvas;
    const frozen=Array.from(document.querySelectorAll('#toolbar button,#toolbar input,#outline button,#outline input')).filter(node=>node!==cancel).map(node=>({node,disabled:node.disabled}));
    for(const {node}of frozen)node.disabled=true;
@@ -103,8 +103,8 @@
     }
     nearbyText=nearbyText.replace(/\s+/g,' ').trim().slice(0,1000);
     const bytes=await blob.arrayBuffer();report({type:'jot-docx-capture',capture:{selection:original,width:canvas.width,height:canvas.height,bytes,nearbyText}},[bytes]);
-    status.textContent='PNG已生成，正在交给原草稿上传入口。';
-   }catch(error){status.textContent=error instanceof Error?error.message:'区域截图失败。';report({type:'jot-docx-capture-error',reason:'capture_failed'});}
+    notice(status,'PNG已生成，正在交给原草稿上传入口。');
+   }catch(error){notice(status,error instanceof Error?error.message:'区域截图失败。');report({type:'jot-docx-capture-error',reason:'capture_failed'});}
    finally{
     if(canvas){canvas.width=0;canvas.height=0;}for(const {image,placeholder}of replaced)if(placeholder.isConnected)placeholder.replaceWith(image);
     for(const frame of document.querySelectorAll('iframe.html2canvas-container'))frame.remove();
