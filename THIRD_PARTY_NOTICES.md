@@ -338,3 +338,5 @@ Native member reference snapshots reuse the retained PilotDeck selection schemas
 Native member PDF and retained Office-PDF text/region quote actions reuse Jot’s attributed PilotDeck selection and PNG upload recovery flows. Source-pinned reopening uses the native member read path, with opened-source and derived-PDF receipts retained through drafts and message snapshots.
 
 Native structured Office DOCX/PPTX text and XLSX saved-cell/range references reuse the attributed OfficeContent and OfficeTextReferenceAction flows with signed native opened-source provenance, original matrix/text confirmation and source-specific focus.
+
+Signed native Office openings also reuse the original isolated Word visual text, XLSX native cell-view2 and DOCX/PPTX/XLSX region PNG reference controllers. The viewer receives one private copy of the same verified native bytes; original window/origin/token, commit/focus, bounded matrix/PNG and upload recovery checks apply.

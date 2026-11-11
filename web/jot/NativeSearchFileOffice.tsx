@@ -1,3 +1,7 @@
+import ActivityToolFileDocx from './ActivityToolFileDocx';
+import ActivityToolFileXlsx from './ActivityToolFileXlsx';
+import ActivityToolFilePptx from './ActivityToolFilePptx';
+import type {FileReferenceIdentity,OfficeCellFocus,OfficeTextFocus,OfficeRegionFocus} from './FileTextReferences';
 import React,{useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
 import {readOfficeViewerUrl} from './activity-file-preview-client';
@@ -94,8 +98,12 @@ function OfficeAttempt({kind,bytes}:{kind:Kind;bytes:Uint8Array}){
  </section>;
 }
 
-export default function NativeSearchFileOffice({kind,bytes}:{kind:Kind;bytes:Uint8Array}){
+export default function NativeSearchFileOffice({kind,bytes,source,officeFocus,officeTextFocus,officeRegionFocus}:{kind:Kind;bytes:Uint8Array;source?:FileReferenceIdentity|undefined;officeFocus?:OfficeCellFocus|undefined;officeTextFocus?:OfficeTextFocus|undefined;officeRegionFocus?:OfficeRegionFocus|undefined}){
  const [revision,setRevision]=useState(0);
+ if(source?.native_source){
+  const input={...source,openedBytes:bytes};
+  return kind==='docx'?<ActivityToolFileDocx {...input} officeTextFocus={officeTextFocus} officeRegionFocus={officeRegionFocus}/>:kind==='xlsx'?<ActivityToolFileXlsx {...input} officeFocus={officeFocus} officeRegionFocus={officeRegionFocus}/>:<ActivityToolFilePptx {...input} officeRegionFocus={officeRegionFocus}/>;
+ }
  return <>
   <button type="button" onClick={()=>setRevision(value=>value+1)}>重新打开本次Office视觉内容</button>
   <OfficeAttempt key={JSON.stringify([kind,revision])} kind={kind} bytes={bytes}/>

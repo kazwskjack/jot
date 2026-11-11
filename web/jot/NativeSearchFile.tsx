@@ -1,4 +1,4 @@
-import type {OfficeCellFocus,OfficeTextFocus} from './FileTextReferences';
+import type {OfficeCellFocus,OfficeTextFocus,OfficeRegionFocus} from './FileTextReferences';
 import type {PdfReferenceFocus} from './pdf-file-view-state';
 import type {NativeOfficePrintPin} from './native-office-print-client';
 import {officePreviewFormat} from '../../packages/gateway/src/artifacts/office-preview-format.js';
@@ -15,12 +15,12 @@ const NativeSearchFileOffice=lazy(()=>import('./NativeSearchFileOffice'));
 const NativeSearchFilePdf=lazy(()=>import('./NativeSearchFilePdf'));
 type Opened=NativeMemberOpenedBytes&{downloadUrl:string;imageUrl?:string;text?:string};
 
-export default function NativeSearchFile({source,expected,printPin,focus,officeFocus,officeTextFocus}:{source:NativeMemberPreviewSource;expected?:{openSha:string;proof:string;sha256:string;size:number};printPin?:NativeOfficePrintPin|undefined;focus?:PdfReferenceFocus|undefined;officeFocus?:OfficeCellFocus|undefined;officeTextFocus?:OfficeTextFocus|undefined}){
+export default function NativeSearchFile({source,expected,printPin,focus,officeFocus,officeTextFocus,officeRegionFocus}:{source:NativeMemberPreviewSource;expected?:{openSha:string;proof:string;sha256:string;size:number};printPin?:NativeOfficePrintPin|undefined;focus?:PdfReferenceFocus|undefined;officeFocus?:OfficeCellFocus|undefined;officeTextFocus?:OfficeTextFocus|undefined;officeRegionFocus?:OfficeRegionFocus|undefined}){
  const owner=taskDraftScope(),identity=JSON.stringify([owner,source,expected,printPin]);
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;opened?:Opened;error?:string}>(),[revision,setRevision]=useState(0);
  const openPin=useRef<{identity:string;sha:string;proof?:string}>();
- const [printMode,setPrintMode]=useState(!!printPin),[structured,setStructured]=useState(!!officeFocus||!!officeTextFocus);
+ const [printMode,setPrintMode]=useState(!!printPin),[structured,setStructured]=useState(!!officeFocus&&officeFocus.value.cell_view!==2||officeTextFocus?.value.text_view===1);
  const captureOpen=(sha:string,proof?:string)=>{
   if(taskDraftScope()!==owner||expected&&(sha!==expected.openSha||proof!==expected.proof)||openPin.current?.identity===identity&&(openPin.current.sha!==sha||openPin.current.proof!==undefined&&openPin.current.proof!==proof))return false;
   openPin.current={identity,sha,...(proof?{proof}:{})};return true;
@@ -86,7 +86,7 @@ export default function NativeSearchFile({source,expected,printPin,focus,officeF
      <span>{Math.min(byteOffset+1,opened.size)}–{byteOffset+(bytes?.length??0)} / {opened.size} 字节</span>
      <button type="button" disabled={byteOffset+256>=opened.size} onClick={()=>setByteOffset(byteOffset+256)}>下一页字节</button>
     </nav>
-   </>:office?.native?<ConversationDisplayBoundary key={opened.openSha} label="原生Office预览"><Suspense fallback={<p role="status">正在载入Office查看器…</p>}><NativeSearchFileOffice key={JSON.stringify([opened.openSha,office.kind])} kind={office.kind} bytes={opened.bytes}/></Suspense></ConversationDisplayBoundary>
+   </>:office?.native?<ConversationDisplayBoundary key={opened.openSha} label="原生Office预览"><Suspense fallback={<p role="status">正在载入Office查看器…</p>}><NativeSearchFileOffice key={JSON.stringify([opened.openSha,office.kind])} kind={office.kind} bytes={opened.bytes} source={nativeMemberReferenceSource(source,opened)} officeFocus={officeFocus} officeTextFocus={officeTextFocus} officeRegionFocus={officeRegionFocus}/></Suspense></ConversationDisplayBoundary>
     :opened.imageUrl?<img src={opened.imageUrl} alt={source.member.path} style={{maxWidth:'100%',height:'auto'}} onError={()=>{setRaw(true);setState({identity,opened,error:'浏览器无法显示此图片格式，当前显示原始字节。'});}}/>
     :pdf?<ConversationDisplayBoundary key={opened.openSha} label="原生PDF预览"><Suspense fallback={<p role="status">正在载入PDF查看器…</p>}><NativeSearchFilePdf key={opened.openSha} bytes={opened.bytes} source={nativeMemberReferenceSource(source,opened)} focus={focus}/></Suspense></ConversationDisplayBoundary>
     :text!==undefined?<>

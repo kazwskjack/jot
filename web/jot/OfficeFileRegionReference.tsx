@@ -1,10 +1,9 @@
 import React,{useContext,useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
-import {FileTextReferenceContext,fileRegionCapture,type FileRegionDraft,type OfficeRegionFocus,type OfficeRegionView} from './FileTextReferences';
+import {FileTextReferenceContext,nativeReferenceIdentity,type FileReferenceIdentity,fileRegionCapture,type FileRegionDraft,type OfficeRegionFocus,type OfficeRegionView} from './FileTextReferences';
 import {createImageRegionContentReference,type NormalizedRect} from './vendor/pilotdeck-content-reference';
 import {validateRegionCaptureSource,validateOfficeRegionView,cellRangeCoordinates} from '../../packages/gateway/src/messages/content-reference.js';
 import {readGeneratedPng} from './upload-recovery.mjs';
-import type {ListedFilePreviewSource} from './activity-file-preview-client';
 
 export type OfficeRegionSession={window:Window;origin:string;token:string;live:()=>boolean;close:(message:string)=>void};
 type Region={serial:number;rect:NormalizedRect;view:OfficeRegionView;anchorRange?:string};
@@ -18,29 +17,29 @@ function readRegion(value:unknown,kind:'docx'|'pptx'|'xlsx'):Region|undefined{
   ||Object.values(rect).some(value=>typeof value!=='number'||!Number.isFinite(value)||value<0||value>1)||!rect.width||!rect.height||rect.x+rect.width>1+1e-9||rect.y+rect.height>1+1e-9)return;
  return region;
 }
-function originalFocus(focus:OfficeRegionFocus|undefined,source:ListedFilePreviewSource,owner:string,kind:'docx'|'pptx'|'xlsx'){
+function originalFocus(focus:OfficeRegionFocus|undefined,source:FileReferenceIdentity,owner:string,kind:'docx'|'pptx'|'xlsx'){
  const value=focus?.value;
  if(!value||value.owner!==owner||value.conversationId!==source.conversationId||value.runId!==source.runId||value.activityId!==source.activityId||value.resultSha!==source.resultSha
-  ||value.file.path!==source.file.path||value.file.version!==source.file.version||value.file.sha256!==source.file.sha256||value.file.size!==source.file.size||value.reference.renderer.id!==kind)return;
- const capture={conversationId:value.conversationId,runId:value.runId,activityId:value.activityId,resultSha:value.resultSha,file:value.file,reference:value.reference,imageBytes:value.imageBytes,rotation:value.rotation,region_view:value.region_view};
+  ||value.file.path!==source.file.path||value.file.version!==source.file.version||nativeReferenceIdentity(value.native_source)!==nativeReferenceIdentity(source.native_source)||value.file.sha256!==source.file.sha256||value.file.size!==source.file.size||value.reference.renderer.id!==kind)return;
+ const capture={conversationId:value.conversationId,runId:value.runId,activityId:value.activityId,resultSha:value.resultSha,file:value.file,...(value.native_source?{native_source:value.native_source}:{}),reference:value.reference,imageBytes:value.imageBytes,rotation:value.rotation,region_view:value.region_view};
  try{validateRegionCaptureSource(capture,source.conversationId);}catch{return;}
  return {rect:value.reference.locator.rect,view:value.region_view};
 }
 
-export default function OfficeFileRegionReference({source,owner,session,focus,kind}:{source:ListedFilePreviewSource;owner:string;session:OfficeRegionSession;focus?:OfficeRegionFocus;kind:'docx'|'pptx'|'xlsx'}){
+export default function OfficeFileRegionReference({source,owner,session,focus,kind}:{source:FileReferenceIdentity;owner:string;session:OfficeRegionSession;focus?:OfficeRegionFocus;kind:'docx'|'pptx'|'xlsx'}){
  const label=kind==='docx'?'Word':kind==='pptx'?'幻灯片':'工作表',positionLabel=kind==='docx'?'Word分段':kind==='pptx'?'幻灯片':'工作表视口';
  const context=useContext(FileTextReferenceContext),latest=useRef(context);latest.current=context;
- const identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,focus?.key]);
+ const identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,nativeReferenceIdentity(source.native_source),focus?.key]);
  const [selection,setSelection]=useState<Region>(),selected=useRef<Region|undefined>(undefined),job=useRef<{selection:Region;lease:object;phase:'capture'|'png'|'upload'}|undefined>(undefined);
  const [phase,setPhase]=useState<'idle'|'capture'|'png'|'upload'>('idle'),[notice,setNotice]=useState(''),[ready,setReady]=useState(false),[confirmed,setConfirmed]=useState<boolean>();
  const startCapture=useRef<()=>void>(()=>{});
- const disabled=!context||context.disabled||context.regionDisabled||context.owner!==owner||context.conversationId!==source.conversationId||!context.regionRenderers?.includes(kind);
+ const disabled=!!source.native_source&&!context?.nativeSources?.includes(1)||!context||context.disabled||context.regionDisabled||context.owner!==owner||context.conversationId!==source.conversationId||!context.regionRenderers?.includes(kind);
  const send=(type:string,payload:Record<string,unknown>)=>{if(session.live())session.window.postMessage({type,protocol:1,token:session.token,...payload},session.origin);};
  const release=(lease=job.current?.lease)=>{if(lease&&fileRegionCapture.owner===lease)fileRegionCapture.owner=undefined;};
  useEffect(()=>{send(`jot-${kind}-region-enable`,{enabled:!disabled});},[disabled,session,kind]);
  useEffect(()=>{
   let active=true,timer:number|undefined;
-  const canAdd=()=>{const ctx=latest.current;return active&&session.live()&&taskDraftScope()===owner&&!!ctx&&!ctx.disabled&&!ctx.regionDisabled&&ctx.owner===owner&&ctx.conversationId===source.conversationId&&!!ctx.regionRenderers?.includes(kind);};
+  const canAdd=()=>{const ctx=latest.current;return active&&session.live()&&taskDraftScope()===owner&&!!ctx&&(!source.native_source||!!ctx.nativeSources?.includes(1))&&!ctx.disabled&&!ctx.regionDisabled&&ctx.owner===owner&&ctx.conversationId===source.conversationId&&!!ctx.regionRenderers?.includes(kind);};
   const receive=async(event:MessageEvent)=>{
    if(!active||!session.live()||event.source!==session.window||event.origin!==session.origin)return;
    const value=event.data;if(!value||typeof value!=='object'||Array.isArray(value)||value.protocol!==1||value.token!==session.token||Object.keys(value).length!==4)return;
@@ -67,14 +66,14 @@ export default function OfficeFileRegionReference({source,owner,session,focus,ki
     const name=`${kind}-region-${crypto.randomUUID()}.png`,file=new File([capture.bytes],name,{type:'image/png'}),original=source.file;
     const reference=createImageRegionContentReference({
      selectionMode:'region',
-     source:{relativePath:original.path,fileName:original.path.split('/').at(-1)!,
+     source:{relativePath:original.path,fileName:source.native_source?original.path.split(/[\\/]/).at(-1)!:original.path.split('/').at(-1)!,
       mimeType:kind==='docx'?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':kind==='pptx'?'application/vnd.openxmlformats-officedocument.presentationml.presentation':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      revision:{id:String(original.version),sha256:original.sha256,size:original.size}},
+      revision:{id:source.native_source?.openSha??String(original.version),sha256:original.sha256,size:original.size}},
      renderer:{id:kind,backend:'builtin',locatorQuality:'visual'},
      locator:kind==='docx'?{surface:'document',rect:region.rect}:kind==='pptx'?{surface:'slide',slideNumber:'slideNumber' in region.view?region.view.slideNumber:undefined,rect:region.rect}:{surface:'sheet',sheetId:'sheetId' in region.view?region.view.sheetId:undefined,sheetName:'sheetName' in region.view?region.view.sheetName:undefined,rect:region.rect,...(region.anchorRange!==undefined?{anchorRange:region.anchorRange}:{})},
      image:{name,mimeType:'image/png',...metadata},nearbyText:capture.nearbyText
     });
-    const draft:FileRegionDraft={owner,conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,file:{path:original.path,version:original.version,sha256:original.sha256,size:original.size},reference,imageBytes:file.size,rotation:0,region_view:region.view};
+    const draft:FileRegionDraft={owner,conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,...(source.native_source?{native_source:source.native_source,file:{path:original.path,sha256:original.sha256,size:original.size}}:{file:{path:original.path,version:original.version!,sha256:original.sha256,size:original.size}}),reference,imageBytes:file.size,rotation:0,region_view:region.view};
     current.phase='upload';setPhase('upload');setNotice(`正在保存${label}截图引用…`);
     const accepted=await latest.current!.onAddRegion(draft,file);
     if(active&&session.live()){setNotice(accepted?`${label}截图引用已交给原草稿和上传入口。`:'截图引用尚未接收，请检查当前对话提示。');if(accepted)send(`jot-${kind}-region-clear`,{serial:region.serial});}

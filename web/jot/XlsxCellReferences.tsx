@@ -1,46 +1,45 @@
 import React,{useContext,useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
-import {FileTextReferenceContext,type FileCellReference,type OfficeCellFocus} from './FileTextReferences';
+import {FileTextReferenceContext,nativeReferenceIdentity,type FileReferenceIdentity,type FileCellReference,type OfficeCellFocus} from './FileTextReferences';
 import type {OfficeRegionSession} from './OfficeFileRegionReference';
-import type {ListedFilePreviewSource} from './activity-file-preview-client';
 import {createCellRangeContentReference,type CellRangeSnapshot} from './vendor/pilotdeck-content-reference';
 import {validateCellReferenceSource} from '../../packages/gateway/src/messages/content-reference.js';
 
 type Selection={serial:number;sheetId:string;sheetName:string;ranges:string[];activeRange:string;cells:CellRangeSnapshot[];headers?:string[][];surroundingValues?:string[][]};
 type Proposal={selection:Selection;value:FileCellReference};
-function readProposal(input:unknown,source:ListedFilePreviewSource,owner:string):Proposal{
+function readProposal(input:unknown,source:FileReferenceIdentity,owner:string):Proposal{
  const required=['serial','sheetId','sheetName','ranges','activeRange','cells'],optional=['headers','surroundingValues'];
  if(!input||typeof input!=='object'||Array.isArray(input)||required.some(key=>!Object.hasOwn(input,key))||Object.keys(input).some(key=>!required.includes(key)&&!optional.includes(key))||JSON.stringify(input).length>100000)throw Error('原生选区数据尚未确认。');
  const selection=input as Selection;
  if(!Number.isSafeInteger(selection.serial)||selection.serial<1)throw Error('原生选区序号尚未确认。');
  const file=source.file,reference=createCellRangeContentReference({
-  source:{relativePath:file.path,fileName:file.path.split('/').at(-1)!,mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',revision:{id:String(file.version),sha256:file.sha256,size:file.size}},
+  source:{relativePath:file.path,fileName:source.native_source?file.path.split(/[\\/]/).at(-1)!:file.path.split('/').at(-1)!,mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',revision:{id:source.native_source?.openSha??String(file.version),sha256:file.sha256,size:file.size}},
   renderer:{id:'xlsx',backend:'builtin',locatorQuality:'semantic'},
   locator:{surface:'sheet',sheetId:selection.sheetId,sheetName:selection.sheetName,ranges:selection.ranges,activeRange:selection.activeRange},
   cells:selection.cells,...(selection.headers!==undefined?{headers:selection.headers}:{}),...(selection.surroundingValues!==undefined?{surroundingValues:selection.surroundingValues}:{})
  });
- const value={cell_view:2 as const,conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,file:{path:file.path,version:file.version,sha256:file.sha256,size:file.size},reference};
+ const value={cell_view:2 as const,conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,...(source.native_source?{native_source:source.native_source,file:{path:file.path,sha256:file.sha256,size:file.size}}:{file:{path:file.path,version:file.version!,sha256:file.sha256,size:file.size}}),reference};
  try{validateCellReferenceSource(value,source.conversationId);}catch{throw Error('原生选区尚未通过来源、矩阵或引用长度核对，请缩小选区。');}
  return {selection,value:{...value,owner}};
 }
-function originalFocus(focus:OfficeCellFocus|undefined,source:ListedFilePreviewSource,owner:string){
+function originalFocus(focus:OfficeCellFocus|undefined,source:FileReferenceIdentity,owner:string){
  const value=focus?.value;
  if(!value||value.cell_view!==2||value.owner!==owner||value.conversationId!==source.conversationId||value.runId!==source.runId||value.activityId!==source.activityId||value.resultSha!==source.resultSha
-  ||value.file.path!==source.file.path||value.file.version!==source.file.version||value.file.sha256!==source.file.sha256||value.file.size!==source.file.size)return;
- const snapshot={cell_view:value.cell_view,conversationId:value.conversationId,runId:value.runId,activityId:value.activityId,resultSha:value.resultSha,file:value.file,reference:value.reference};
+  ||value.file.path!==source.file.path||value.file.version!==source.file.version||nativeReferenceIdentity(value.native_source)!==nativeReferenceIdentity(source.native_source)||value.file.sha256!==source.file.sha256||value.file.size!==source.file.size)return;
+ const snapshot={cell_view:value.cell_view,conversationId:value.conversationId,runId:value.runId,activityId:value.activityId,resultSha:value.resultSha,file:value.file,...(value.native_source?{native_source:value.native_source}:{}),reference:value.reference};
  try{validateCellReferenceSource(snapshot,source.conversationId);}catch{return;}
  const reference=value.reference;
  return {sheetId:reference.locator.sheetId,sheetName:reference.locator.sheetName,ranges:reference.locator.ranges,activeRange:reference.locator.activeRange,cells:reference.cells,
   ...(reference.headers!==undefined?{headers:reference.headers}:{}),...(reference.surroundingValues!==undefined?{surroundingValues:reference.surroundingValues}:{})};
 }
 
-export default function XlsxCellReferences({source,owner,session,focus}:{source:ListedFilePreviewSource;owner:string;session:OfficeRegionSession;focus?:OfficeCellFocus}){
+export default function XlsxCellReferences({source,owner,session,focus}:{source:FileReferenceIdentity;owner:string;session:OfficeRegionSession;focus?:OfficeCellFocus}){
  const context=useContext(FileTextReferenceContext),latest=useRef(context);latest.current=context;
- const identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,focus?.key]);
+ const identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,nativeReferenceIdentity(source.native_source),focus?.key]);
  const [proposal,setProposal]=useState<Proposal>(),selected=useRef<Proposal|undefined>(undefined),pending=useRef<Proposal|undefined>(undefined);
  const [ready,setReady]=useState(false),[committing,setCommitting]=useState(false),[notice,setNotice]=useState(''),[confirmed,setConfirmed]=useState<boolean>();
  const timer=useRef<number|undefined>(undefined),commit=useRef<()=>void>(()=>{});
- const disabled=!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId||!context.cellViews?.includes(2);
+ const disabled=!!source.native_source&&!context?.nativeSources?.includes(1)||!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId||!context.cellViews?.includes(2);
  const send=(type:string,payload:Record<string,unknown>)=>{if(session.live())session.window.postMessage({type,protocol:1,token:session.token,...payload},session.origin);};
  const clearPending=()=>{pending.current=undefined;window.clearTimeout(timer.current);setCommitting(false);};
  useEffect(()=>{
@@ -49,7 +48,7 @@ export default function XlsxCellReferences({source,owner,session,focus}:{source:
  },[disabled,session]);
  useEffect(()=>{
   let active=true;
-  const canAdd=()=>{const ctx=latest.current;return active&&session.live()&&taskDraftScope()===owner&&!!ctx&&!ctx.disabled&&ctx.owner===owner&&ctx.conversationId===source.conversationId&&!!ctx.cellViews?.includes(2);};
+  const canAdd=()=>{const ctx=latest.current;return active&&session.live()&&taskDraftScope()===owner&&!!ctx&&(!source.native_source||!!ctx.nativeSources?.includes(1))&&!ctx.disabled&&ctx.owner===owner&&ctx.conversationId===source.conversationId&&!!ctx.cellViews?.includes(2);};
   const receive=(event:MessageEvent)=>{
    if(!active||!session.live()||event.source!==session.window||event.origin!==session.origin)return;
    const value=event.data;if(!value||typeof value!=='object'||Array.isArray(value)||value.protocol!==1||value.token!==session.token||Object.keys(value).length!==4)return;
