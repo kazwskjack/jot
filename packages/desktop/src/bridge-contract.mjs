@@ -52,7 +52,7 @@ export function parseDesktopCommand(channel,value){
   if(typeof value.enabled!=='boolean')fail(code);
   return Object.freeze({channel,payload:Object.freeze({...value})});
  }
- if(channel==='update.cancel'||channel==='update.activate'){
+ if(channel==='update.cancel'||channel==='update.activate'||(channel==='update.download'&&value!==undefined)){
   const code='desktop_update_command_invalid';record(value,code);exactKeys(value,['operation_id'],code);
   if(typeof value.operation_id!=='string'||! /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.operation_id))fail(code);
   return Object.freeze({channel,payload:Object.freeze({operationId:value.operation_id.toLowerCase()})});

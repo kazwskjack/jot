@@ -1,7 +1,7 @@
 // Adapts PilotDeck 783499ff desktopUpdates; AGPL-3.0. Native Jot receipts remain authoritative.
 export const updatePhases=['available','downloading','downloaded','verified','staged','awaiting-activation','activating','active','cancelled','failed','unknown'] as const;
 export type UpdatePhase=typeof updatePhases[number];
-export type DesktopUpdateStatus={enabled:boolean;reason:string|null;phase:UpdatePhase|null;operationId:string|null;checking:boolean|null;actionPending:boolean|null};
+export type DesktopUpdateStatus={enabled:boolean;reason:string|null;phase:UpdatePhase|null;operationId:string|null;checking:boolean|null;actionPending:boolean|null;operationCommands:1|null;activeCommand:'download'|'activate'|null;cancelPending:boolean|null};
 export type DesktopUpdateCheck={available:boolean;operationId:string|null;phase:UpdatePhase|null;version:string;sequence:string;channel:string;platform:string;arch:string};
 export type DesktopUpdatesBridge={getUpdateStatus:()=>Promise<unknown>;checkForUpdate:()=>Promise<unknown>;onUpdateProgress?:(listener:(event:unknown)=>void)=>()=>void};
 const row=(value:unknown):Record<string,unknown>|null=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null;
@@ -16,12 +16,17 @@ export function desktopUpdatesBridge():DesktopUpdatesBridge|null{
 }
 export function desktopUpdateStatus(value:unknown):DesktopUpdateStatus{
  const r=row(value);
- if(!r||!keys(r,['enabled','reason','phase','operationId','checking','actionPending'])||typeof r.enabled!=='boolean'||
+ if(!r||!keys(r,['enabled','reason','phase','operationId','checking','actionPending','operationCommands','activeCommand','cancelPending'])||typeof r.enabled!=='boolean'||
   (r.enabled?r.reason!==null:!code(r.reason))||(r.phase!==null&&!phase(r.phase))||
   (r.operationId!==undefined&&r.operationId!==null&&!uuid(r.operationId))||
-  (r.checking!==undefined&&typeof r.checking!=='boolean')||(r.actionPending!==undefined&&typeof r.actionPending!=='boolean'))throw Error('desktop_update_status_invalid');
+  (r.checking!==undefined&&typeof r.checking!=='boolean')||(r.actionPending!==undefined&&typeof r.actionPending!=='boolean')||
+  (r.operationCommands!==undefined&&r.operationCommands!==1)||(r.activeCommand!==undefined&&r.activeCommand!==null&&r.activeCommand!=='download'&&r.activeCommand!=='activate')||
+  (r.cancelPending!==undefined&&typeof r.cancelPending!=='boolean')||
+  (r.operationCommands===1&&(typeof r.checking!=='boolean'||typeof r.actionPending!=='boolean'||r.activeCommand===undefined||typeof r.cancelPending!=='boolean'||
+   r.actionPending!==(r.activeCommand!==null||r.cancelPending===true)||(r.checking===true&&r.actionPending===true))))throw Error('desktop_update_status_invalid');
  return {enabled:r.enabled,reason:r.reason as string|null,phase:r.phase as UpdatePhase|null,operationId:uuid(r.operationId)?r.operationId:null,
-  checking:typeof r.checking==='boolean'?r.checking:null,actionPending:typeof r.actionPending==='boolean'?r.actionPending:null};
+  checking:typeof r.checking==='boolean'?r.checking:null,actionPending:typeof r.actionPending==='boolean'?r.actionPending:null,operationCommands:r.operationCommands===1?1:null,
+  activeCommand:r.activeCommand==='download'||r.activeCommand==='activate'?r.activeCommand:null,cancelPending:typeof r.cancelPending==='boolean'?r.cancelPending:null};
 }
 export function desktopUpdateCheck(value:unknown):DesktopUpdateCheck{
  const r=row(value);

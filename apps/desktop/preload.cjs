@@ -59,7 +59,7 @@ const bridge=Object.freeze({
  dismissTaskNotification:identity=>invoke('notification.dismiss',identity),
  getUpdateStatus:()=>invoke('update.status'),
  checkForUpdate:()=>invoke('update.check'),
- downloadUpdate:()=>invoke('update.download'),
+ downloadUpdate:operationId=>operationId===undefined?invoke('update.download'):invoke('update.download',{operation_id:operationId}),
  cancelUpdate:operationId=>invoke('update.cancel',{operation_id:operationId}),
  activateUpdate:operationId=>invoke('update.activate',{operation_id:operationId}),
  onUpdateProgress(listener){

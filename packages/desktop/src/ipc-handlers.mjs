@@ -32,9 +32,9 @@ export function registerDesktopIpcHandlers({ipcMain,appOrigin,getWindow,stateSto
    window.webContents.send('desktop:open-task',identity);return true;
   }],
   ['dialog.selectFile',async()=>selectFile()],
-  ['update.status',async()=>updateLifecycle?.status?updateLifecycle.status():Object.freeze({enabled:false,reason:'desktop_update_host_policy_missing',phase:null,checking:false,actionPending:false})],
+  ['update.status',async()=>updateLifecycle?.status?updateLifecycle.status():Object.freeze({enabled:false,reason:'desktop_update_host_policy_missing',phase:null,checking:false,actionPending:false,operationCommands:1,activeCommand:null,cancelPending:false})],
   ['update.check',async()=>requireUpdateMethod('check')()],
-  ['update.download',async()=>requireUpdateMethod('download')()],
+  ['update.download',async(_event,payload)=>requireUpdateMethod('download')(payload)],
   ['update.cancel',async(_event,payload)=>requireUpdateMethod('cancel')(payload)],
   ['update.activate',async(_event,payload)=>requireUpdateMethod('activate')(payload)]
  ]);

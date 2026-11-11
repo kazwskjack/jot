@@ -27,7 +27,7 @@ const projectRoot=resolve(appDirectory,'../..');
 
 function disabledUpdateLifecycle(reason='desktop_update_host_policy_missing'){
  const unavailable=async()=>{throw new Error('desktop_update_unavailable');};
- return Object.freeze({status:async()=>Object.freeze({enabled:false,reason,phase:null,checking:false,actionPending:false}),check:unavailable,download:unavailable,cancel:unavailable,activate:unavailable,
+ return Object.freeze({status:async()=>Object.freeze({enabled:false,reason,phase:null,checking:false,actionPending:false,operationCommands:1,activeCommand:null,cancelPending:false}),check:unavailable,download:unavailable,cancel:unavailable,activate:unavailable,
   onProgress:()=>()=>{},reconcile:async()=>({enabled:false,reason,state:null}),
   prepareStartup:async({restoredStartupNonce}={})=>restoredStartupNonce!==null&&restoredStartupNonce!==undefined?({start:false,operationId:null,enabled:false,
    reason:'desktop_update_restored_startup_contract_unavailable'}):({start:true,operationId:null,enabled:false}),

@@ -86,8 +86,9 @@ function validateReceipt(staged,envelope){
 export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle,downloader,stateStore,platformSignatureVerifier,candidateProbe,hostLifecycle,
  desktopLifecycle,getHealthUrl,exitForHandoff,fetchEnvelope,relaunch,confirmActivation,probeRestoredRelease,getHostProcessContext}={}){
  const currentHostProcessContext=getHostProcessContext??(({releaseRoot})=>({pid:process.pid,execPath:process.execPath,releaseRoot}));
- let checked=null,checking=false,actionPending=0;
+ let checked=null,checking=false,activeAction=null,cancelPending=false;
  const contexts=new Map(),controllers=new Map(),progressListeners=new Set();
+ const commandStatus=()=>({checking,actionPending:activeAction!==null||cancelPending,operationCommands:1,activeCommand:activeAction?.kind??null,cancelPending});
  const emitProgress=(operationId,phase)=>{
   const event=Object.freeze({operation_id:operationId,phase});
   for(const listener of progressListeners)try{listener(event);}catch{}
@@ -145,10 +146,10 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
 
  async function status(){
   const error=configurationError();
-  if(error)return Object.freeze({enabled:false,reason:error,phase:null,checking,actionPending:actionPending>0});
+  if(error)return Object.freeze({enabled:false,reason:error,phase:null,...commandStatus()});
   const state=await stateStore.read();
-  if(!state?.enabled)return Object.freeze({enabled:false,reason:state?.reason??'desktop_update_state_unavailable',phase:state?.state?.operation?.phase??null,checking,actionPending:actionPending>0});
-  return Object.freeze({enabled:true,reason:null,phase:state.state?.operation?.phase??'available',operationId:state.state?.operation?.id??null,checking,actionPending:actionPending>0});
+  if(!state?.enabled)return Object.freeze({enabled:false,reason:state?.reason??'desktop_update_state_unavailable',phase:state?.state?.operation?.phase??null,...commandStatus()});
+  return Object.freeze({enabled:true,reason:null,phase:state.state?.operation?.phase??'available',operationId:state.state?.operation?.id??null,...commandStatus()});
  }
 
  async function prepareStartup({restoredStartupNonce=null}={}){
@@ -341,16 +342,26 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
  }
 
  async function check(){
-  if(checking||actionPending>0)fail('desktop_update_command_pending');
+  if(checking||activeAction!==null||cancelPending)fail('desktop_update_command_pending');
   checking=true;
   try{return await checkCandidate();}finally{checking=false;}
  }
- // A check must not replace a downloading/staged context during another action.
- // Cancellation retains its original ability to interrupt a running download.
- async function updateAction(action,args){
+ // Reserve ownership before the first await. The original operation must stay
+ // fixed through native confirmation, download verification and cancellation.
+ async function updateAction(kind,args){
   if(checking)fail('desktop_update_command_pending');
-  actionPending+=1;
-  try{return await action(args);}finally{actionPending-=1;}
+  if(kind==='download'&&args===undefined&&!checked)fail('desktop_update_check_required');
+  const operationId=args?.operationId??(kind==='download'&&args===undefined?checked?.operationId:null);
+  if(typeof operationId!=='string'||!operationIdPattern.test(operationId))fail('desktop_update_operation_invalid');
+  if(kind==='cancel'){
+   if(cancelPending||activeAction&&(activeAction.kind!=='download'||activeAction.operationId!==operationId))fail('desktop_update_command_pending');
+   cancelPending=true;
+   try{return await cancel({operationId});}finally{cancelPending=false;}
+  }
+  if(activeAction||cancelPending)fail('desktop_update_command_pending');
+  activeAction={kind,operationId};
+  try{return await (kind==='download'?download({operationId}):activate({operationId}));}
+  finally{activeAction=null;}
  }
  async function checkCandidate(){
   assertReady();
@@ -390,9 +401,10 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
   return Object.freeze({available:true,operationId,...safeSummary(envelope)});
  }
 
- async function download(){
+ async function download({operationId:expectedOperationId}={}){
   assertReady();
   if(!checked)fail('desktop_update_check_required');
+  if(expectedOperationId!==checked.operationId)fail('desktop_update_operation_mismatch');
   const context=contexts.get(checked.operationId);
   if(!context)fail('desktop_update_operation_context_unavailable');
   const operationId=context.operationId,envelope=context.envelope,controller=new AbortController();
@@ -496,7 +508,7 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
   if(typeof confirmActivation!=='function')fail('desktop_update_confirmation_unavailable');
   const confirmation=await confirmActivation({version:context.envelope.version,channel:context.envelope.channel,platform:context.envelope.platform,
    arch:context.envelope.arch,signerFingerprints:context.signerFingerprints??[]});
-  if(confirmation!==true){await stateStore.setPhase(operationId,'cancelled');emitProgress(operationId,'cancelled');contexts.delete(operationId);return Object.freeze({declined:true,operationId});}
+  if(confirmation!==true){await stateStore.setPhase(operationId,'cancelled');emitProgress(operationId,'cancelled');contexts.delete(operationId);if(checked?.operationId===operationId)checked=null;return Object.freeze({declined:true,operationId});}
   await stateStore.setPhase(operationId,'activating');
   emitProgress(operationId,'activating');
   if(profileFor(context.envelope)==='desktop-electron'){
@@ -599,6 +611,6 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
   if(typeof listener!=='function')fail('desktop_update_progress_listener_invalid');
   progressListeners.add(listener);return ()=>progressListeners.delete(listener);
  }
- return Object.freeze({status,check,download:()=>updateAction(download),cancel:args=>updateAction(cancel,args),activate:args=>updateAction(activate,args),reconcile,prepareStartup,confirmStartup,confirmRestoredStartup,
+ return Object.freeze({status,check,download:args=>updateAction('download',args),cancel:args=>updateAction('cancel',args),activate:args=>updateAction('activate',args),reconcile,prepareStartup,confirmStartup,confirmRestoredStartup,
   handleRestoredStartupFailure,handleStartupFailure,rollbackPrevious,onProgress});
 }
