@@ -74,6 +74,6 @@ export default function ActivityToolFile(props:ListedFilePreviewSource&{focus?:P
    <button type="button" disabled={textView!==identity} onClick={()=>setTextView(undefined)}>{pdf?t('查看PDF','View PDF'):t('查看图片','View Image')}</button>
    <button type="button" disabled={textView===identity} onClick={()=>setTextView(identity)}>{t('查看正文','View Body')}</button>
   </nav>
-  {textView===identity?<ActivityToolFileText {...props}/>:pdf?<ConversationDisplayBoundary key={identity} label={t('PDF查看器','PDF Viewer')}><Suspense fallback={<p lang={language} role="status">{t('正在载入PDF查看器…','Loading PDF viewer…')}</p>}><div lang="zh-CN"><ActivityToolFilePdf {...props}/></div></Suspense></ConversationDisplayBoundary>:<ActivityToolFileImage {...props}/>}
+  {textView===identity?<ActivityToolFileText {...props}/>:pdf?<ConversationDisplayBoundary key={identity} label={t('PDF查看器','PDF Viewer')}><Suspense fallback={<p lang={language} role="status">{t('正在载入PDF查看器…','Loading PDF viewer…')}</p>}><div lang={language}><ActivityToolFilePdf {...props}/></div></Suspense></ConversationDisplayBoundary>:<ActivityToolFileImage {...props}/>}
  </>;
 }

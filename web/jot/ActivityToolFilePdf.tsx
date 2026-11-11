@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import PdfFileRegionReference from './PdfFileRegionReference';
 import PdfFileTextReferenceAction from './PdfFileTextReferenceAction';
 import {capturePdfView,defaultPdfView,pdfViewIdentity,readPdfView,writePdfView,type PdfViewState,type PdfReferenceFocus} from './pdf-file-view-state';
@@ -20,6 +22,7 @@ const assets=new URL('pdfjs/6.1.200/',new URL(workerUrl,document.baseURI)).href;
 
 export type PdfViewingPrint=Omit<OfficePrintPreview,'proof'>&{proof?:string|undefined;onRetry:()=>void;focus?:PdfReferenceFocus|undefined};
 export default function ActivityToolFilePdf(props:FileViewingSource&{focus?:PdfReferenceFocus|undefined;officePrint?:PdfViewingPrint|undefined}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const {conversationId,runId,activityId,resultSha,file,officePrint}=props,owner=taskDraftScope();
  const identity=pdfViewIdentity(props,owner,officePrint);
  const sourceFocus=officePrint?officePrint.focus:props.focus;
@@ -148,47 +151,48 @@ export default function ActivityToolFilePdf(props:FileViewingSource&{focus?:PdfR
  },[identity]);
  const reportMatches=useCallback((matches:PdfSearchMatch[],selected:string|null)=>{if(document){searchJump.current=selected;setSearchResult({document,matches,selected});}},[document]);
  const activeSearch=searchResult?.document===document?searchResult:undefined;
+ const pageMatches=useMemo(()=>activeSearch?.matches.filter(match=>match.pageNumber===page)??[],[activeSearch?.matches,page]);
  const fullscreen=async()=>{
   try{if(window.document.fullscreenElement===root.current)await window.document.exitFullscreen();else await root.current?.requestFullscreen();}
   catch(error){setActionError(error instanceof Error?error.message:'暂时无法切换全屏');}
  };
- return <section ref={root} tabIndex={-1} className="jot-activity-content" aria-label={officePrint?"原Office固定版本的转换PDF":props.native_source?"原生固定打开PDF":"原列表固定PDF版本"} data-chat-search-scope="" data-desktop-find-surface="pdf" style={{background:'var(--jot-background,white)',overflow:'auto'}} onKeyDown={event=>{
+ return <section lang={language} ref={root} tabIndex={-1} className="jot-activity-content" aria-label={officePrint?t('原Office固定版本的转换PDF','Converted PDF from Original Office Pinned Version'):props.native_source?t('原生固定打开PDF','Native Pinned Opened PDF'):t('原列表固定PDF版本','Original List Pinned PDF Version')} data-chat-search-scope="" data-desktop-find-surface="pdf" style={{background:'var(--jot-background,white)',overflow:'auto'}} onKeyDown={event=>{
    if(document&&!event.defaultPrevented&&!event.nativeEvent.isComposing&&event.keyCode!==229&&(event.ctrlKey||event.metaKey)&&!event.altKey&&event.key.toLowerCase()==='f'){
     event.preventDefault();event.stopPropagation();const input=root.current?.querySelector<HTMLInputElement>('[data-pdf-file-search]');input?.focus();input?.select();
    }
   }}>
-  <h4>{file.path} · 版本 {props.native_source?.openSha??file.version}</h4>
-  {officePrint&&<p role="status">LibreOffice转换PDF · {officePrint.pageCount}页 · 摘要 <code>{officePrint.sha256}</code>。文字引用按近似页定位保存。</p>}
-  {officePrint?.proof&&<details><summary>转换来源证明</summary><code>{officePrint.proof}</code></details>}
+  <h4>{file.path} · {t('版本','Version')} {props.native_source?.openSha??file.version}</h4>
+  {officePrint&&<p role="status">{t('LibreOffice转换PDF','LibreOffice Converted PDF')} · {t(`${officePrint.pageCount}页`,`${officePrint.pageCount} pages`)} · {t('摘要','Digest')} <code>{officePrint.sha256}</code>{t('。文字引用按近似页定位保存。','. Text references are saved with approximate page locations.')}</p>}
+  {officePrint?.proof&&<details><summary>{t('转换来源证明','Conversion Source Proof')}</summary><code>{officePrint.proof}</code></details>}
   {document&&source&&<><PdfFileTextReferenceAction root={root} source={source} rotation={currentView.rotation} printView={printView}/><PdfFileRegionReference root={viewport} source={source} page={page} rotation={currentView.rotation} printView={printView}/></>}
-  {document&&props.native_source&&!source&&<p>此打开内容没有完整引用凭据，可阅读和下载；文字与选区引用暂不可用。</p>}
+  {document&&props.native_source&&!source&&<p>{t('此打开内容没有完整引用凭据，可阅读和下载；文字与选区引用暂不可用。','This opened content has no complete reference credentials. You can read and download it; text and region references are unavailable.')}</p>}
   {!props.native_source&&typeof file.version==='number'&&<ActivityToolFileBytes key={identity} conversationId={conversationId} runId={runId} activityId={activityId} resultSha={resultSha} file={{path:file.path,version:file.version,sha256:file.sha256,size:file.size}}/>}
   {challenge?.identity===identity&&<form onSubmit={event=>{event.preventDefault();challenge.update(password);setPassword('');setChallenge(undefined);}}>
-   <label>PDF密码<input type="password" autoComplete="current-password" value={password} onChange={event=>setPassword(event.target.value)}/></label>
-   <button type="submit">解锁PDF</button>{challenge.invalid&&<p role="alert">密码未匹配，请重试。</p>}
+   <label>{t('PDF密码','PDF Password')}<input type="password" autoComplete="current-password" value={password} onChange={event=>setPassword(event.target.value)}/></label>
+   <button type="submit">{t('解锁PDF','Unlock PDF')}</button>{challenge.invalid&&<p role="alert">{t('密码未匹配，请重试。','The password did not match. Try again.')}</p>}
   </form>}
-  {(!current||!document&&!current.error)&&<p role="status">{officePrint?'正在载入已核对的转换PDF…':'正在核对并载入原PDF…'}</p>}
-  {document&&sourceFocus&&<p role="status">原引用页码 · {sourceFocus.pages.map(value=>value.page).join('、')} {sourceFocus.rotation===undefined?'此引用未记录选区旋转，当前仅定位原页。':''} <button type="button" onClick={()=>locateReference()}>定位原引用</button> {sourceFocus.pages.length>1&&sourceFocus.pages.map(value=><button key={value.page} type="button" onClick={()=>locateReference(value.page)}>定位引用第 {value.page} 页</button>)}</p>}
-  {document&&<nav aria-label="PDF页面控制" data-chat-search-ignore>
-   <label><input type="checkbox" checked={continuous} onChange={event=>change({continuous:event.target.checked,position:0,left:0})}/>连续显示PDF页面</label>
-   <button type="button" disabled={page<=1} onClick={()=>navigate(page-1)}>上一页PDF</button>
-   <label>PDF页码<input type="number" min={1} max={document.numPages} value={page} onChange={event=>{const value=Number(event.target.value);if(Number.isSafeInteger(value))navigate(Math.max(1,Math.min(document.numPages,value)));}}/></label><span> / {document.numPages}</span>
-   <button type="button" disabled={page>=document.numPages} onClick={()=>navigate(page+1)}>下一页PDF</button>
-   <button type="button" onClick={()=>change({zoom:clampZoom(scale.current-0.25)})}>缩小PDF</button>
-   <button type="button" onClick={()=>change({zoom:clampZoom(scale.current+0.25)})}>放大PDF</button>
-   <button type="button" onClick={()=>change({zoom:'width'})}>适合宽度</button>
-   <button type="button" onClick={()=>change({zoom:'page'})}>适合整页</button>
-   <label>PDF缩放百分比<input type="number" min={10} max={400} value={typeof currentView.zoom==='number'?Math.round(currentView.zoom*100):''} placeholder="自动" onChange={event=>{const value=Number(event.target.value);if(Number.isFinite(value)&&value>0)change({zoom:clampZoom(value/100)});}}/></label>
-   <button type="button" onClick={()=>change({rotation:(currentView.rotation+270)%360})}>逆时针旋转</button>
-   <button type="button" onClick={()=>change({rotation:(currentView.rotation+90)%360})}>顺时针旋转</button>
-   <button type="button" onClick={()=>void fullscreen()}>切换PDF全屏</button>
+  {(!current||!document&&!current.error)&&<p role="status">{officePrint?t('正在载入已核对的转换PDF…','Loading verified converted PDF…'):t('正在核对并载入原PDF…','Verifying and loading original PDF…')}</p>}
+  {document&&sourceFocus&&<p role="status">{t('原引用页码','Original Reference Pages')} · {sourceFocus.pages.map(value=>value.page).join('、')} {sourceFocus.rotation===undefined?t('此引用未记录选区旋转，当前仅定位原页。','This reference has no saved selection rotation. Only the original page is located.'):''} <button type="button" onClick={()=>locateReference()}>{t('定位原引用','Locate Original Reference')}</button> {sourceFocus.pages.length>1&&sourceFocus.pages.map(value=><button key={value.page} type="button" onClick={()=>locateReference(value.page)}>{t(`定位引用第 ${value.page} 页`,`Locate Reference Page ${value.page}`)}</button>)}</p>}
+  {document&&<nav aria-label={t("PDF页面控制","PDF Page Controls")} data-chat-search-ignore>
+   <label><input type="checkbox" checked={continuous} onChange={event=>change({continuous:event.target.checked,position:0,left:0})}/>{t('连续显示PDF页面','Show PDF Pages Continuously')}</label>
+   <button type="button" disabled={page<=1} onClick={()=>navigate(page-1)}>{t('上一页PDF','Previous PDF Page')}</button>
+   <label>{t('PDF页码','PDF Page Number')}<input type="number" min={1} max={document.numPages} value={page} onChange={event=>{const value=Number(event.target.value);if(Number.isSafeInteger(value))navigate(Math.max(1,Math.min(document.numPages,value)));}}/></label><span> / {document.numPages}</span>
+   <button type="button" disabled={page>=document.numPages} onClick={()=>navigate(page+1)}>{t('下一页PDF','Next PDF Page')}</button>
+   <button type="button" onClick={()=>change({zoom:clampZoom(scale.current-0.25)})}>{t('缩小PDF','Zoom Out PDF')}</button>
+   <button type="button" onClick={()=>change({zoom:clampZoom(scale.current+0.25)})}>{t('放大PDF','Zoom In PDF')}</button>
+   <button type="button" onClick={()=>change({zoom:'width'})}>{t('适合宽度','Fit Width')}</button>
+   <button type="button" onClick={()=>change({zoom:'page'})}>{t('适合整页','Fit Page')}</button>
+   <label>{t('PDF缩放百分比','PDF Zoom Percentage')}<input type="number" min={10} max={400} value={typeof currentView.zoom==='number'?Math.round(currentView.zoom*100):''} placeholder={t("自动","Auto")} onChange={event=>{const value=Number(event.target.value);if(Number.isFinite(value)&&value>0)change({zoom:clampZoom(value/100)});}}/></label>
+   <button type="button" onClick={()=>change({rotation:(currentView.rotation+270)%360})}>{t('逆时针旋转','Rotate Counterclockwise')}</button>
+   <button type="button" onClick={()=>change({rotation:(currentView.rotation+90)%360})}>{t('顺时针旋转','Rotate Clockwise')}</button>
+   <button type="button" onClick={()=>void fullscreen()}>{t('切换PDF全屏','Toggle PDF Fullscreen')}</button>
   </nav>}
-  {document&&<details><summary>PDF缩略图</summary><PdfFileThumbnails key={identity+revision} document={document} page={page} rotation={currentView.rotation} onNavigate={navigate}/></details>}
+  {document&&<details><summary>{t('PDF缩略图','PDF Thumbnails')}</summary><PdfFileThumbnails key={identity+revision} document={document} page={page} rotation={currentView.rotation} onNavigate={navigate}/></details>}
   {document&&<PdfFileNavigation key={identity+revision} document={document} page={page} onNavigate={navigate} onMatches={reportMatches}/>}
   <div ref={viewport} style={{width:'100%',minWidth:0,overflow:'auto',maxHeight:'80vh'}}>
-   {document&&continuous?<PdfFilePages key={identity+revision} document={document} root={viewport} page={page} navigationRevision={navigationRevision} zoom={currentView.zoom} rotation={currentView.rotation} width={width} onScale={reportScale} onReady={restoreView} onVisiblePage={reportVisiblePage} matches={activeSearch?.matches??[]} selected={activeSearch?.selected??null} referencePages={referencePages}/>:document&&<PdfFilePage key={JSON.stringify([identity,revision,page,currentView.zoom,currentView.rotation,width])} document={document} pageNumber={page} zoom={currentView.zoom} rotation={currentView.rotation} width={width} onScale={reportScale} onReady={restoreView} matches={activeSearch?.matches.filter(match=>match.pageNumber===page)??[]} selected={activeSearch?.selected??null} referenceRect={referencePages?.find(target=>target.page===page)?.rect}/>}
+   {document&&continuous?<PdfFilePages key={identity+revision} document={document} root={viewport} page={page} navigationRevision={navigationRevision} zoom={currentView.zoom} rotation={currentView.rotation} width={width} onScale={reportScale} onReady={restoreView} onVisiblePage={reportVisiblePage} matches={activeSearch?.matches??[]} selected={activeSearch?.selected??null} referencePages={referencePages}/>:document&&<PdfFilePage key={JSON.stringify([identity,revision,page,currentView.zoom,currentView.rotation,width])} document={document} pageNumber={page} zoom={currentView.zoom} rotation={currentView.rotation} width={width} onScale={reportScale} onReady={restoreView} matches={pageMatches} selected={activeSearch?.selected??null} referenceRect={referencePages?.find(target=>target.page===page)?.rect}/>}
   </div>
-  {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>officePrint?officePrint.onRetry():setRevision(value=>value+1)}>重试PDF</button></p>}
-  {actionError&&<p role="alert">{actionError}</p>}
+  {current?.error&&<p role="alert">{conversationUiError(current.error,language)} <button type="button" onClick={()=>officePrint?officePrint.onRetry():setRevision(value=>value+1)}>{t('重试PDF','Retry PDF')}</button></p>}
+  {actionError&&<p role="alert">{conversationUiError(actionError,language)}</p>}
  </section>;
 }

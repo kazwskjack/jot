@@ -1,6 +1,16 @@
 // Fixed owned conversation UI failures; unknown/raw content stays unchanged.
 import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
 const english:Record<string,string>={
+ "转换PDF大小与来源结果不一致。": "The converted PDF size differs from the source result.",
+ "转换PDF摘要与来源结果不一致。": "The converted PDF digest differs from the source result.",
+ "转换PDF页数与已核对结果不一致。": "The converted PDF page count differs from the verified result.",
+ "此固定PDF的原引用位置未能核对，请核对引用页码和选区信息。": "The original reference location in this pinned PDF could not be verified. Check the reference pages and region.",
+ "此页不属于原引用，请核对引用页码。": "This page is not part of the original reference. Check the reference pages.",
+ "暂时无法切换全屏": "Fullscreen cannot currently be switched.",
+ "PDF页面尺寸无效": "The PDF page dimensions are invalid.",
+ "PDF页面绘制失败": "PDF page rendering failed.",
+ "PDF目录读取失败": "Reading the PDF outline failed.",
+ "PDF全文搜索失败": "PDF full-text search failed.",
  "原列表文件版本或正文分页尚未确认": "The original list file version or body page is unconfirmed.",
  "该原快照版本的已固定源文件暂不可用。": "The pinned source file for this original snapshot version is unavailable.",
  "此固定版本的原文件内容暂不可用。": "Original file content for this pinned version is unavailable.",

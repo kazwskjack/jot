@@ -1,3 +1,4 @@
+import {useApplicationLanguage,useApplicationText} from '../application-language';
 // Adapted from PilotDeck revision 783499ffdb2d501bf590b2e035acd027a882df10.
 // Original source ui/src/components/code-editor/view/subcomponents/PdfDocumentPreview.tsx, PdfThumbnail.
 // Upstream GNU Affero General Public License v3.0 terms apply.
@@ -7,6 +8,7 @@ import React,{useEffect,useRef,useState,type RefObject} from 'react';
 import type {PDFDocumentProxy,PDFPageProxy,RenderTask} from 'pdfjs-dist';
 
 export default function PdfThumbnail({document,pageNumber,rotation,active,navigationRoot,onSelect}:{document:PDFDocumentProxy;pageNumber:number;rotation:number;active:boolean;navigationRoot:RefObject<HTMLDivElement|null>;onSelect:(page:number)=>void}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const button=useRef<HTMLButtonElement>(null),canvas=useRef<HTMLCanvasElement>(null);
  const [visible,setVisible]=useState(false),[error,setError]=useState(false),[revision,setRevision]=useState(0);
  useEffect(()=>{
@@ -35,11 +37,11 @@ export default function PdfThumbnail({document,pageNumber,rotation,active,naviga
    void Promise.resolve(render?.promise).catch(()=>{}).then(()=>{try{page?.cleanup();}catch{}});
   };
  },[document,pageNumber,rotation,visible,revision]);
- return <div style={{height:160,boxSizing:'border-box',padding:4}}>
-  <button ref={button} type="button" aria-label={`查看PDF第 ${pageNumber} 页`} aria-current={active?'page':undefined} onClick={()=>onSelect(pageNumber)} style={{display:'block',width:'100%',height:error?128:152,border:active?'2px solid currentColor':undefined}}>
-   <span style={{display:'flex',alignItems:'center',justifyContent:'center',height:124}}><canvas ref={canvas} aria-hidden="true" style={{display:error?'none':'block'}}/>{error&&<span>缩略图暂不可用</span>}</span>
-   <span>第 {pageNumber} 页</span>
+ return <div lang={language} style={{height:160,boxSizing:'border-box',padding:4}}>
+  <button ref={button} type="button" aria-label={t(`查看PDF第 ${pageNumber} 页`,`View PDF Page ${pageNumber}`)} aria-current={active?'page':undefined} onClick={()=>onSelect(pageNumber)} style={{display:'block',width:'100%',height:error?128:152,border:active?'2px solid currentColor':undefined}}>
+   <span style={{display:'flex',alignItems:'center',justifyContent:'center',height:124}}><canvas ref={canvas} aria-hidden="true" style={{display:error?'none':'block'}}/>{error&&<span>{t('缩略图暂不可用','Thumbnail Unavailable')}</span>}</span>
+   <span>{t(`第 ${pageNumber} 页`,`Page ${pageNumber}`)}</span>
   </button>
-  {error&&<button type="button" onClick={()=>setRevision(value=>value+1)} aria-label={`重试PDF第 ${pageNumber} 页缩略图`}>重试缩略图</button>}
+  {error&&<button type="button" onClick={()=>setRevision(value=>value+1)} aria-label={t(`重试PDF第 ${pageNumber} 页缩略图`,`Retry Thumbnail for PDF Page ${pageNumber}`)}>{t('重试缩略图','Retry Thumbnail')}</button>}
  </div>;
 }
