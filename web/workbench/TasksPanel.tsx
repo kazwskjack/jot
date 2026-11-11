@@ -232,7 +232,7 @@ function OccurrencePanel({task,agents,replyEnabled,replyExecution,notificationsE
    {run.data?.run_id===selected.run_id&&<><dl><dt>{message('运行状态')}</dt><dd>{states[run.data!.status]?message(states[run.data!.status]):run.data!.status}</dd><dt>{message('创建时间')}</dt><dd>{run.data!.created_at}</dd><dt>{message('更新时间')}</dt><dd>{run.data!.updated_at}</dd></dl>
     <TaskRunControls key={selected.run_id} run={run.data!} expectedRunId={selected.run_id!} enabled={resumeEnabled&&!run.error&&!resource.error} loading={run.loading||resource.loading} onRefresh={()=>{run.reload();resource.reload();}} onResumed={()=>{setNotice('恢复请求已接收；继续沿用本次执行的进度和额度。');resource.reload();run.reload();}}/>
    </>}
-   {publication&&<div lang="zh-CN"><WorkPublicationPanel key={`${publication.taskId}:${publication.runId}`} {...publication} onBusy={publicationPending}/></div>}
+   {publication&&<WorkPublicationPanel key={`${publication.taskId}:${publication.runId}`} {...publication} onBusy={publicationPending}/>}
    <TaskMembersPanel key={selected.occurrence_id} task={task} agents={agents} occurrence={selected} run={run.data?.run_id===selected.run_id?run.data:null} enabled={membersEnabled&&!resource.error&&!run.error}/>
    {Boolean(selected.evidence)&&<><h4>{message('检查证据')}</h4><pre>{JSON.stringify(selected.evidence,null,2)}</pre></>}
   </div>}
