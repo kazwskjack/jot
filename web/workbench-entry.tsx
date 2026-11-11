@@ -1,3 +1,5 @@
+import {useDesktopCommands,type DesktopUiCommand} from './jot/useDesktopCommands';
+import {useLayoutDisplayPreferences} from './jot/useToolDisplayPreference';
 import {request,subscribeTaskDraftScope,taskDraftScope} from './jot/client';
 import {readWorkbenchRoute,writeWorkbenchRoute} from './jot/workbench-route-state';
 import {recordUiDiagnostic,registerUiDiagnostics} from './jot/ui-diagnostics';
@@ -27,6 +29,8 @@ function WorkbenchApplication(){
  return <WorkbenchSession key={owner} owner={owner}/>;
 }
 function WorkbenchSession({owner}:{owner:string}){
+ const surface=useRef<HTMLDivElement>(null),layoutDisplay=useLayoutDisplayPreferences();
+ const [desktopFocus,setDesktopFocus]=useState<{owner:string;command:DesktopUiCommand;route:string;workspace?:string}>(),[desktopError,setDesktopError]=useState('');
  const [initial]=useState(()=>{
   const saved=readWorkbenchRoute(owner,workbenchViews)??{view:'agents',conversation:'',showConversations:false};
   try{const retryView=sessionStorage.getItem(workbenchRetryViewSlot);if(retryView){sessionStorage.removeItem(workbenchRetryViewSlot);if(workbenchViews.includes(retryView))return {view:retryView,conversation:'',showConversations:false};}}catch{}
@@ -60,6 +64,72 @@ function WorkbenchSession({owner}:{owner:string}){
   setTaskSource(null);setConversation('');setShowConversations(false);setView('persistent-tasks');
  },[desktopOpenTask,managementPending]);
  useEffect(()=>{document.documentElement.dataset.theme=theme;try{localStorage.setItem('jot-theme',theme);}catch{}},[theme]);
-  return <div className="workbench-application"><header><a href="/">Jot</a><strong>工作台</strong><button disabled={!!conversation||managementPending} onClick={()=>setShowConversations(value=>!value)}>{showConversations?'返回工作台':'我的对话'}</button><button onClick={()=>setTheme(theme==='dark'?'light':'dark')}>{theme==='dark'?'浅色':'深色'}</button></header>{reloadError&&<p role="alert">{reloadError}</p>}{conversation?<RoleConversation onReload={reloadConversation} ordinary={showConversations} onTaskSource={source=>{setTaskSource(source);setConversation('');setShowConversations(false);setView('persistent-tasks');}} id={conversation} onForkConversation={target=>setConversation(target)} onClose={()=>setConversation('')}/>:showConversations?<ConversationPicker onOpen={setConversation} onPendingChange={setManagementPending}/>:<Workbench onPendingChange={setManagementPending} taskSource={taskSource} onTaskSourceConsumed={()=>setTaskSource(null)} desktopOpenTask={managementPending?null:desktopOpenTask} onDesktopOpenTaskConsumed={consumeDesktopOpenTask} view={view} onOpen={setView} onConversation={setConversation}/>}</div>;
+ const visible=(node:HTMLElement|null):node is HTMLElement=>!!node&&!node.closest('[hidden],[inert],[aria-hidden="true"]')&&node.getClientRects().length>0&&getComputedStyle(node).visibility!=='hidden'&&!(node instanceof HTMLButtonElement||node instanceof HTMLInputElement||node instanceof HTMLSelectElement?node.disabled:false);
+ const target=(command:string)=>{const node=surface.current?.querySelector<HTMLElement>(`[data-desktop-target="${command}"]`)??null;return visible(node)?node:null;};
+ const findTarget=()=>{
+  const active=document.activeElement;if(active instanceof HTMLIFrameElement)return null;
+  const context=active instanceof Element?active.closest<HTMLElement>('[data-chat-search-scope]'):null;
+  const scope=context&&surface.current?.contains(context)?context:surface.current?.querySelector<HTMLElement>('[data-chat-search-scope]');
+  if(!scope)return null;
+  const node=scope.dataset.desktopFindSurface==='pdf'?scope.querySelector<HTMLInputElement>('[data-pdf-file-search]')
+   :Array.from(scope.querySelectorAll<HTMLElement>('[data-desktop-target="find"]')).find(node=>node.closest('[data-chat-search-scope]')===scope)??null;
+  return visible(node??null)?node:null;
+ };
+ const canNavigate=()=>{
+  const current=reloadRoute.current;
+  if(taskDraftScope()!==owner||current.managementPending||current.taskSource||current.desktopOpenTask)return false;
+  if(!current.conversation)return true;
+  const guard=surface.current?.querySelector<HTMLButtonElement>('button[data-desktop-navigation-guard]');return !!guard&&!guard.disabled&&guard.dataset.desktopConversation===current.conversation&&guard.dataset.desktopOwner===owner;
+ };
+ const filesContext=()=>surface.current?.querySelector<HTMLElement>('[data-desktop-workbench][data-desktop-files-ready="true"]');
+ const commandEnabled=(command:DesktopUiCommand)=>{
+  if(command==='find')return !!findTarget();
+  if(command==='toggle-sidebar'||command==='skills'||command==='check-updates')return !!target(command);
+  if(command==='files')return canNavigate()&&Boolean(filesContext()?.dataset.desktopWorkspace);
+  return canNavigate();
+ };
+ const executeDesktop=(command:DesktopUiCommand)=>{
+  if(taskDraftScope()!==owner||!commandEnabled(command))return;setDesktopError('');
+  if(command==='toggle-sidebar'){layoutDisplay.setPreference('sidebarVisible',!layoutDisplay.value.sidebarVisible);return;}
+  if(command==='find'){const node=findTarget();node?.click();node?.focus();if(node instanceof HTMLInputElement)node.select();return;}
+  if(command==='skills'||command==='check-updates'){const node=target(command);node?.scrollIntoView({block:'nearest'});node?.focus();if(command==='check-updates')node?.click();return;}
+  const route=command==='new-conversation'||command==='chat'?'conversations':command==='new-project'?'projects':command==='files'?'shared-workspace':command==='scheduled-tasks'?'persistent-tasks':'settings';
+  const workspace=command==='files'?filesContext()?.dataset.desktopWorkspace:undefined;
+  setConversation('');setShowConversations(route==='conversations');if(route!=='conversations')setView(route);
+  setDesktopFocus({owner,command,route,...(workspace?{workspace}:{})});
+ };
+ useEffect(()=>{
+  if(!desktopFocus)return;
+  const request=desktopFocus,current=reloadRoute.current;let done=false;
+  const correctRoute=()=>taskDraftScope()===request.owner&&!reloadRoute.current.conversation&&(request.route==='conversations'?reloadRoute.current.showConversations:!reloadRoute.current.showConversations&&reloadRoute.current.view===request.route);
+  const finish=()=>{done=true;setDesktopFocus(value=>value===request?undefined:value);};
+  if(!correctRoute()||current.managementPending||current.taskSource||current.desktopOpenTask){finish();return;}
+  let disposed=false,frame=0,openedProject=false;
+  const cancel=()=>{if(disposed||done)return;setDesktopError('桌面命令的原入口尚未就绪，可从当前页面继续。');finish();};
+  const apply=()=>{
+   frame=0;if(disposed||done)return;
+   if(!correctRoute()||!canNavigate()){finish();return;}
+   let node:HTMLElement|null=null;
+   if(request.command==='new-project'){
+    node=target('new-project-input');
+    if(!node){const action=target('new-project');if(action&&!openedProject){openedProject=true;action.click();}return;}
+   }else if(request.command==='new-conversation')node=target('new-conversation');
+   else if(request.command==='chat')node=target('chat');
+   else if(request.command==='settings')node=target('settings');
+   else if(request.command==='files'){
+    node=target('files');if(node&&node.dataset.desktopWorkspace!==request.workspace){cancel();return;}
+    if(node)node.click();
+   }else node=surface.current?.querySelector<HTMLElement>(`[data-desktop-route="${request.route}"]`)??null;
+   if(!visible(node))return;
+   node.scrollIntoView({block:'nearest'});node.focus();if(node instanceof HTMLInputElement)node.select();finish();
+  };
+  const schedule=()=>{if(!done&&!frame)frame=requestAnimationFrame(apply);};
+  const observer=new MutationObserver(schedule),root=surface.current;
+  if(root)observer.observe(root,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled','hidden','data-desktop-workspace']});
+  const timer=setTimeout(cancel,15000);schedule();
+  return()=>{disposed=true;cancelAnimationFrame(frame);clearTimeout(timer);observer.disconnect();};
+ },[desktopFocus,owner,view,conversation,showConversations,managementPending,taskSource,desktopOpenTask]);
+ useDesktopCommands({owner,sidebarVisible:layoutDisplay.value.sidebarVisible,enabled:commandEnabled,execute:executeDesktop});
+  return <div ref={surface} className="workbench-application"><header><a href="/">Jot</a><strong>工作台</strong><button disabled={!!conversation||managementPending} onClick={()=>setShowConversations(value=>!value)}>{showConversations?'返回工作台':'我的对话'}</button><button onClick={()=>setTheme(theme==='dark'?'light':'dark')}>{theme==='dark'?'浅色':'深色'}</button></header>{reloadError&&<p role="alert">{reloadError}</p>}{desktopError&&<p role="status">{desktopError}</p>}{conversation?<RoleConversation onReload={reloadConversation} ordinary={showConversations} onTaskSource={source=>{setTaskSource(source);setConversation('');setShowConversations(false);setView('persistent-tasks');}} id={conversation} onForkConversation={target=>setConversation(target)} onClose={()=>setConversation('')}/>:showConversations?<ConversationPicker onOpen={setConversation} onPendingChange={setManagementPending}/>:<Workbench onPendingChange={setManagementPending} taskSource={taskSource} onTaskSourceConsumed={()=>setTaskSource(null)} desktopOpenTask={managementPending?null:desktopOpenTask} onDesktopOpenTaskConsumed={consumeDesktopOpenTask} view={view} onOpen={setView} onConversation={setConversation}/>}</div>;
 }
 createRoot(document.getElementById('root')!).render(<WorkbenchApplication/>);

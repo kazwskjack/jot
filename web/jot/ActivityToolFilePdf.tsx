@@ -152,7 +152,7 @@ export default function ActivityToolFilePdf(props:FileViewingSource&{focus?:PdfR
   try{if(window.document.fullscreenElement===root.current)await window.document.exitFullscreen();else await root.current?.requestFullscreen();}
   catch(error){setActionError(error instanceof Error?error.message:'暂时无法切换全屏');}
  };
- return <section ref={root} tabIndex={-1} className="jot-activity-content" aria-label={officePrint?"原Office固定版本的转换PDF":props.native_source?"原生固定打开PDF":"原列表固定PDF版本"} data-chat-search-scope="" style={{background:'var(--jot-background,white)',overflow:'auto'}} onKeyDown={event=>{
+ return <section ref={root} tabIndex={-1} className="jot-activity-content" aria-label={officePrint?"原Office固定版本的转换PDF":props.native_source?"原生固定打开PDF":"原列表固定PDF版本"} data-chat-search-scope="" data-desktop-find-surface="pdf" style={{background:'var(--jot-background,white)',overflow:'auto'}} onKeyDown={event=>{
    if(document&&!event.defaultPrevented&&!event.nativeEvent.isComposing&&event.keyCode!==229&&(event.ctrlKey||event.metaKey)&&!event.altKey&&event.key.toLowerCase()==='f'){
     event.preventDefault();event.stopPropagation();const input=root.current?.querySelector<HTMLInputElement>('[data-pdf-file-search]');input?.focus();input?.select();
    }

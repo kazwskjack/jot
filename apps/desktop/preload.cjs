@@ -30,8 +30,20 @@ ipcRenderer.on('desktop:update-progress',(_event,value)=>{
  const safe=Object.freeze({operation_id:value.operation_id.toLowerCase(),phase:value.phase});
  for(const listener of updateProgressListeners)try{listener(safe);}catch{}
 });
+const menuCommands=new Set(['new-conversation','new-project','settings','check-updates','find','toggle-sidebar','chat','files','skills','scheduled-tasks']);
+const commandListeners=new Set();
+// Transient UI commands are never replayed into a later document/account.
+ipcRenderer.on('desktop:command',(_event,value)=>{
+ if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='command,owner_scope,protocol'
+  ||value.protocol!==1||!menuCommands.has(value.command)||typeof value.owner_scope!=='string'||!/^[a-f0-9]{64}$/.test(value.owner_scope))return;
+ const safe=Object.freeze({protocol:1,command:value.command,owner_scope:value.owner_scope});
+ for(const listener of commandListeners)try{listener(safe);}catch{}
+});
 const invoke=(channel,payload)=>ipcRenderer.invoke(channel,payload);
 const bridge=Object.freeze({
+ platform:process.platform,
+ setMenuState:value=>invoke('menu.state.set',value),
+ onCommand(listener){if(typeof listener!=='function')throw TypeError('desktop_listener_invalid');commandListeners.add(listener);return()=>commandListeners.delete(listener);},
  selectFile:()=>invoke('dialog.selectFile'),
  readNotificationState:()=>invoke('notification.state.read'),
  initializeNotificationState:startedAt=>invoke('notification.state.initialize',{started_at:startedAt}),

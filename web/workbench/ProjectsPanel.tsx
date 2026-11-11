@@ -104,7 +104,7 @@ export default function ProjectsPanel(){
   else if(!mutation.pending)pendingRetryFocus.current=false;
  },[error,mutation.pending,retry]);
  return <div>
-  <div className="wb-toolbar"><div><h2>项目</h2><p>管理对话所属项目。</p></div><button ref={createAction} type="button" disabled={mutation.pending||lifecycleMutation.pending} onClick={()=>{composing.current=false;returnTarget.current={kind:'create'};pendingFocus.current=false;conflictReloadStarted.current=false;setConflict(null);setCreating(true);setRenaming(null);setError('');}}>创建项目</button></div>
+  <div className="wb-toolbar"><div><h2>项目</h2><p>管理对话所属项目。</p></div><button ref={createAction} type="button" data-desktop-target="new-project" disabled={mutation.pending||lifecycleMutation.pending} onClick={()=>{composing.current=false;returnTarget.current={kind:'create'};pendingFocus.current=false;conflictReloadStarted.current=false;setConflict(null);setCreating(true);setRenaming(null);setError('');}}>创建项目</button></div>
   {recovery.error&&<p className="wb-error" role="alert">{recovery.error}</p>}
   {lifecycleNotice&&<p role="status">{lifecycleNotice}</p>}
   {lifecycleError&&<p className="wb-error" role="alert">{lifecycleError}</p>}
@@ -115,7 +115,7 @@ export default function ProjectsPanel(){
    <div className="wb-actions"><button autoFocus type="submit" disabled={mutation.pending||!recovery.store}>确认{lifecycleLabels[review.action]}项目</button><button type="button" onClick={()=>setReview(null)}>取消项目操作</button></div>
   </form>}
   {creating&&<form className="wb-form" aria-label="创建项目" onSubmit={create} onKeyDown={preventImeSubmit}>
-   <label>新项目名称<input autoFocus required maxLength={100} value={newTitle} disabled={mutation.pending||lifecycleMutation.pending} onChange={event=>setNewTitle(event.target.value)} onCompositionStart={()=>{composing.current=true;}} onCompositionEnd={()=>{composing.current=false;}}/></label>
+   <label>新项目名称<input data-desktop-target="new-project-input" autoFocus required maxLength={100} value={newTitle} disabled={mutation.pending||lifecycleMutation.pending} onChange={event=>setNewTitle(event.target.value)} onCompositionStart={()=>{composing.current=true;}} onCompositionEnd={()=>{composing.current=false;}}/></label>
    <div className="wb-actions"><button className="wb-primary" type="submit" disabled={mutation.pending||!newTitle.trim()}>{mutation.pending?'正在保存…':'保存项目'}</button><button type="button" disabled={mutation.pending||lifecycleMutation.pending} onClick={()=>setCreating(false)}>取消</button></div>
   </form>}
   <ResourceStatus {...resource} onRetry={resource.reload} label="项目"/>

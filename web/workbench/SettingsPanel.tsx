@@ -184,7 +184,7 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
  },[beginMutation,client,endMutation,onboarding,onboardingEnabled]);
 
  return <>
-  <h2>模型、凭据与安装设置</h2>
+  <h2 data-desktop-target="settings" tabIndex={-1}>模型、凭据与安装设置</h2>
   <p className="wb-page-intro">查看模型目录、宿主状态及凭据入口，管理当前 Host profile 的设置与插件包。</p>
   <div className="wb-settings-grid">
    <section className="wb-form" aria-labelledby="wb-tool-display">

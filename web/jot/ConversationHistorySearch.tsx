@@ -283,7 +283,7 @@ export default function ConversationHistorySearch(props:Props){
 
  return <div className="jot-history-search">
   <style>{`::highlight(${highlightName}){background:#f4cd54;color:#151515}`}</style>
-  <button ref={opener} type="button" aria-expanded={open} disabled={!ready} onClick={openSearch}>{activityOnly?'搜索公开记录':'搜索当前会话'}</button>
+  <button ref={opener} data-desktop-target="find" type="button" aria-expanded={open} disabled={!ready} onClick={openSearch}>{activityOnly?'搜索公开记录':'搜索当前会话'}</button>
   {open&&<div role="search" aria-label={activityOnly?'公开记录搜索':'会话历史搜索'}>
    <input ref={input} type="search" aria-label={activityOnly?'搜索公开记录':'搜索会话内容'} placeholder={activityOnly?'搜索公开记录…':'搜索会话内容…'} value={draft} autoComplete="off" spellCheck={false}
     onChange={event=>{setDraft(event.currentTarget.value);if(!composing.current){changeQuery(event.currentTarget.value);}}}

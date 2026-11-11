@@ -5,6 +5,7 @@ import {basename,dirname,isAbsolute,join,relative,resolve,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {startLocalBackend} from './backend.mjs';
 import {loadHostUpdatePolicy} from './host-update-policy.mjs';
+import {createDesktopCommandMenu} from './application-menu.mjs';
 import {desktopWebPreferences,isDesktopAppUrl,mayGrantNotificationPermission} from './desktop-security.mjs';
 import {buildTrayIconPng} from './tray-icon.mjs';
 import {resolveDesktopPaths} from './package-layout.mjs';
@@ -230,6 +231,9 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
    webPreferences:desktopWebPreferences(paths.preloadPath)
   });
   mainWindow=window;
+  let commandMenu=null;
+  const resetCommandMenu=()=>commandMenu?.reset();
+  const commandNavigationStarted=(_event,_url,inPlace,mainFrame)=>{if(mainFrame===true&&inPlace!==true)resetCommandMenu();};
   const syncNotificationPermission=()=>{
    void permissionStatus().then(status=>{
     notificationRuntime.permissionChanged(status);
@@ -239,6 +243,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   };
   window.on('focus',syncNotificationPermission);
   const denyNavigation=(_event,url)=>{if(!isDesktopAppUrl(url,appOrigin))_event.preventDefault();};
+  window.webContents.on('did-start-navigation',commandNavigationStarted);
   window.webContents.on('will-navigate',denyNavigation);
   window.webContents.on('will-redirect',denyNavigation);
   window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
@@ -247,6 +252,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   let recoveryTimer=null,recoveryAttempts=0,stableTimer=null;
   const didFinishLoadHandler=()=>{deliverPendingTaskNavigation(window);if(recoveryTimer){clearTimeout(recoveryTimer);recoveryTimer=null;}if(stableTimer)clearTimeout(stableTimer);stableTimer=setTimeout(()=>{stableTimer=null;recoveryAttempts=0;},30000);stableTimer.unref?.();};
   const renderProcessGoneHandler=(_event,details)=>{
+   resetCommandMenu();
    report(new Error('renderer_process_gone:'+String(details?.reason??'unknown')));
    if(shuttingDown||window.isDestroyed()||recoveryAttempts>=3)return;
    recoveryAttempts++;
@@ -256,8 +262,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   window.webContents.on('did-finish-load',didFinishLoadHandler);
   window.webContents.on('render-process-gone',renderProcessGoneHandler);
   window.on('close',event=>{if(!shuttingDown&&tray&&!tray.isDestroyed()){event.preventDefault();window.hide();}});
-  const windowMenu=Menu.buildFromTemplate([{label:'Jot',submenu:[{label:'显示 Jot',click:restoreWindow},{label:'任务通知设置',click:openNotificationSettings},{type:'separator'},{label:'退出',click:()=>app.quit()}]}]);
-  Menu.setApplicationMenu(windowMenu);
+  commandMenu=createDesktopCommandMenu({Menu,getWindow:()=>mainWindow,appOrigin,restoreWindow,openNotificationSettings,requestQuit:()=>app.quit()});
   try{
    tray=new Tray(nativeImage.createFromBuffer(buildTrayIconPng()));
    tray.setToolTip('Jot');
@@ -266,7 +271,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   }catch(error){report(new Error('system_tray_unavailable:'+String(error?.message??error)));}
   removeIpcHandlers=registerDesktopIpcHandlers({
    ipcMain,appOrigin,getWindow:()=>mainWindow,stateStore,notificationRuntime,
-   readPermission:permissionStatus,updateLifecycle,
+   readPermission:permissionStatus,updateLifecycle,setMenuState:value=>commandMenu.setState(value),
    selectFile:async()=>{
     const parent=mainWindow;
     if(!parent||parent.isDestroyed?.()||typeof dialog?.showOpenDialog!=='function')throw new Error('desktop_file_dialog_unavailable');
@@ -278,11 +283,10 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
     return selected;
    },
   });
-  try{await window.loadURL(appOrigin+'/workbench.html');if(showWindow)window.show();}
-  catch(error){window.destroy();mainWindow=null;throw error;}
-  return {destroy(){
+  const destroyWindow=()=>{
    if(recoveryTimer)clearTimeout(recoveryTimer);if(stableTimer)clearTimeout(stableTimer);
    window.off('focus',syncNotificationPermission);
+   commandMenu?.reset();window.webContents.off('did-start-navigation',commandNavigationStarted);
    window.webContents.off('did-finish-load',didFinishLoadHandler);window.webContents.off('render-process-gone',renderProcessGoneHandler);
    window.webContents.off('will-navigate',denyNavigation);window.webContents.off('will-redirect',denyNavigation);
    window.webContents.session.off('will-download',downloadHandler);
@@ -290,7 +294,10 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
    if(tray&&!tray.isDestroyed())tray.destroy();tray=null;
    if(!window.isDestroyed())window.destroy();
    if(mainWindow===window)mainWindow=null;
-  }};
+  };
+  try{await window.loadURL(appOrigin+'/workbench.html');if(showWindow)window.show();}
+  catch(error){destroyWindow();throw error;}
+  return {destroy:destroyWindow};
  };
  let startupOperationId=null,startupRestoredStartup=null;
  lifecycle=createDesktopLifecycleImpl({app,backendFactory,windowFactory,onError:report,beforeStart:async()=>{

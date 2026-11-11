@@ -1,5 +1,6 @@
+import {parseDesktopMenuState} from './menu-commands.mjs';
 const notificationEvents=new Set(['changed','completed','failed','needs_confirmation']);
-const channels=new Set(['notification.show','notification.dismiss','notification.state.read','notification.state.initialize','notification.permission.read','preferences.read','preferences.write','window.openTask',
+const channels=new Set(['menu.state.set','notification.show','notification.dismiss','notification.state.read','notification.state.initialize','notification.permission.read','preferences.read','preferences.write','window.openTask',
  'update.status','update.check','update.download','update.cancel','update.activate','dialog.selectFile']);
 const hasOwn=(value,key)=>Object.prototype.hasOwnProperty.call(value,key);
 
@@ -23,6 +24,7 @@ function taskIdentity(value,code){
 
 export function parseDesktopCommand(channel,value){
  if(typeof channel!=='string'||!channels.has(channel))fail('desktop_ipc_channel_denied');
+ if(channel==='menu.state.set')return Object.freeze({channel,payload:parseDesktopMenuState(value)});
  if(channel==='notification.show'){
   const code='desktop_notification_invalid';record(value,code);
   const keys=['task_id','occurrence_id','generation','event_kind','title','body'];exactKeys(value,keys,code);

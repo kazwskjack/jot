@@ -21,7 +21,7 @@ export function SkillCatalogView({value,paths,resources,definitions={},onPathCha
  onPathChange:(name:string,path:string)=>void;onReadResource:(name:string)=>void;onUseSkill:(name:string)=>void;
  onBrowseSkill?:(name:string)=>void;
 }){
- return <section aria-label="当前会话技能目录"><h3>当前会话技能</h3>
+ return <section data-desktop-target="skills" tabIndex={-1} aria-label="当前会话技能目录"><h3>当前会话技能</h3>
   <p>工作区 {value.viewScope.workspace_id} · 项目 {value.viewScope.project_id??'未绑定'} · {'kind' in value.viewScope
    ?`原生会话 ${value.viewScope.session_ref}`:`角色 ${value.viewScope.agent_id}`}</p>
   <p>目录只显示元数据。资源读取只返回你选择的相对路径；内容按纯文本显示，不会执行。</p>
