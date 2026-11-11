@@ -1,3 +1,4 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
 import React,{useCallback,useContext,useEffect,useRef,useState} from 'react';
 import type {Caps,HostAdminClient,HostOnboardingSnapshot,HostReadinessResponse,HostSettingsSnapshot,HostSettingsUpdate,HostSettingsValues} from './types';
 import {taskDraftScope} from '../jot/client';
@@ -30,6 +31,7 @@ function conflictVersion(error:unknown){
  return null;
 }
 export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminClient}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const toolDisplay=useToolDisplayPreference(),messageDisplay=useMessageDisplayPreferences(),layoutDisplay=useLayoutDisplayPreferences();
  const readinessEnabled=hostCapabilityEnabled(caps,'host_readiness');
  const settingsNamespace=typeof caps.workbench?.host_settings_write_namespace==='string'&&/^[a-z][a-z0-9._-]{0,127}$/.test(caps.workbench.host_settings_write_namespace)&&caps.workbench.host_settings_write_namespace!=='jot-host-policy'?caps.workbench.host_settings_write_namespace:null;
@@ -193,23 +195,23 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
  },[beginMutation,client,endMutation,onboarding,onboardingEnabled]);
 
  return <>
-  <h2 data-desktop-target="settings" tabIndex={-1}>模型、凭据与安装设置</h2>
-  <p className="wb-page-intro">查看模型目录、宿主状态及凭据入口，管理当前 Host profile 的设置与插件包。</p>
+  <h2 lang={language} data-desktop-target="settings" tabIndex={-1}>{t("模型、凭据与安装设置","Models, Credentials and Setup Settings")}</h2>
+  <p lang={language} className="wb-page-intro">{t("查看模型目录、宿主状态及凭据入口，管理当前 Host profile 的设置与插件包。","View the model catalog, host status and credential entry; manage settings and plugin bundles for the current Host profile.")}</p>
   <div className="wb-settings-grid">
    <DesktopAboutPanel key={currentTaskScope} scopeKey={currentTaskScope}/>
    <DesktopUpdatesPanel key={currentTaskScope} scopeKey={currentTaskScope} onPendingChange={reportUpdatePending} canBeginAction={canBeginUpdate}/>
-   <section className="wb-form" aria-labelledby="wb-tool-display">
-    <h3 id="wb-tool-display">会话显示</h3>
-    <label className="wb-checkbox"><input type="checkbox" checked={toolDisplay.enabled} disabled={!toolDisplay.available} onChange={event=>toolDisplay.setEnabled(event.currentTarget.checked)}/>自动展开工具步骤</label>
-    <p className="wb-settings-note">显示已加载的工具分组和步骤详情；手动折叠的选择会保留，工具正文和文件仍需主动打开。</p>
-    <label className="wb-checkbox"><input type="checkbox" checked={messageDisplay.value.showThinking} disabled={!messageDisplay.available} onChange={event=>messageDisplay.setPreference('showThinking',event.currentTarget.checked)}/>显示模型思考与摘要</label>
-    {messageDisplay.value.showThinking&&<label className="wb-checkbox"><input type="checkbox" checked={messageDisplay.value.inlineThinking} disabled={!messageDisplay.available} onChange={event=>messageDisplay.setPreference('inlineThinking',event.currentTarget.checked)}/>以行内样式显示思考内容</label>}
-    <label className="wb-checkbox"><input type="checkbox" checked={messageDisplay.value.sendByCtrlEnter} disabled={!messageDisplay.available} onChange={event=>messageDisplay.setPreference('sendByCtrlEnter',event.currentTarget.checked)}/>使用 Ctrl/Cmd + Enter 发送</label>
-    <p className="wb-settings-note">开启快捷键选项后，Enter 换行；Shift + Enter 始终换行。</p>
-    <label className="wb-checkbox"><input type="checkbox" checked={layoutDisplay.value.autoScrollToBottom} disabled={!layoutDisplay.available} onChange={event=>layoutDisplay.setPreference('autoScrollToBottom',event.currentTarget.checked)}/>自动滚动到会话末尾</label>
-    <p className="wb-settings-note">上滑阅读或打开检索后暂停跟随，可用“回到会话末尾”返回最新位置。</p>
-    <label className="wb-checkbox"><input type="checkbox" checked={layoutDisplay.value.sidebarVisible} disabled={!layoutDisplay.available} onChange={event=>layoutDisplay.setPreference('sidebarVisible',event.currentTarget.checked)}/>显示工作台导航</label>
-    {!toolDisplay.available?<p role="status">当前账户身份尚未确认，暂不能保存偏好。</p>:(!toolDisplay.persisted||!messageDisplay.persisted||!layoutDisplay.persisted)&&<p role="status">浏览器未保存此偏好，当前页面内的选择仍然有效，刷新后可能恢复之前的设置。</p>}
+   <section lang={language} className="wb-form" aria-labelledby="wb-tool-display">
+    <h3 id="wb-tool-display">{t("会话显示","Conversation Display")}</h3>
+    <label className="wb-checkbox"><input type="checkbox" checked={toolDisplay.enabled} disabled={!toolDisplay.available} onChange={event=>toolDisplay.setEnabled(event.currentTarget.checked)}/>{t("自动展开工具步骤","Automatically Expand Tool Steps")}</label>
+    <p className="wb-settings-note">{t("显示已加载的工具分组和步骤详情；手动折叠的选择会保留，工具正文和文件仍需主动打开。","Show loaded tool group and step details. Manual collapse choices are retained; open tool bodies and files explicitly.")}</p>
+    <label className="wb-checkbox"><input type="checkbox" checked={messageDisplay.value.showThinking} disabled={!messageDisplay.available} onChange={event=>messageDisplay.setPreference('showThinking',event.currentTarget.checked)}/>{t("显示模型思考与摘要","Show Model Thinking and Summaries")}</label>
+    {messageDisplay.value.showThinking&&<label className="wb-checkbox"><input type="checkbox" checked={messageDisplay.value.inlineThinking} disabled={!messageDisplay.available} onChange={event=>messageDisplay.setPreference('inlineThinking',event.currentTarget.checked)}/>{t("以行内样式显示思考内容","Show Thinking Inline")}</label>}
+    <label className="wb-checkbox"><input type="checkbox" checked={messageDisplay.value.sendByCtrlEnter} disabled={!messageDisplay.available} onChange={event=>messageDisplay.setPreference('sendByCtrlEnter',event.currentTarget.checked)}/>{t("使用 Ctrl/Cmd + Enter 发送","Send with Ctrl/Cmd + Enter")}</label>
+    <p className="wb-settings-note">{t("开启快捷键选项后，Enter 换行；Shift + Enter 始终换行。","With the shortcut option enabled, Enter inserts a new line. Shift + Enter always inserts a new line.")}</p>
+    <label className="wb-checkbox"><input type="checkbox" checked={layoutDisplay.value.autoScrollToBottom} disabled={!layoutDisplay.available} onChange={event=>layoutDisplay.setPreference('autoScrollToBottom',event.currentTarget.checked)}/>{t("自动滚动到会话末尾","Automatically Scroll to Conversation End")}</label>
+    <p className="wb-settings-note">{t("上滑阅读或打开检索后暂停跟随，可用“回到会话末尾”返回最新位置。","Scrolling up to read or opening search pauses following. Use Return to Conversation End to return to the latest position.")}</p>
+    <label className="wb-checkbox"><input type="checkbox" checked={layoutDisplay.value.sidebarVisible} disabled={!layoutDisplay.available} onChange={event=>layoutDisplay.setPreference('sidebarVisible',event.currentTarget.checked)}/>{t("显示工作台导航","Show Workbench Navigation")}</label>
+    {!toolDisplay.available?<p role="status">{t("当前账户身份尚未确认，暂不能保存偏好。","The current account identity is unconfirmed. Preferences cannot be saved yet.")}</p>:(!toolDisplay.persisted||!messageDisplay.persisted||!layoutDisplay.persisted)&&<p role="status">{t("浏览器未保存此偏好，当前页面内的选择仍然有效，刷新后可能恢复之前的设置。","The browser did not save this preference. Your choice remains active on this page; refreshing may restore earlier settings.")}</p>}
    </section>
    {caps.workbench?.plugin_profiles===true&&<PluginProfilesPanel key={currentTaskScope} scopeKey={currentTaskScope} onPendingChange={reportPluginPending}/>}
    {settingsReadEnabled&&<HostCredentialsPanel client={client} scopeKey={currentTaskScope}/>}
@@ -217,11 +219,11 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
    <HostSettingsReadPanel enabled={settingsReadEnabled} namespaces={caps.workbench?.host_settings_read_namespaces} client={client} scopeKey={currentTaskScope}/>
    <HostSettingsPanel enabled={settingsEnabled} state={settings} readiness={null} onDraftChange={draft=>setSettings(state=>hostSettingsDraftChanged(state,draft))} onUseHostValues={()=>setSettings(state=>hostSettingsUseServerSnapshot(state))} onReload={()=>void reloadSettings()} onSave={()=>void saveSettings()}/>
    <OnboardingPanel enabled={onboardingEnabled} state={onboarding} readiness={readiness} settingsApplyAvailable={settingsEnabled&&!!onboardingHostSettingsDraft(settings,onboarding.draft)} settingsSaving={settings.saving} onApplySettings={()=>void applyOnboardingSettings()} onDraftChange={draft=>setOnboarding(state=>onboardingDraftChanged(state,draft))} onUseHostDraft={()=>setOnboarding(state=>onboardingUseServerSnapshot(state))} onReload={()=>void reloadOnboarding()} onSave={()=>void saveOnboarding()}/>
-   <section className="wb-form" aria-labelledby="wb-settings-catalog">
-    <h3 id="wb-settings-catalog">模型目录</h3>
-    <p className="wb-status">模型目录只表示已发现的条目，不代表凭据有效、模型调用已验证或 RuntimeReadiness 已就绪。</p>
-    {Array.isArray(caps.models)&&caps.models.length? <ul className="wb-settings-list">{caps.models.map((item,index)=>{const row=record(item);const provider=typeof row?.provider==='string'?row.provider:'未知提供方';const model=typeof row?.model==='string'?row.model:'未知模型';return <li key={`${provider}:${model}:${index}`}><strong>{model}</strong><span>{provider}</span></li>;})}</ul>:<p className="wb-status">目录未知或为空。</p>}
-    <p className="wb-settings-note">提供方测试：未验证（Host 测试接口未在此界面开放）。</p>
+   <section lang={language} className="wb-form" aria-labelledby="wb-settings-catalog">
+    <h3 id="wb-settings-catalog">{t("模型目录","Model Catalog")}</h3>
+    <p className="wb-status">{t("模型目录只表示已发现的条目，不代表凭据有效、模型调用已验证或 RuntimeReadiness 已就绪。","The model catalog lists discovered entries. It does not confirm valid credentials, verified model calls or RuntimeReadiness.")}</p>
+    {Array.isArray(caps.models)&&caps.models.length? <ul className="wb-settings-list">{caps.models.map((item,index)=>{const row=record(item);const provider=typeof row?.provider==='string'?row.provider:'未知提供方';const model=typeof row?.model==='string'?row.model:'未知模型';return <li key={`${provider}:${model}:${index}`}><strong>{typeof row?.model==='string'?model:t('未知模型','Unknown Model')}</strong><span>{typeof row?.provider==='string'?provider:t('未知提供方','Unknown Provider')}</span></li>;})}</ul>:<p className="wb-status">{t("目录未知或为空。","The catalog is unknown or empty.")}</p>}
+    <p className="wb-settings-note">{t("提供方测试：未验证（Host 测试接口未在此界面开放）。","Provider verification: unverified (the Host test interface is not exposed here).")}</p>
    </section>
   </div>
  </>;

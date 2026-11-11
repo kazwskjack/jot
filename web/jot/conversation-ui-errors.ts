@@ -1,6 +1,20 @@
 // Fixed owned conversation UI failures; unknown/raw content stays unchanged.
 import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
 const english:Record<string,string>={
+ "安装引导版本冲突；Host 当前版本未知。步骤和草稿仍保留，请重新读取后再保存。": "Setup version conflict; the current Host version is unknown. Steps and drafts are retained. Read again before saving.",
+ "引导步骤和非敏感草稿已由 Host 保存，可在刷新后恢复。": "The Host saved setup steps and non-sensitive drafts. They can be recovered after refresh.",
+ "Host 未报告": "Not Reported by Host",
+ "设置版本冲突；Host 当前版本未知。你的编辑仍保留，请重新读取后再保存。": "Settings version conflict; the current Host version is unknown. Your edits are retained. Read again before saving.",
+ "Host 尚未确认这次保存是否完成。草稿已保留；再次点击“查询保存状态”会复用同一个保存键。": "The Host has not confirmed whether this save completed. The draft is retained; Query Save Status reuses the same save key.",
+ "浏览器恢复回执不可用，无法提交设置。请保留浏览器存储后重试。": "The browser recovery receipt is unavailable, so settings cannot be submitted. Retain browser storage and retry.",
+ "设置已保存；Host 报告 applies=live。当前 Session 的重启状态未知。": "Settings saved; the Host reports applies=live. The current session restart status is unknown.",
+ "设置已保存；Host 报告 applies=live。活动影响未知。当前 Session 的重启状态未知。": "Settings saved; the Host reports applies=live. Activity impact is unknown. The current session restart status is unknown.",
+ "设置已保存；当前生效状态未知。当前 Session 的重启状态未知。": "Settings saved; current activation is unknown. The current session restart status is unknown.",
+ "设置已保存；当前生效状态未知。活动影响未知。当前 Session 的重启状态未知。": "Settings saved; current activation is unknown. Activity impact is unknown. The current session restart status is unknown.",
+ "Host 已确认保存；Host 报告 applies=live。当前 Session 重启状态未知。": "The Host confirmed the save and reports applies=live. The current session restart status is unknown.",
+ "Host 已确认保存；Host 报告 applies=live。活动影响未知。当前 Session 重启状态未知。": "The Host confirmed the save and reports applies=live. Activity impact is unknown. The current session restart status is unknown.",
+ "Host 已确认保存；设置对当前运行的生效状态未知。当前 Session 重启状态未知。": "The Host confirmed the save; activation for the current run is unknown. The current session restart status is unknown.",
+ "Host 已确认保存；设置对当前运行的生效状态未知。活动影响未知。当前 Session 重启状态未知。": "The Host confirmed the save; activation for the current run is unknown. Activity impact is unknown. The current session restart status is unknown.",
  "该技能未提供可沿当前权限读取的原始文件声明，可读取技能详情中的原生元数据。": "This skill provides no original file manifest readable under current permissions. Read the native metadata in its skill details.",
  "找不到该技能或相对路径，请检查输入后重试。": "The skill or relative path was not found. Check the input and retry.",
  "技能资源路径或响应无效，请检查相对路径格式。": "The skill resource path or response is invalid. Check the relative path format.",
@@ -419,4 +433,27 @@ const english:Record<string,string>={
 };
 export function conversationUiError(value:string,language:ApplicationLanguage){
  return language==='en'&&Object.hasOwn(english,value)?english[value]!:value;
+}
+
+// These complete formats are produced by host-setup-state; codes and versions stay original.
+export function hostSetupUiMessage(value:string,language:ApplicationLanguage){
+ const fixed=conversationUiError(value,language);
+ if(language!=='en'||fixed!==value)return fixed;
+ for(const [prefix,translated] of [
+  ['读取设置失败；保留上次已读取的配置。','Reading settings failed; the last read configuration is retained.'],
+  ['保存未确认；继续保留之前已确认的配置。','The save is unconfirmed; the previously confirmed configuration is retained.'],
+  ['读取引导状态失败；保留上次已读取的步骤和草稿。','Reading setup state failed; the last read steps and drafts are retained.'],
+  ['引导进度未确认；仍保留上次已确认步骤和草稿。','Setup progress is unconfirmed; the last confirmed steps and drafts are retained.'],
+ ] as const){
+  if(value===prefix)return translated;
+  if(value.startsWith(prefix)){
+   const code=/^（([a-z][a-z0-9_]{0,63})）$/.exec(value.slice(prefix.length));
+   if(code)return translated+' ('+code[1]+')';
+  }
+ }
+ const conflict=/^设置版本冲突；Host 当前版本为 (0|[1-9][0-9]*)。你的编辑仍保留，请重新读取并检查后再保存。$/.exec(value);
+ if(conflict&&Number.isSafeInteger(Number(conflict[1])))return `Settings version conflict; the current Host version is ${conflict[1]}. Your edits are retained. Read again and check before saving.`;
+ const setupConflict=/^安装引导版本冲突；Host 当前版本为 ([1-9][0-9]*)。步骤和草稿仍保留，请重新读取并检查后再保存。$/.exec(value);
+ if(setupConflict&&Number.isSafeInteger(Number(setupConflict[1])))return `Setup version conflict; the current Host version is ${setupConflict[1]}. Steps and drafts are retained. Read again and check before saving.`;
+ return value;
 }
