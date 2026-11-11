@@ -1,3 +1,4 @@
+import {useThemePreference,ThemeSelector,type ThemePreference} from './jot/theme-preference';
 import {useDesktopCommands,type DesktopUiCommand} from './jot/useDesktopCommands';
 import {useLayoutDisplayPreferences} from './jot/useToolDisplayPreference';
 import {desktopUpdatesBridge} from './workbench/desktop-updates';
@@ -17,6 +18,7 @@ type DesktopOpenTaskIdentity=Readonly<{task_id:string;occurrence_id:string}>;
 type DesktopBridgeWindow=Window&{jotDesktop?:{onOpenTask?:(listener:(identity:DesktopOpenTaskIdentity)=>void)=>()=>void}};
 
 function WorkbenchApplication(){
+ const appearance=useThemePreference();
  useEffect(registerUiDiagnostics,[]);
  const owner=useSyncExternalStore(subscribeTaskDraftScope,taskDraftScope),[revision,setRevision]=useState(0),[loading,setLoading]=useState(true),[error,setError]=useState('');
  useEffect(()=>{
@@ -27,9 +29,9 @@ function WorkbenchApplication(){
   return()=>controller.abort();
  },[revision]);
  if(!owner)return <section aria-label="工作台账户恢复"><p role={loading?'status':'alert'}>{loading?'正在确认账户并恢复工作台…':error||'账户身份已变化，请重新确认连接。'}</p><button type="button" disabled={loading} onClick={()=>setRevision(value=>value+1)}>重新确认账户</button></section>;
- return <WorkbenchSession key={owner} owner={owner}/>;
+ return <WorkbenchSession key={owner} owner={owner} appearance={appearance}/>;
 }
-function WorkbenchSession({owner}:{owner:string}){
+function WorkbenchSession({owner,appearance}:{owner:string;appearance:ThemePreference}){
  const surface=useRef<HTMLDivElement>(null),layoutDisplay=useLayoutDisplayPreferences();
  const [desktopFocus,setDesktopFocus]=useState<{owner:string;command:DesktopUiCommand;route:string;workspace?:string}>(),[desktopError,setDesktopError]=useState('');
  const [initial]=useState(()=>{
@@ -52,7 +54,6 @@ function WorkbenchSession({owner}:{owner:string}){
   try{recordUiDiagnostic('manual-reload');window.location.reload();return true;}
   catch{setReloadError('界面暂时无法重新载入，当前页面已保留。');return false;}
  },[]);
- const [theme,setTheme]=useState(()=>{try{return localStorage.getItem('jot-theme')==='light'?'light':'dark';}catch{return 'dark';}});
  const handleDesktopOpenTask=useCallback((identity:DesktopOpenTaskIdentity)=>setDesktopOpenTask(identity),[]);
  const consumeDesktopOpenTask=useCallback(()=>setDesktopOpenTask(null),[]);
  useEffect(()=>{
@@ -64,7 +65,6 @@ function WorkbenchSession({owner}:{owner:string}){
   if(!desktopOpenTask||managementPending)return;
   setTaskSource(null);setConversation('');setShowConversations(false);setView('persistent-tasks');
  },[desktopOpenTask,managementPending]);
- useEffect(()=>{document.documentElement.dataset.theme=theme;try{localStorage.setItem('jot-theme',theme);}catch{}},[theme]);
  const visible=(node:HTMLElement|null):node is HTMLElement=>!!node&&!node.closest('[hidden],[inert],[aria-hidden="true"]')&&node.getClientRects().length>0&&getComputedStyle(node).visibility!=='hidden'&&!(node instanceof HTMLButtonElement||node instanceof HTMLInputElement||node instanceof HTMLSelectElement?node.disabled:false);
  const target=(command:string)=>{const node=surface.current?.querySelector<HTMLElement>(`[data-desktop-target="${command}"]`)??null;return visible(node)?node:null;};
  const findTarget=()=>{
@@ -141,6 +141,6 @@ function WorkbenchSession({owner}:{owner:string}){
   return()=>{disposed=true;cancelAnimationFrame(frame);clearTimeout(timer);observer.disconnect();};
  },[desktopFocus,owner,view,conversation,showConversations,managementPending,taskSource,desktopOpenTask]);
  useDesktopCommands({owner,surface,sidebarVisible:layoutDisplay.value.sidebarVisible,enabled:commandEnabled,execute:executeDesktop});
-  return <div ref={surface} className="workbench-application"><header data-desktop-toolbar><a href="/">Jot</a><strong>工作台</strong><button disabled={!!conversation||managementPending} onClick={()=>setShowConversations(value=>!value)}>{showConversations?'返回工作台':'我的对话'}</button><button onClick={()=>setTheme(theme==='dark'?'light':'dark')}>{theme==='dark'?'浅色':'深色'}</button></header>{reloadError&&<p role="alert">{reloadError}</p>}{desktopError&&<p role="status">{desktopError}</p>}{conversation?<RoleConversation onReload={reloadConversation} ordinary={showConversations} onTaskSource={source=>{setTaskSource(source);setConversation('');setShowConversations(false);setView('persistent-tasks');}} id={conversation} onForkConversation={target=>setConversation(target)} onClose={()=>setConversation('')}/>:showConversations?<ConversationPicker onOpen={setConversation} onPendingChange={setManagementPending}/>:<Workbench onPendingChange={setManagementPending} taskSource={taskSource} onTaskSourceConsumed={()=>setTaskSource(null)} desktopOpenTask={managementPending?null:desktopOpenTask} onDesktopOpenTaskConsumed={consumeDesktopOpenTask} view={view} onOpen={setView} onConversation={setConversation}/>}</div>;
+  return <div ref={surface} className="workbench-application"><header data-desktop-toolbar><a href="/">Jot</a><strong>工作台</strong><button disabled={!!conversation||managementPending} onClick={()=>setShowConversations(value=>!value)}>{showConversations?'返回工作台':'我的对话'}</button><ThemeSelector preference={appearance} zh/></header>{reloadError&&<p role="alert">{reloadError}</p>}{desktopError&&<p role="status">{desktopError}</p>}{conversation?<RoleConversation onReload={reloadConversation} ordinary={showConversations} onTaskSource={source=>{setTaskSource(source);setConversation('');setShowConversations(false);setView('persistent-tasks');}} id={conversation} onForkConversation={target=>setConversation(target)} onClose={()=>setConversation('')}/>:showConversations?<ConversationPicker onOpen={setConversation} onPendingChange={setManagementPending}/>:<Workbench onPendingChange={setManagementPending} taskSource={taskSource} onTaskSourceConsumed={()=>setTaskSource(null)} desktopOpenTask={managementPending?null:desktopOpenTask} onDesktopOpenTaskConsumed={consumeDesktopOpenTask} view={view} onOpen={setView} onConversation={setConversation}/>}</div>;
 }
 createRoot(document.getElementById('root')!).render(<WorkbenchApplication/>);

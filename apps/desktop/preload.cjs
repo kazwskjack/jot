@@ -129,7 +129,20 @@ function installWindowChrome(){
   const root=document.documentElement;if(!root||!document.body||document.getElementById('jot-window-caption'))return;
   let disposed=false,serial=0,active=null,savedFocus=null,fullscreen=false,lastRevision=0;
   let desiredTheme=root.dataset.theme==='light'?'light':'dark';
-  if(!root.hasAttribute('data-theme')){try{desiredTheme=localStorage.getItem('jot-theme')==='light'?'light':'dark';}catch{}root.dataset.theme=desiredTheme;}
+  const systemTheme=window.matchMedia?.('(prefers-color-scheme: dark)');
+  if(!root.hasAttribute('data-theme')){
+   let mode='system';
+   try{
+    const raw=localStorage.getItem('jot-theme-preference-v1'),legacy=localStorage.getItem('jot-theme');
+    if(legacy==='dark'||legacy==='light'||legacy==='system')mode=legacy;
+    if(raw&&raw.length<=128){try{const value=JSON.parse(raw);
+     if(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')==='mode,version'&&value.version===1&&['system','dark','light'].includes(value.mode))mode=value.mode;
+    }catch{}}
+   }catch{}
+   root.dataset.themeMode=mode;desiredTheme=mode==='system'?(systemTheme?.matches?'dark':'light'):mode;root.dataset.theme=desiredTheme;
+  }
+  const followSystem=()=>{if(!disposed&&root.dataset.themeMode==='system')root.dataset.theme=systemTheme?.matches?'dark':'light';};
+  systemTheme?.addEventListener('change',followSystem);
   const host=document.createElement('div');host.id='jot-window-caption';
   const shadow=host.attachShadow({mode:'closed'}),style=document.createElement('style');
   style.textContent=`:host{position:fixed;top:0;left:0;height:var(--jot-caption-height);width:100%;z-index:10000;display:block;background:var(--jot-caption-bg);color:var(--jot-caption-fg);-webkit-app-region:drag;user-select:none;font:13px system-ui}
@@ -257,11 +270,11 @@ function installWindowChrome(){
    if(sentTheme===desiredTheme)return;const requested=desiredTheme;sentTheme=requested;
    void invoke('window.chrome.theme',{theme:requested}).then(applyState).catch(()=>{if(sentTheme===requested)sentTheme=null;});
   };
-  const observer=new MutationObserver(syncTheme);observer.observe(root,{attributes:true,attributeFilter:['data-theme','lang','data-jot-desktop-toolbar','data-jot-desktop-integrated']});
+  const observer=new MutationObserver(syncTheme);observer.observe(root,{attributes:true,attributeFilter:['data-theme','data-theme-mode','lang','data-jot-desktop-toolbar','data-jot-desktop-integrated']});
   window.addEventListener('keydown',keydown);paint();
   void invoke('window.chrome.read').then(value=>{applyState(value);syncTheme();}).catch(syncTheme);
   const dispose=()=>{
-   if(disposed)return;disposed=true;serial+=1;observer.disconnect();window.removeEventListener('keydown',keydown);
+   if(disposed)return;disposed=true;serial+=1;observer.disconnect();systemTheme?.removeEventListener('change',followSystem);window.removeEventListener('keydown',keydown);
    closeLinux();linuxCaptionListeners.delete(linuxUpdate);commandListeners.delete(commandDismiss);window.removeEventListener('blur',closeLinux);window.removeEventListener('resize',closeLinux);document.removeEventListener('pointerdown',outsideLinux,true);
    captionMenuListeners.delete(captionEvent);windowChromeListeners.delete(applyState);savedFocus=null;
    linuxHost?.remove();host.remove();sheet.remove();root.removeAttribute('data-jot-desktop-platform');root.removeAttribute('data-jot-desktop-fullscreen');

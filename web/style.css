@@ -6,3 +6,5 @@
 header .standalone-mode{font-size:15px;font-style:italic;font-weight:700;background:transparent;border:0;box-shadow:none;padding:4px 8px;text-transform:lowercase;align-self:center;-webkit-tap-highlight-color:transparent}header .standalone-mode:focus-visible{outline:2px solid var(--muted);outline-offset:3px}.notice button{margin-left:12px}
 
 .jot-twemoji{display:inline-block;position:relative;width:1em;height:1em;margin:0 .05em 0 .1em;vertical-align:-.1em}.jot-twemoji-source{display:inline-block;width:1em;height:1em;color:transparent;user-select:text}.jot-twemoji-image{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;user-select:none}
+
+.jot-theme-control{display:flex;align-items:center;gap:8px;flex-wrap:wrap;max-width:100%}.jot-theme-select{font:inherit;font-size:14px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 8px;max-width:100%}.jot-theme-select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.jot-theme-control>[role=status]{display:block;max-width:24em;font-size:12px;white-space:normal;color:var(--muted)}
