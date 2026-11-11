@@ -31,6 +31,6 @@ export default function GitCheckoutPreview({project,snapshotId,targetRef,onClose
    {!reviewing&&<button ref={reviewOpener} type="button" onClick={()=>setReviewing(true)}>{message('生成切换审核')}</button>}
 
   </>}
-  {reviewing&&<div lang="zh-CN"><GitCheckoutReview project={project} snapshotId={snapshotId} targetRef={targetRef} onBusy={busy=>{setChildBusy(busy);onBusy(busy)}} onClose={()=>{setReviewing(false);setRestoreFocus(true)}}/></div>}
+  {reviewing&&<GitCheckoutReview project={project} snapshotId={snapshotId} targetRef={targetRef} onBusy={busy=>{setChildBusy(busy);onBusy(busy)}} onClose={()=>{setReviewing(false);setRestoreFocus(true)}}/>}
  </section>;
 }

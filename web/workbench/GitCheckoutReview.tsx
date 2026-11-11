@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
+import {gitUiMessage} from './git-ui-messages';
 import React,{useEffect,useLayoutEffect,useRef,useState} from 'react';
 import type {GitCheckoutReviewIntent} from './types';
 import {pathId,workbenchApi} from './client';
@@ -8,6 +10,8 @@ type Command={path:string;body:Record<string,unknown>};
 export default function GitCheckoutReview({project,snapshotId,targetRef,onClose,onBusy,initialReview}:{
  project:string;snapshotId:string;targetRef:string;onClose:()=>void;onBusy:(busy:boolean)=>void;initialReview?:GitCheckoutReviewIntent;
 }){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const message=(value:string)=>gitUiMessage(value,language);
  const mutation=useGitMutationReceipt(project),[review,setReview]=useState<GitCheckoutReviewIntent|null>(initialReview??null);
  const [busy,setBusy]=useState(false),[verified,setVerified]=useState(!!initialReview),[error,setError]=useState('');
  const alive=useRef(true),inflight=useRef(false),active=useRef<AbortController|null>(null),command=useRef<Command|null>(null),decision=useRef<HTMLButtonElement>(null);
@@ -56,40 +60,40 @@ export default function GitCheckoutReview({project,snapshotId,targetRef,onClose,
   }finally{end()}
  };
  const refresh=async()=>{if(!review)return;const control=begin();if(!control)return;try{await read(review.intent_id,control.signal)}catch{if(alive.current&&!control.signal.aborted){setVerified(false);setError('当前审核状态尚未确认，请重试读取。')}}finally{end()}};
- return <section className="wb-form wb-git-review" aria-label="Git 分支切换审核">
-  <div className="wb-toolbar"><h3>分支切换审核</h3><button type="button" disabled={locked} onClick={onClose}>关闭切换审核</button></div>
-  {!review?<><p>目标引用 <code>{targetRef}</code></p><button ref={decision} type="button" disabled={locked} onClick={()=>void send('prepare')}>固定切换审核内容</button></>:<>
-   <p>审核 SHA-256 <code>{review.review_sha256}</code></p>
+ return <section lang={language} className="wb-form wb-git-review" aria-label={message('Git 分支切换审核')}>
+  <div className="wb-toolbar"><h3>{message('分支切换审核')}</h3><button type="button" disabled={locked} onClick={onClose}>{message('关闭切换审核')}</button></div>
+  {!review?<><p>{message('目标引用 ')}<code>{targetRef}</code></p><button ref={decision} type="button" disabled={locked} onClick={()=>void send('prepare')}>{message('固定切换审核内容')}</button></>:<>
+   <p>{message('审核 SHA-256 ')}<code>{review.review_sha256}</code></p>
    <GitCheckoutEvidence preview={review.witness.preview} target={review.witness.target}/>
-   {referencePlan?.state==='planned'?<section aria-label="切换引用预期"><h4>切换引用预期</h4>
-    <dl><dt>HEAD 状态</dt><dd>{referencePlan.mode==='branch'?'本地分支':'分离 HEAD'} · <code>{referencePlan.head.branch??referencePlan.head.oid}</code></dd>
-     <dt>HEAD 文件预期</dt><dd>{referencePlan.head_file.size} 字节 · SHA-256 <code>{referencePlan.head_file.sha256}</code></dd>
-     <dt>HEAD 日志</dt><dd>{referencePlan.head_log.append?'追加切换记录':'按当前策略跳过日志追加'} · <code>{referencePlan.head_log.message}</code></dd>
-     <dt>日志原提交</dt><dd><code>{referencePlan.head_log.old_oid}</code></dd><dt>日志目标提交</dt><dd><code>{referencePlan.head_log.new_oid}</code></dd>
-     <dt>保留公共配置</dt><dd><code>{referencePlan.configuration.common_sha256??'原文件缺失'}</code></dd>
-     <dt>保留工作区配置</dt><dd><code>{referencePlan.configuration.worktree_sha256??'独立配置未启用或原文件缺失'}</code></dd>
+   {referencePlan?.state==='planned'?<section aria-label={message('切换引用预期')}><h4>{message('切换引用预期')}</h4>
+    <dl><dt>{message('HEAD 状态')}</dt><dd>{message(referencePlan.mode==='branch'?'本地分支':'分离 HEAD')} · <code>{referencePlan.head.branch??referencePlan.head.oid}</code></dd>
+     <dt>{message('HEAD 文件预期')}</dt><dd>{referencePlan.head_file.size}{t(' 字节',' Bytes')} · SHA-256 <code>{referencePlan.head_file.sha256}</code></dd>
+     <dt>{message('HEAD 日志')}</dt><dd>{message(referencePlan.head_log.append?'追加切换记录':'按当前策略跳过日志追加')} · <code>{referencePlan.head_log.message}</code></dd>
+     <dt>{message('日志原提交')}</dt><dd><code>{referencePlan.head_log.old_oid}</code></dd><dt>{message('日志目标提交')}</dt><dd><code>{referencePlan.head_log.new_oid}</code></dd>
+     <dt>{message('保留公共配置')}</dt><dd><code>{referencePlan.configuration.common_sha256??message('原文件缺失')}</code></dd>
+     <dt>{message('保留工作区配置')}</dt><dd><code>{referencePlan.configuration.worktree_sha256??message('独立配置未启用或原文件缺失')}</code></dd>
     </dl>
-    {logMetadata?<dl aria-label="固定日志条目"><dt>日志操作者</dt><dd>{logMetadata.committer.name} &lt;{logMetadata.committer.email}&gt; · {logMetadata.committer.timestamp}</dd>
-     <dt>追加条目</dt><dd>{logMetadata.entry_size} 字节 · SHA-256 <code>{logMetadata.entry_sha256}</code></dd></dl>:referencePlan.head_log.append&&<p role="status">日志操作者及条目字节尚未固定，需要项目仓库配置中的操作者身份。</p>}
-    <p>目标引用的对象值保持原值。完整日志文件与工作区发布、批准及恢复方案继续补齐。</p>
-   </section>:<p role="status">{referencePlan?.state==='policy_required'?'本地引用指向非 commit 对象，引用发布策略仍待补齐。':'此历史审核尚无引用变更预期，请重新生成审核以固定该内容。'}</p>}
-   {logAfter?.state==='appended'||logAfter?.state==='retained'?<section aria-label="HEAD 日志文件预期"><h4>HEAD 日志文件预期</h4>
-    <p>{logAfter.state==='appended'?'追加后':'保留原文件'} · {logAfter.size} 字节 · SHA-256 <code>{logAfter.sha256??'原文件缺失'}</code></p>
-   </section>:<p role="status">{logAfter?.state==='not_confirmed'?{reference_policy_required:'引用策略仍待补齐，完整日志预期尚未确认。',identity_unconfigured:'需要配置操作者身份以固定完整日志预期。',log_format_required:'原日志末尾格式需要处理策略，完整日志预期尚未确认。',output_limit:'追加后的日志超过当前文件上限，完整日志预期尚未确认。'}[logAfter.reason]:'此历史审核尚无完整日志文件预期。'}</p>}
-   {publication?.state==='planned'?<section aria-label="元数据写入清单"><h4>元数据写入清单</h4>
-    <ul>{publication.files.map(file=><li key={file.scope+'\0'+file.path}><code>{file.path}</code> · {file.operation==='append'?'追加':'替换'} · {file.after.size} 字节 · SHA-256 <code>{file.after.sha256}</code>
-     {file.permissions.state!=='creation_policy_required'?<p>{file.permissions.state==='create'?'新建模式':'保留模式'} <code>{file.permissions.mode.toString(8).padStart(4,'0')}</code> · UID {file.permissions.uid} · GID {file.permissions.gid}</p>:<p role="status">新建文件的权限与所属策略仍待补齐。</p>}
+    {logMetadata?<dl aria-label={message('固定日志条目')}><dt>{message('日志操作者')}</dt><dd>{logMetadata.committer.name} &lt;{logMetadata.committer.email}&gt; · {logMetadata.committer.timestamp}</dd>
+     <dt>{message('追加条目')}</dt><dd>{logMetadata.entry_size}{t(' 字节',' Bytes')} · SHA-256 <code>{logMetadata.entry_sha256}</code></dd></dl>:referencePlan.head_log.append&&<p role="status">{message('日志操作者及条目字节尚未固定，需要项目仓库配置中的操作者身份。')}</p>}
+    <p>{message('目标引用的对象值保持原值。完整日志文件与工作区发布、批准及恢复方案继续补齐。')}</p>
+   </section>:<p role="status">{message(referencePlan?.state==='policy_required'?'本地引用指向非 commit 对象，引用发布策略仍待补齐。':'此历史审核尚无引用变更预期，请重新生成审核以固定该内容。')}</p>}
+   {logAfter?.state==='appended'||logAfter?.state==='retained'?<section aria-label={message('HEAD 日志文件预期')}><h4>{message('HEAD 日志文件预期')}</h4>
+    <p>{message(logAfter.state==='appended'?'追加后':'保留原文件')} · {logAfter.size}{t(' 字节',' Bytes')} · SHA-256 <code>{logAfter.sha256??message('原文件缺失')}</code></p>
+   </section>:<p role="status">{message(logAfter?.state==='not_confirmed'?{reference_policy_required:'引用策略仍待补齐，完整日志预期尚未确认。',identity_unconfigured:'需要配置操作者身份以固定完整日志预期。',log_format_required:'原日志末尾格式需要处理策略，完整日志预期尚未确认。',output_limit:'追加后的日志超过当前文件上限，完整日志预期尚未确认。'}[logAfter.reason]:'此历史审核尚无完整日志文件预期。')}</p>}
+   {publication?.state==='planned'?<section aria-label={message('元数据写入清单')}><h4>{message('元数据写入清单')}</h4>
+    <ul>{publication.files.map(file=><li key={file.scope+'\0'+file.path}><code>{file.path}</code> · {message(file.operation==='append'?'追加':'替换')} · {file.after.size}{t(' 字节',' Bytes')} · SHA-256 <code>{file.after.sha256}</code>
+     {file.permissions.state!=='creation_policy_required'?<p>{message(file.permissions.state==='create'?'新建模式':'保留模式')} <code>{file.permissions.mode.toString(8).padStart(4,'0')}</code> · UID {file.permissions.uid} · GID {file.permissions.gid}</p>:<p role="status">{message('新建文件的权限与所属策略仍待补齐。')}</p>}
     </li>)}</ul>
-    {!!publication.directories?.length&&<><h5>新建元数据目录</h5><ul>{publication.directories.map(directory=><li key={directory.path}><code>{directory.path}</code> · 模式 <code>{directory.mode.toString(8).padStart(4,'0')}</code> · UID {directory.uid} · GID {directory.gid}</li>)}</ul></>}
-    <h5>所需锁</h5><ul>{publication.locks.map(lock=><li key={lock.scope+'\0'+lock.path}>{lock.scope==='git'?'当前 Git 目录':'公共 Git 目录'} · <code>{lock.path}</code></li>)}</ul>
-    <p>完整工作区发布、锁获取与恢复继续接入原生执行流程。</p>
-   </section>:<p role="status">{publication?.state==='not_confirmed'?{layout_required:'物理来源凭证尚未完整，元数据写入清单待确认。',reference_policy_required:'引用或 HEAD 来源策略仍待补齐，元数据写入清单待确认。',log_after_required:'完整日志预期尚未确认，元数据写入清单待确认。'}[publication.reason]:'此历史审核尚无元数据写入清单。'}</p>}
-   <p role="status">{!verified?'当前审核状态尚未确认。':review.state==='prepared'?'切换依据已固定，等待完整执行策略。':'审核已取消。'}</p>
-   <div className="wb-actions">{review.state==='prepared'&&<button ref={decision} type="button" disabled={locked||!verified} onClick={()=>void send('cancel')}>取消切换审核</button>}
-    <button ref={review.state==='cancelled'?decision:undefined} type="button" disabled={locked} onClick={()=>void refresh()}>刷新切换审核状态</button></div>
+    {!!publication.directories?.length&&<><h5>{message('新建元数据目录')}</h5><ul>{publication.directories.map(directory=><li key={directory.path}><code>{directory.path}</code>{message(' · 模式 ')}<code>{directory.mode.toString(8).padStart(4,'0')}</code> · UID {directory.uid} · GID {directory.gid}</li>)}</ul></>}
+    <h5>{message('所需锁')}</h5><ul>{publication.locks.map(lock=><li key={lock.scope+'\0'+lock.path}>{message(lock.scope==='git'?'当前 Git 目录':'公共 Git 目录')} · <code>{lock.path}</code></li>)}</ul>
+    <p>{message('完整工作区发布、锁获取与恢复继续接入原生执行流程。')}</p>
+   </section>:<p role="status">{message(publication?.state==='not_confirmed'?{layout_required:'物理来源凭证尚未完整，元数据写入清单待确认。',reference_policy_required:'引用或 HEAD 来源策略仍待补齐，元数据写入清单待确认。',log_after_required:'完整日志预期尚未确认，元数据写入清单待确认。'}[publication.reason]:'此历史审核尚无元数据写入清单。')}</p>}
+   <p role="status">{message(!verified?'当前审核状态尚未确认。':review.state==='prepared'?'切换依据已固定，等待完整执行策略。':'审核已取消。')}</p>
+   <div className="wb-actions">{review.state==='prepared'&&<button ref={decision} type="button" disabled={locked||!verified} onClick={()=>void send('cancel')}>{message('取消切换审核')}</button>}
+    <button ref={review.state==='cancelled'?decision:undefined} type="button" disabled={locked} onClick={()=>void refresh()}>{message('刷新切换审核状态')}</button></div>
   </>}
-  <p role="status">文件发布、引用、日志、跟踪及恢复策略仍需完整实现，后续接入审核批准与原生切换派发。</p>
-  {error&&<p role="alert" className="wb-error">{error}</p>}
-  {mutation.pending&&<button type="button" disabled={busy} onClick={()=>void send('retry')}>重试原切换审核请求</button>}
+  <p role="status">{message('文件发布、引用、日志、跟踪及恢复策略仍需完整实现，后续接入审核批准与原生切换派发。')}</p>
+  {error&&<p role="alert" className="wb-error">{message(error)}</p>}
+  {mutation.pending&&<button type="button" disabled={busy} onClick={()=>void send('retry')}>{message('重试原切换审核请求')}</button>}
  </section>;
 }
