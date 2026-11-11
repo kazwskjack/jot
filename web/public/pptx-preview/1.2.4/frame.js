@@ -5,6 +5,40 @@ import {createPptxRegion} from './pptx-region.js';
 const parentHost=new URLSearchParams(location.search).get('parent');
 if(!parentHost||!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(parentHost))throw Error('PPTX_PARENT_INVALID');
 const parentOrigin='http://'+parentHost,controller=new AbortController(),content=document.getElementById('content'),status=document.getElementById('status');
+// Keep language changes on owned UI nodes, outside document text and view/search state.
+let language='zh-CN';
+const labels=new Map();
+const showLabel=entry=>{
+ const text=language==='en'?entry.en:entry.zh;
+ if(entry.attribute)entry.element.setAttribute(entry.attribute,text);else entry.element.textContent=text;
+};
+const ui=(element,zh,en,attribute='')=>{
+ let fields=labels.get(element);if(!fields){fields=new Map();labels.set(element,fields);}
+ const entry={element,zh,en,attribute};fields.set(attribute,entry);showLabel(entry);
+};
+for(const element of document.querySelectorAll('[data-jot-ui-en]'))ui(element,element.textContent,element.dataset.jotUiEn);
+for(const element of document.querySelectorAll('[data-jot-ui-aria-en]'))ui(element,element.getAttribute('aria-label'),element.dataset.jotUiAriaEn,'aria-label');
+const setLanguage=value=>{
+ if(language===value)return;language=value;document.documentElement.lang=value;
+ for(const fields of labels.values())for(const entry of fields.values())showLabel(entry);
+};
+const notices={
+ "区域边长至少需要8个显示像素。": "Region sides must be at least 8 display pixels.",
+ "区域已选中，请在查看器下方确认截图引用。": "The region is selected. Confirm the screenshot reference below the viewer.",
+ "截图区域已取消。": "The screenshot region was cancelled.",
+ "在当前幻灯片内拖动框选，或选择整张幻灯片。": "Drag within the current slide or select the whole slide.",
+ "正在生成有界幻灯片PNG…": "Generating a bounded slide PNG…",
+ "截图引擎尚未就绪。": "The screenshot engine is not ready.",
+ "截图引擎读取失败。": "Loading the screenshot engine failed.",
+ "原生幻灯片截图句柄未就绪。": "The native slide screenshot handle is not ready.",
+ "原幻灯片尺寸已变化。": "The original slide dimensions changed.",
+ "原幻灯片已变化。": "The original slide changed.",
+ "PNG编码失败。": "PNG encoding failed.",
+ "截图超过当前8 MiB范围。": "The screenshot exceeds the 8 MiB limit.",
+ "PNG已生成，正在交给原草稿上传入口。": "The PNG was generated and is being handed to the original draft upload entry.",
+ "区域截图失败。": "Region screenshot capture failed."
+};
+const notice=(element,message)=>ui(element,message,Object.hasOwn(notices,message)?notices[message]:message);
 const query=document.getElementById('query'),slide=document.getElementById('slide'),counter=document.getElementById('matches');
 const batchPrevious=document.getElementById('search-batch-previous'),batchNext=document.getElementById('search-batch-next');
 const thumbnails=document.getElementById('thumbnails'),thumbnailList=document.getElementById('thumbnail-list'),thumbnailToggle=document.getElementById('thumbnail-toggle');
@@ -45,6 +79,7 @@ const clearThumbnails=()=>{
  thumbnailGeneration++;
  for(const handle of thumbnailHandles)handle.dispose();
  thumbnailHandles=[];
+ for(const button of thumbnailList.querySelectorAll('button'))labels.delete(button);
  thumbnailList.replaceChildren();
 };
 const clearHighlights=()=>{
@@ -53,7 +88,7 @@ const clearHighlights=()=>{
  highlights=[];viewer?.clearSearchHighlights();
 };
 const dispose=()=>{clearTimeout(viewTimer);viewGeneration++;restoreScroll=undefined;window.removeEventListener('scroll',scheduleView,true);window.removeEventListener('blur',reportView);for(const type of ['pointerdown','wheel','keydown'])window.removeEventListener(type,cancelViewRestore,true);closed=true;searchGeneration++;searchStarts=[];controller.abort();clearTimeout(searchTimer);slideObserver?.disconnect();region?.dispose();clearThumbnails();clearHighlights();viewer?.destroy();viewer=undefined;matches=[];content.replaceChildren();};
-const fail=()=>{if(closed)return;report({type:'jot-pptx-error',code:'PPTX_RENDER_FAILED'});dispose();status.textContent='幻灯片视觉读取失败';};
+const fail=()=>{if(closed)return;report({type:'jot-pptx-error',code:'PPTX_RENDER_FAILED'});dispose();ui(status,'幻灯片视觉读取失败','Slide visual reading failed');};
 const controls=()=>{
  const ready=!!viewer&&!closed,working=busy||rendering;slide.disabled=!ready||working;query.disabled=!ready;
  query.closest('nav').setAttribute('aria-busy',String(working));
@@ -95,7 +130,7 @@ const renderThumbnailPage=page=>{
    const button=document.createElement('button'),image=document.createElement('span'),label=document.createElement('span');
    button.type='button';
    button.dataset.slideIndex=String(index);
-   button.setAttribute('aria-label',`转到第 ${index+1} 张幻灯片`);
+   ui(button,`转到第 ${index+1} 张幻灯片`,`Go to Slide ${index+1}`,'aria-label');
    image.className='thumbnail-image';
    image.setAttribute('aria-hidden','true');
    image.inert=true;
@@ -174,15 +209,15 @@ const showMatch=async(delta,generation=searchGeneration)=>{
  const selected=matches[matchIndex];clearHighlights();await viewer.goToSlide(selected.slideIndex);
  if(generation!==searchGeneration||closed)return;
  await paintCurrentSlide(generation,selected);
- if(generation===searchGeneration&&!closed)counter.textContent=`第 ${searchBatch+1} 批 · ${matchIndex+1} / ${matches.length}`;
+ if(generation===searchGeneration&&!closed)ui(counter,`第 ${searchBatch+1} 批 · ${matchIndex+1} / ${matches.length}`,`Batch ${searchBatch+1} · ${matchIndex+1} / ${matches.length}`);
 };
 const search=async(generation,value,page=0)=>{
  if(generation!==searchGeneration||closed)return;
- if(value.length>200){counter.textContent='查找文字最多200字符';return;}
+ if(value.length>200){ui(counter,'查找文字最多200字符','Search text is limited to 200 characters');return;}
  clearHighlights();matches=[];matchIndex=0;hasNextSearchBatch=false;
  const found=[],cursor=searchStarts[page];
  let more=false,nextCursor,steps=0;
- counter.textContent=`正在搜索第 ${page+1} 批…`;
+ ui(counter,`正在搜索第 ${page+1} 批…`,`Searching batch ${page+1}…`);
  if(value.trim()){
   const data=viewer.presentationData;
   outer:for(let index=cursor.slideIndex;index<data.slides.length;index++){
@@ -205,7 +240,7 @@ const search=async(generation,value,page=0)=>{
      // Revisit only the unmatched tail so literal matches crossing windows remain reachable.
      offset+=hits.length?hits[hits.length-1].matchEnd:Math.max(1,chunk.length-value.length+1);
      if(++steps%8===0){
-      counter.textContent=`正在搜索第 ${page+1} 批 · 已找到 ${found.length} 处`;
+      ui(counter,`正在搜索第 ${page+1} 批 · 已找到 ${found.length} 处`,`Searching batch ${page+1} · ${found.length} matches found`);
       await new Promise(resolve=>setTimeout(resolve,0));
      }
     }
@@ -216,15 +251,15 @@ const search=async(generation,value,page=0)=>{
  if(generation!==searchGeneration||closed)return;
  searchStarts.length=page+1;if(more)searchStarts.push(nextCursor);
  searchBatch=page;hasNextSearchBatch=more;matches=found;
- document.getElementById('coverage').textContent=more?'当前批最多1000处，可继续搜索后续全部已接纳文字。':value.trim()?'已搜索至演示文稿末尾。':'';
- counter.textContent=matches.length?`第 ${page+1} 批 · 1 / ${matches.length}`:value.trim()?'没有匹配':'尚未搜索';
+ ui(document.getElementById('coverage'),more?'当前批最多1000处，可继续搜索后续全部已接纳文字。':value.trim()?'已搜索至演示文稿末尾。':'',more?'Up to 1000 matches in this batch. Continue to search all remaining admitted text.':value.trim()?'Searched to the end of the presentation.':'');
+ ui(counter,matches.length?`第 ${page+1} 批 · 1 / ${matches.length}`:value.trim()?'没有匹配':'尚未搜索',matches.length?`Batch ${page+1} · 1 / ${matches.length}`:value.trim()?'No matches':'Not searched');
  if(matches.length)await showMatch(0,generation);
 };
 const schedule=()=>{
  const generation=++searchGeneration,value=query.value;
  clearTimeout(searchTimer);matches=[];clearHighlights();
  searchBatch=0;searchStarts=[{slideIndex:0,entryIndex:0,offset:0}];hasNextSearchBatch=false;
- document.getElementById('coverage').textContent='';controls();counter.textContent='等待搜索';
+ ui(document.getElementById('coverage'),'','');controls();ui(counter,'等待搜索','Waiting to search');
  searchTimer=setTimeout(()=>run(()=>search(generation,value)),180);
 };
 const changeSearchBatch=delta=>{
@@ -247,20 +282,22 @@ addEventListener('pagehide',()=>{reportView();if(started&&!closed)report({type:'
 addEventListener('message',async event=>{
  if(closed||event.source!==parent||event.origin!==parentOrigin||!event.data||typeof event.data!=='object'||Array.isArray(event.data))return;
  const value=event.data;
+ if(started&&value.type==='jot-pptx-language'&&value.protocol===1&&value.token===token
+  &&Object.keys(value).sort().join(',')==='language,protocol,token,type'&&['zh-CN','en'].includes(value.language)){setLanguage(value.language);return;}
  if(value.type==='jot-pptx-probe'&&value.protocol===1&&Object.keys(value).length===2){boot();return;}
  if(started&&value.protocol===1&&value.token===token&&Object.keys(value).length===4){if(value.type==='jot-pptx-view-probe'&&viewer)restoreView(value.view);else region?.command(value);return;}
  if(started||value.type!=='jot-pptx-init'||value.protocol!==1||typeof value.token!=='string'||!/^[a-f0-9-]{36}$/.test(value.token)||Object.keys(value).length!==4
   ||!(value.bytes instanceof ArrayBuffer)||value.bytes.byteLength>32*1024*1024)return;
- started=true;token=value.token;status.textContent='正在读取原幻灯片…';
+ started=true;token=value.token;ui(status,'正在读取原幻灯片…','Reading original slides…');
  try{
   const next=await PptxViewer.open(value.bytes,content,{renderMode:'slide',fitMode:'contain',zoomPercent:100,
    zipLimits:{...RECOMMENDED_ZIP_LIMITS,maxEntryUncompressedBytes:8*1024*1024,maxTotalUncompressedBytes:32*1024*1024,maxMediaBytes:32*1024*1024,maxConcurrency:2},
    lazyMedia:true,lazySlides:true,pdfjs:false,signal:controller.signal,onSlideChange:controls,onSlideError:fail,
    onRenderStart:()=>{clearHighlights();rendering=true;controls();reportWork();},onRenderComplete:()=>{rendering=false;controls();reportWork();},
-   onNodeError:()=>{partial=true;status.textContent='部分节点尚未成功绘制，请对照原文件。';}});
+   onNodeError:()=>{partial=true;ui(status,'部分节点尚未成功绘制，请对照原文件。','Some nodes did not render successfully. Compare with the original file.');}});
   if(closed){next.destroy();return;}viewer=next;
   if(!Number.isSafeInteger(viewer.slideCount)||viewer.slideCount<1||viewer.slideCount>50000)throw Error('PPTX_VIEW_LIMIT');
-  region=createPptxRegion({content,getViewer:()=>viewer,isWorking:()=>busy||rendering,report,run});
+  region=createPptxRegion({content,getViewer:()=>viewer,isWorking:()=>busy||rendering,report,run,notice});
   slideObserver=new MutationObserver(()=>{
    if(closed)return;
    region.invalidate();clearHighlights();needsHighlights=!!query.value.trim();
@@ -269,7 +306,7 @@ addEventListener('message',async event=>{
    if(thumbnailOpen)renderThumbnailPage(Math.floor(viewer.currentSlideIndex/4));
   });
   slideObserver.observe(content,{childList:true});
-  status.textContent=partial?'部分节点尚未成功绘制，请对照原文件。':'原幻灯片视觉内容';controls();report({type:'jot-pptx-ready',info:{slides:viewer.slideCount,partial}});reportWork();
+  ui(status,partial?'部分节点尚未成功绘制，请对照原文件。':'原幻灯片视觉内容',partial?'Some nodes did not render successfully. Compare with the original file.':'Original slide visual content');controls();report({type:'jot-pptx-ready',info:{slides:viewer.slideCount,partial}});reportWork();
  }catch{if(!controller.signal.aborted)fail();}finally{value.bytes=null;}
 });
 boot();

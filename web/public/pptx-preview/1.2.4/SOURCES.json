@@ -56,6 +56,11 @@
     {
       "path": "web/public/pptx-preview/1.2.4/frame.js",
       "changes": "Adds original-window/origin/protocol/token-bound view-probe and bounded view reports. Parent retains32 owner/source-keyed views. Word keeps zoom/outline/scroll, PPTX keeps slide/zoom/thumbnails/scroll, XLSX keeps actual sheet/zoom/scroll through original native API commands and serialized renderer queue. Explicit quote focus suppresses older saved viewport restoration. Frame timers/scroll subscriptions are released on closure; reports coalesce scroll updates at160ms. Original library and renderer assets remain unchanged."
+    },
+    {
+      "path": "web/public/pptx-preview/1.2.4/frame.js",
+      "upstream_path": "ui/src/components/code-editor/view/subcomponents/PptxBuiltinPreview.tsx",
+      "changes": "Adapts pinned useTranslation display to saved Jot language through exact parent-window/origin/protocol/token/four-field language admission after original initialization. Binds only owned navigation/search/status/thumbnail aria/region labels. Original slide DOM, raw slide text, search indices/cursors/highlights/generations, native render queue, partial errors, four-handle thumbnail paging and source/capture/view messages remain. Old thumbnail language bindings are released with original handles on page changes; language never re-renders slides or starts search/capture/navigation. Original assets/CSP unchanged; no runtime execution performed."
     }
   ]
 }

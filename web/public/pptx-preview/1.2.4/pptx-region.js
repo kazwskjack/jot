@@ -14,7 +14,7 @@ function loadEngine(){
  return engine;
 }
 
-export function createPptxRegion({content,getViewer,isWorking,report,run}){
+export function createPptxRegion({content,getViewer,isWorking,report,run,notice}){
  const controller=new AbortController(),options={signal:controller.signal};
  const captureCharts=new Set();
  const startButton=document.getElementById('region-start'),whole=document.getElementById('region-whole'),cancel=document.getElementById('region-cancel'),status=document.getElementById('region-status');
@@ -48,13 +48,13 @@ export function createPptxRegion({content,getViewer,isWorking,report,run}){
  const choose=rect=>{
   const bounds=attach()?.getBoundingClientRect(),stamp=view();
   if(!bounds||!stamp||[stamp.width,stamp.height].some(value=>!Number.isFinite(value)||value<=0||value>33554432)
-   ||rect.width*bounds.width<8||rect.height*bounds.height<8){clear();status.textContent='区域边长至少需要8个显示像素。';return;}
+   ||rect.width*bounds.width<8||rect.height*bounds.height<8){clear();notice(status,'区域边长至少需要8个显示像素。');return;}
   selection={serial:++serial,rect,view:stamp};draw(rect);send();controls();
-  status.textContent='区域已选中，请在查看器下方确认截图引用。';
+  notice(status,'区域已选中，请在查看器下方确认截图引用。');
  };
  const stop=()=>{
   if(capturing){report({type:'jot-pptx-capture-cancel',reason:'cancelled'});return;}
-  active=false;clear();status.textContent='截图区域已取消。';
+  active=false;clear();notice(status,'截图区域已取消。');
  };
  const invalidate=()=>{
   if(disposed)return;
@@ -64,7 +64,7 @@ export function createPptxRegion({content,getViewer,isWorking,report,run}){
  startButton.addEventListener('click',()=>{
   if(!enabled||capturing||isWorking())return;
   active=true;attach();clear();window.getSelection()?.removeAllRanges();
-  status.textContent='在当前幻灯片内拖动框选，或选择整张幻灯片。';
+  notice(status,'在当前幻灯片内拖动框选，或选择整张幻灯片。');
  },options);
  whole.addEventListener('click',()=>{if(active&&!capturing&&!isWorking())choose({x:0,y:0,width:1,height:1});},options);
  cancel.addEventListener('click',stop,options);
@@ -110,7 +110,7 @@ export function createPptxRegion({content,getViewer,isWorking,report,run}){
   if(disposed||!enabled||capturing||!selection||selection.serial!==expected)return;
   const original=selection;
   if(!sameView(view(),original.view)){clear();return;}
-  capturing=true;controls();status.textContent='正在生成有界幻灯片PNG…';
+  capturing=true;controls();notice(status,'正在生成有界幻灯片PNG…');
   try{
    const render=await loadEngine();if(disposed)return;
    captureRoot=document.createElement('div');captureRoot.inert=true;captureRoot.setAttribute('aria-hidden','true');
@@ -142,9 +142,9 @@ export function createPptxRegion({content,getViewer,isWorking,report,run}){
    const nearbyText=(element.textContent??'').replace(/\s+/g,' ').trim().slice(0,1000),bytes=await blob.arrayBuffer();
    if(disposed)return;
    report({type:'jot-pptx-capture',capture:{selection:original,width:widthPng,height:heightPng,bytes,nearbyText}},[bytes]);
-   status.textContent='PNG已生成，正在交给原草稿上传入口。';
+   notice(status,'PNG已生成，正在交给原草稿上传入口。');
   }catch(error){
-   if(!disposed){status.textContent=error instanceof Error?error.message:'区域截图失败。';report({type:'jot-pptx-capture-error',reason:'capture_failed'});}
+   if(!disposed){notice(status,error instanceof Error?error.message:'区域截图失败。');report({type:'jot-pptx-capture-error',reason:'capture_failed'});}
   }finally{cleanupCapture();capturing=false;if(!disposed)controls();}
  };
  const restore=async focus=>{

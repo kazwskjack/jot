@@ -10,6 +10,9 @@ import OfficeFileRegionReference,{type OfficeRegionSession} from './OfficeFileRe
 
 function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:FileViewingSource;owner:string;identity:string;officeRegionFocus?:OfficeRegionFocus}){
  const language=useApplicationLanguage(),t=useApplicationText();
+ const currentLanguage=useRef(language);currentLanguage.current=language;
+ const setViewerLanguage=useRef<()=>void>(()=>{});
+ useEffect(()=>{setViewerLanguage.current();},[language]);
  const referenceSource=fileViewingReferenceSource(source);
  const frame=useRef<HTMLIFrameElement>(null),probe=useRef<(element:HTMLIFrameElement)=>void>(()=>{}),cancel=useRef<()=>void>(()=>{});
  const regionSession=useRef<OfficeRegionSession|undefined>(undefined);
@@ -20,10 +23,11 @@ function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:FileViewi
   const dispose=()=>{closed=true;controller.abort();bytes=undefined;window.clearTimeout(timer);window.removeEventListener('message',message);window.document.removeEventListener('securitypolicyviolation',policy);};
   const fail=(message:string)=>{if(closed)return;dispose();setState({phase:'error',message});};
   const arm=()=>{window.clearTimeout(timer);timer=window.setTimeout(()=>fail('幻灯片视觉读取超时，请重读或重新加载Jot页面。'),30000);};
+  setViewerLanguage.current=()=>{if(live()&&sent&&origin)frame.current?.contentWindow?.postMessage({type:'jot-pptx-language',protocol:1,token,language:currentLanguage.current},origin);};
   const send=()=>{
    if(!live()||!booted||sent||!origin||!bytes||!frame.current?.contentWindow)return;
    sent=true;
-   try{frame.current.contentWindow.postMessage({type:'jot-pptx-init',protocol:1,token,bytes},origin,[bytes]);bytes=undefined;}
+   try{frame.current.contentWindow.postMessage({type:'jot-pptx-init',protocol:1,token,bytes},origin,[bytes]);bytes=undefined;setViewerLanguage.current();}
    catch{fail('原幻灯片未能交给视觉查看器，请重试。');}
   };
   const message=(event:MessageEvent)=>{
@@ -56,7 +60,7 @@ function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:FileViewi
    const verified=await readFileVisualSourceBytes(source,owner,controller.signal);if(!live())return;bytes=verified.buffer as ArrayBuffer;send();
   };
   void load().catch(error=>{if(!controller.signal.aborted)fail(error instanceof Error?error.message:'原幻灯片读取失败');});
-  return()=>{dispose();regionSession.current=undefined;probe.current=()=>{};cancel.current=()=>{};};
+  return()=>{dispose();regionSession.current=undefined;setViewerLanguage.current=()=>{};probe.current=()=>{};cancel.current=()=>{};};
  },[identity,owner]);
  return <section lang={language} className="jot-pptx-preview" aria-label={t('原幻灯片视觉内容','Original Slide Visual Content')}>
   <p role={state.phase==='error'?'alert':'status'}>{state.working?t('正在绘制或搜索幻灯片…','Rendering or searching slides…'):state.phase==='ready'&&state.slides!==undefined?t(state.message,`${state.slides} slides read${state.partial?'; some nodes did not render successfully. Compare with the original file.':'.'}`):conversationUiError(state.message,language)} {(state.phase==='loading'||state.working)&&<button type="button" onClick={()=>cancel.current()}>{t('取消并关闭视觉查看器','Cancel and Close Visual Viewer')}</button>}</p>
