@@ -1,3 +1,4 @@
+export function publicNativeTodoInput(data:Record<string,unknown>):import('../../contracts/types.js').NativeTodoInput|undefined;
 export type NativeArtifactReceipt=import('../../contracts/types.js').ActivityResultArtifact;
 export function publicNativeFileSearch(value:unknown):import('../../contracts/types.js').NativeFileSearch|undefined;
 export function collectArtifactRefs(value: unknown, output?: Set<string>, receipts?: Map<string,NativeArtifactReceipt>): void;

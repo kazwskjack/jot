@@ -29435,6 +29435,7 @@
         ],
         "additionalProperties": false
       },
+      "NativeTodoInput": {"description":"Bounded public projection of actual native todo tool input, not a task/goal completion receipt. Captured only from original unsummarized authorized calls; old immutable summarized member call vocabularies are unchanged. Capture is limited to512KiB UTF8 JSON; larger inputs expose source_limit. Do not infer successful application from this input.","oneOf":[{"type":"object","additionalProperties":false,"required":["format","items"],"properties":{"format":{"const":"items"},"items":{"type":"array","maxItems":16384,"items":{"type":"object","additionalProperties":false,"required":["content","status"],"properties":{"content":{"type":"string","minLength":1,"maxLength":524288},"status":{"enum":["pending","in_progress","completed"]}}}}}},{"type":"object","additionalProperties":false,"required":["format","text"],"properties":{"format":{"const":"markdown"},"text":{"type":"string","maxLength":524288}}},{"type":"object","additionalProperties":false,"required":["format"],"properties":{"format":{"const":"source_limit"}}}]},
       "Activity_subagent": {
         "type": "object",
         "properties": {
@@ -29490,9 +29491,19 @@
           "detail": {
             "type": "object",
             "properties": {
-              "native_search_call_seq": {"type":"integer","minimum":0,"maximum":9007199254740991},
-              "native_search_result_seq": {"type":"integer","minimum":0,"maximum":9007199254740991},
-              "file_search": {"$ref": "#/components/schemas/NativeFileSearch"},
+              "native_search_call_seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "native_search_result_seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "file_search": {
+                "$ref": "#/components/schemas/NativeFileSearch"
+              },
               "child_run_id": {
                 "type": "string",
                 "pattern": "^[A-Za-z0-9][A-Za-z0-9_:\\-]{0,127}$"
@@ -29540,12 +29551,37 @@
                 "items": {
                   "$ref": "#/components/schemas/ActivityResultArtifact"
                 }
+              },
+              "todo_input": {
+                "$ref": "#/components/schemas/NativeTodoInput"
               }
             },
             "required": [
               "child_run_id"
             ],
-            "additionalProperties": false
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "required": [
+                    "todo_input"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "tool_name"
+                  ],
+                  "properties": {
+                    "tool_name": {
+                      "enum": [
+                        "todo_write",
+                        "TodoWrite"
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
           }
         },
         "required": [

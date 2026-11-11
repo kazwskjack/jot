@@ -1,3 +1,4 @@
+import NativeTodoInputContent from './NativeTodoInputContent';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 // Phase grouping and expandable nested tool history adapt PilotDeck 783499ff,
 // AgentTimeline.tsx/SubagentContainer.tsx. Adapted portions retain AGPL-3.0 terms.
@@ -75,6 +76,7 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,
      {row.issue&&<p role="status" data-chat-search-ignore>{row.issue}</p>}
      {isExpanded&&<>
       {status==='unknown'&&activity.status!=='unknown'&&<p role="status" data-chat-search-ignore>所属运行已结束，此步骤尚无终态回执。</p>}
+      {activity.kind==='subagent'&&activity.detail.todo_input&&<NativeTodoInputContent value={activity.detail.todo_input} sourceKey={JSON.stringify([activity.run_id,activity.activity_id,activity.tool_call_id])}/>}
       <dl>{activityDetailRows(activity).map((detail,index)=><React.Fragment key={index}><dt>{detail.label}</dt><dd style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{detail.value}</dd></React.Fragment>)}</dl>
       {typeof activity.detail.tool_name==='string'&&(activity.detail.tool_name==='jot_workspace'||/^jot_mcp_[a-z0-9_]{1,50}$/.test(activity.detail.tool_name)
        ||(activity.kind==='search'||activity.kind==='subagent')&&['glob','grep'].includes(activity.detail.tool_name)&&activity.detail.file_search)&&<button type="button" data-chat-search-ignore onClick={()=>onOpenToolResult(activity)}>查看工具结果正文</button>}

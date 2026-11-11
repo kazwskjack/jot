@@ -246,6 +246,32 @@ export function safeWebOperationUrl(value) {
 }
 
 
+/** Only the declared native todo input becomes public; all other tool arguments remain private. */
+export function publicNativeTodoInput(data) {
+  const name=data?.name??data?.toolName??data?.tool;
+  if(name!=='todo_write'&&name!=='TodoWrite')return;
+  const limit=524288,limited=()=>({format:'source_limit'});
+  let args;
+  try{
+    if(typeof data.arguments==='string'&&Buffer.byteLength(data.arguments,'utf8')>limit)return limited();
+    args=record(typeof data.arguments==='string'?JSON.parse(data.arguments):data.arguments);
+  }catch{return;}
+  if(!args)return;
+  if(name==='TodoWrite'&&typeof args.markdown==='string'&&Object.keys(args).length===1){
+    const value={format:'markdown',text:args.markdown};return Buffer.byteLength(JSON.stringify(value),'utf8')<=limit?value:limited();
+  }
+  if(Object.keys(args).join(',')!=='todos'||!Array.isArray(args.todos))return;
+  if(args.todos.length>16384)return limited();
+  const items=[];let bytes=0;
+  for(const item of args.todos){
+    if(!record(item)||Object.keys(item).sort().join(',')!=='content,status'||typeof item.content!=='string'
+      ||!item.content.trim()||!['pending','in_progress','completed'].includes(item.status))return;
+    bytes+=Buffer.byteLength(item.content,'utf8');if(bytes>limit)return limited();
+    items.push({content:item.content,status:item.status});
+  }
+  const value={format:'items',items};return Buffer.byteLength(JSON.stringify(value),'utf8')<=limit?value:limited();
+}
+
 /** Extract only the original public argument vocabulary for tool activities. */
 export function publicNativeToolCall(data) {
   let args = null

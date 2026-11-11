@@ -1,4 +1,4 @@
-import {publicNativeFileSearch,publicNativeToolResult,publicNativeToolCall,sessionToolCallId,type PublicNativeToolResult,type PublicNativeToolCall,type NativeArtifactReceipt} from './native-tool-result.js'
+import {publicNativeTodoInput,publicNativeFileSearch,publicNativeToolResult,publicNativeToolCall,sessionToolCallId,type PublicNativeToolResult,type PublicNativeToolCall,type NativeArtifactReceipt} from './native-tool-result.js'
 import {createHash} from 'node:crypto'
 import {
   safeWebOperationCounts, safeWebOperationId, safeWebOperationItems, safeWebOperationUrl,
@@ -115,6 +115,8 @@ function toolActivity(data: Record<string, unknown>, context: ProjectionContext,
     const name = data.name ?? data.toolName ?? data.tool
     if (typeof name === 'string' && name) detail.tool_name = name
     const observed = publicCall ?? publicNativeToolCall(data)
+    // Summarized member calls retain their existing immutable vocabulary until a negotiated projection upgrade.
+    if(tool.kind==='subagent'&&!completed&&!publicCall){const todo=publicNativeTodoInput(data);if(todo)detail.todo_input=todo;}
     if (tool.kind === 'subagent' && name === 'jot_workspace' && observed.delegates
       && typeof rawCallId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(rawCallId)
       && context.sessionRef) {

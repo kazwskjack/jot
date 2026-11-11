@@ -61,7 +61,8 @@ export function activityDetailRows(activity:ToolActivity):Array<{label:string;va
    if(activity.detail.child_run_id!==activity.run_id)add('子运行',activity.detail.child_run_id);
    add('成员会话',activity.detail.child_conversation_id);add('原成员',activity.detail.child_session_ref);add('成员角色',activity.detail.role_ref);
    add('委派请求',activity.detail.native_request_id);add('成员预留',activity.detail.reservation_id);
-   add('公开摘要',activity.detail.summary);break;
+   add('公开摘要',activity.detail.summary);
+   if(activity.detail.todo_input)add('清单输入',activity.detail.todo_input.format==='items'?`${activity.detail.todo_input.items.length} 项原请求条目`:activity.detail.todo_input.format==='markdown'?'原请求Markdown清单':'超出公开展示范围');break;
   case 'crawl':
    add('批次',activity.detail.batch_id);add('抓取操作',activity.detail.operation);
    add('请求数量',activity.detail.requested_count);add('完成数量',activity.detail.completed_count);add('失败数量',activity.detail.failed_count);
@@ -190,5 +191,7 @@ export function visibleActivityRows(rows:ActivityRow[],expanded:Record<string,bo
 export function activitySearchText(activity:ToolActivity,run?:ActivityRun){
  const status=activityDisplayStatus(activity,run);
  return [activityKindLabels[activity.kind],activity.title,activityStatusLabels[status]??activityStatusLabels.unknown,
-  ...activityDetailRows(activity).flatMap(detail=>[detail.label,detail.value])].join('\n');
+  ...activityDetailRows(activity).flatMap(detail=>[detail.label,detail.value]),
+  ...(activity.kind==='subagent'&&activity.detail.todo_input?.format==='items'?activity.detail.todo_input.items.flatMap(item=>[item.content,item.status])
+   :activity.kind==='subagent'&&activity.detail.todo_input?.format==='markdown'?[activity.detail.todo_input.text]:[])].join('\n');
 }
