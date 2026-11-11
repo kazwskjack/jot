@@ -7,6 +7,7 @@ import {createHostSettingsRecovery} from './host-settings-recovery.mjs';
 import {useLayoutDisplayPreferences,useMessageDisplayPreferences,useToolDisplayPreference} from '../jot/useToolDisplayPreference';
 import HostCredentialsPanel from './HostCredentialsPanel';
 import SettingsTerminalPanel from './SettingsTerminalPanel';
+import ModelCatalogPanel from './ModelCatalogPanel';
 import PluginProfilesPanel from './PluginProfilesPanel';
 import DesktopUpdatesPanel from './DesktopUpdatesPanel';
 import DesktopAboutPanel from './DesktopAboutPanel';
@@ -227,12 +228,7 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
    <HostSettingsReadPanel enabled={settingsReadEnabled} namespaces={caps.workbench?.host_settings_read_namespaces} client={client} scopeKey={currentTaskScope}/>
    <HostSettingsPanel enabled={settingsEnabled} state={settings} readiness={null} onDraftChange={draft=>setSettings(state=>hostSettingsDraftChanged(state,draft))} onUseHostValues={()=>setSettings(state=>hostSettingsUseServerSnapshot(state))} onReload={()=>void reloadSettings()} onSave={()=>void saveSettings()}/>
    <OnboardingPanel enabled={onboardingEnabled} state={onboarding} readiness={readiness} settingsApplyAvailable={settingsEnabled&&!!onboardingHostSettingsDraft(settings,onboarding.draft)} settingsSaving={settings.saving} onApplySettings={()=>void applyOnboardingSettings()} onDraftChange={draft=>setOnboarding(state=>onboardingDraftChanged(state,draft))} onUseHostDraft={()=>setOnboarding(state=>onboardingUseServerSnapshot(state))} onReload={()=>void reloadOnboarding()} onSave={()=>void saveOnboarding()}/>
-   <section lang={language} className="wb-form" aria-labelledby="wb-settings-catalog">
-    <h3 id="wb-settings-catalog">{t("模型目录","Model Catalog")}</h3>
-    <p className="wb-status">{t("模型目录只表示已发现的条目，不代表凭据有效、模型调用已验证或 RuntimeReadiness 已就绪。","The model catalog lists discovered entries. It does not confirm valid credentials, verified model calls or RuntimeReadiness.")}</p>
-    {Array.isArray(caps.models)&&caps.models.length? <ul className="wb-settings-list">{caps.models.map((item,index)=>{const row=record(item);const provider=typeof row?.provider==='string'?row.provider:'未知提供方';const model=typeof row?.model==='string'?row.model:'未知模型';return <li key={`${provider}:${model}:${index}`}><strong>{typeof row?.model==='string'?model:t('未知模型','Unknown Model')}</strong><span>{typeof row?.provider==='string'?provider:t('未知提供方','Unknown Provider')}</span></li>;})}</ul>:<p className="wb-status">{t("目录未知或为空。","The catalog is unknown or empty.")}</p>}
-    <p className="wb-settings-note">{t("提供方测试：未验证（Host 测试接口未在此界面开放）。","Provider verification: unverified (the Host test interface is not exposed here).")}</p>
-   </section>
+   <ModelCatalogPanel models={caps.models}/>
   </div>
  </>;
 }

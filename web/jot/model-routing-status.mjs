@@ -1,6 +1,17 @@
 const HEALTH={healthy:'健康',unhealthy:'当前不可用',stale:'健康检查已过期',unknown:'健康状态未知'};
 const HEALTH_EN={healthy:'Healthy',unhealthy:'Currently unavailable',stale:'Health check expired',unknown:'Health unknown'};
 const plain=value=>!!value&&typeof value==='object'&&!Array.isArray(value);
+/** Match the original Host receipt freshness rules without issuing a provider call. */
+export function modelHealthAt(health,now=Date.now()){
+ const unknown={status:'unknown',observed_at:null,expires_at:null};
+ if(!plain(health)||Object.keys(health).sort().join(',')!=='expires_at,observed_at,status'
+  ||!['healthy','unhealthy','stale','unknown'].includes(health.status))return unknown;
+ if(health.status==='unknown')return unknown;
+ const {observed_at,expires_at}=health;
+ if(!Number.isSafeInteger(observed_at)||observed_at<0||!Number.isSafeInteger(expires_at)||expires_at<observed_at)return unknown;
+ const stale=health.status==='stale'||!Number.isSafeInteger(now)||now<observed_at||now>=expires_at;
+ return {status:stale?'stale':health.status,observed_at,expires_at};
+}
 export function modelHealthLabel(health,language='zh-CN'){
  const labels=language==='en'?HEALTH_EN:HEALTH;return plain(health)&&Object.hasOwn(labels,health.status)?labels[health.status]:labels.unknown;
 }

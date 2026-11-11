@@ -39,7 +39,8 @@ import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import RunDiagnostics from './RunDiagnostics';
 import {RunCancelWriter} from './run-cancel.mjs';
 import {ConversationModeWriter,conversationModeSupport} from './conversation-mode.mjs';
-import {modelRoutingStatus,modelSelectionPreservingFallbacks} from './model-routing-status.mjs';
+import {modelSelectionPreservingFallbacks} from './model-routing-status.mjs';
+import ModelRoutingStatus from './ModelRoutingStatus';
 import {ConversationForkWriter,conversationForkRetrySource} from './conversation-fork-controller.mjs';
 import {ConversationForkAction} from './conversation-fork-action.mjs';
 import PromptComposer from './PromptComposer';
@@ -315,7 +316,6 @@ function ConversationContent({id,onClose,onReload,onTaskSource,onForkConversatio
   const recoveryRun=recoveryRuns.find(value=>value.run_id===recoveryRunId)??recoveryRuns[0];
   const queryRecoveryMount=catalogMountForRun(recoveryRun?.run_id,taskDraftScope(),ordinary);
  const chatMode=ordinary&&conversation?.mode==='chat';
- const routingStatus=modelRoutingStatus(conversation?.model,models,language);
  let modes={aware:false,default:'work',chatReady:false},modeCapabilityError='';
  try{modes=conversationModeSupport(modeCaps);}catch(e){modeCapabilityError=e instanceof Error?e.message:'对话模式能力尚未确认';}
  const chatUnavailable=chatMode&&!!modeCaps&&!modes.chatReady;
@@ -593,7 +593,7 @@ function ConversationContent({id,onClose,onReload,onTaskSource,onForkConversatio
  {!uploads.recoveryReady&&!uploadRecoveryError&&<p lang={language} role="status">{t("正在读取原上传回执…","Loading original upload receipts…")}</p>}
  {preview&&<section lang={language} role="region" aria-label={t("附件预览","Attachment Preview")} className="jot-file-preview"><h3 lang={language}>{preview.name}</h3><button lang={language} onClick={()=>{previewRequest.current?.abort();previewRequest.current=undefined;setPreview(undefined);}}>{t("关闭预览","Close Preview")}</button>{preview.loading&&<p lang={language} role="status">{t("正在读取文件内容…","Loading file content…")}</p>}{preview.url&&<img src={preview.url} alt={preview.name}/>} {preview.text!==undefined&&<pre>{preview.text}</pre>}{preview.truncated&&<p lang={language}>{t("预览内容已截短","Preview content is truncated")}</p>}{preview.unsupported&&<p lang={language}>{t("此文件暂不支持在线预览","Online preview is not supported for this file")}</p>}</section>}
  <input ref={fileInput} type="file" aria-label={t("添加文件","Attach Files")} multiple hidden disabled={!state||busy||cancelWriter.pending||goalPending||messageLocked||uploads.blocked||uploads.unresolved||!maxBytes} onChange={select}/>
- {ordinary&&!chatMode&&conversation&&<aside lang={language} className="jot-model-routing-status" aria-label={t("模型路由状态","Model Routing Status")}><p lang={language} role="status">{routingStatus.primary}</p><p lang={language}>{routingStatus.fallbacks}</p></aside>}
+ {ordinary&&!chatMode&&conversation&&<ModelRoutingStatus selection={conversation.model} models={models}/>}
  <input ref={folderInput} type="file" aria-label={t("添加文件夹","Attach Folder")} multiple hidden disabled={!state||busy||cancelWriter.pending||goalPending||messageLocked||uploads.blocked||uploads.unresolved||!maxBytes} onChange={select}/>
  {ordinary&&!chatMode&&goalMode&&<p lang={language} role="status">{t("目标模式","Goal Mode")}</p>}
  <AssistantReplyQuoteAction root={conversationRegion} conversationId={id} disabled={quoteLocked} onAdd={addReplyQuote}/>
