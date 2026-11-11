@@ -1,5 +1,6 @@
-import React,{useState,useCallback} from 'react';
+import React,{useState,useCallback,useLayoutEffect,useId,useRef} from 'react';
 import {MutationPending,MutationPendingState} from './MutationContext';
+import {useLayoutDisplayPreferences} from '../jot/useToolDisplayPreference';
 import {taskDraftScope} from '../jot/client';
 import type {BrowserActionReadinessItem,TaskSourceSelection} from './types';
 import {useResource} from './useResource';
@@ -26,6 +27,13 @@ function BrowserActionReadiness({items}:{items:BrowserActionReadinessItem[]}){
 }
 
 export default function Workbench({view,onOpen,onConversation,taskSource,onTaskSourceConsumed,desktopOpenTask,onDesktopOpenTaskConsumed,onPendingChange}:{view:string;onOpen:(view:string)=>void;onConversation:(id:string)=>void;taskSource?:TaskSourceSelection|null;onTaskSourceConsumed?:()=>void;desktopOpenTask?:{task_id:string;occurrence_id:string}|null;onDesktopOpenTaskConsumed?:()=>void;onPendingChange?:(pending:boolean)=>void}){
+ const layoutDisplay=useLayoutDisplayPreferences(),navigation=useRef<HTMLElement>(null),toggle=useRef<HTMLButtonElement>(null),navigationId=useId();
+ const previousSidebar=useRef(layoutDisplay.value.sidebarVisible);
+ useLayoutEffect(()=>{
+  const active=document.activeElement;
+  if(previousSidebar.current&&!layoutDisplay.value.sidebarVisible&&(active===document.body||navigation.current?.contains(active)))toggle.current?.focus();
+  previousSidebar.current=layoutDisplay.value.sidebarVisible;
+ },[layoutDisplay.value.sidebarVisible]);
  const [pending,setPending]=useState(false),reportPending=useCallback((value:boolean)=>{setPending(value);onPendingChange?.(value);},[onPendingChange]);
  const capabilities=useResource(signal=>workbenchApi.capabilities(signal),'workbench-capabilities'),agents=useResource(signal=>workbenchApi.agents(signal),'workbench-agents',capabilities.data?.workbench?.agent_roles===true);
  const retryChunk=()=>{try{sessionStorage.setItem(workbenchRetryViewSlot,view);}catch{};};
@@ -42,5 +50,5 @@ export default function Workbench({view,onOpen,onConversation,taskSource,onTaskS
     :view==='teams'
      ?<RetryablePanel key={view} load={loadTeams} label="角色团队" props={{caps:capabilities.data,agents:agents.data?.items??[],onConversation}} onBeforeRetry={retryChunk}/>
      :<RetryablePanel key={view} load={loadSharedWorkspace} label="共享工作区" props={{caps:capabilities.data,agents:agents.data?.items??[],onWorkspaceSelected:capabilities.reload}} onBeforeRetry={retryChunk}/>}</>;
-  return <MutationPendingState.Provider value={pending}><MutationPending.Provider value={reportPending}><div className="wb-layout"><nav className="wb-nav" aria-label="Agent 工作台">{[['agents','Agent 角色'],['persistent-tasks','持续任务'],['teams','角色团队'],['shared-workspace','共享工作区'],['git','Git 工作台'],['projects','项目'],['settings','设置']].map(([value,label])=><button key={value} disabled={pending} aria-current={view===value?'page':undefined} onClick={()=>{agents.reload();onOpen(value);}}>{label}</button>)}</nav><div className="wb-content"><ResourceStatus {...capabilities} onRetry={capabilities.reload}/>{capabilities.data&&<><BrowserActionReadiness items={capabilities.data.workbench?.browser_action_readiness??[]}/>{panel}</>}</div></div></MutationPending.Provider></MutationPendingState.Provider>;
+  return <MutationPendingState.Provider value={pending}><MutationPending.Provider value={reportPending}><div className="wb-layout"><nav ref={navigation} id={navigationId} className="wb-nav" hidden={!layoutDisplay.value.sidebarVisible} aria-label="Agent 工作台">{[['agents','Agent 角色'],['persistent-tasks','持续任务'],['teams','角色团队'],['shared-workspace','共享工作区'],['git','Git 工作台'],['projects','项目'],['settings','设置']].map(([value,label])=><button key={value} disabled={pending} aria-current={view===value?'page':undefined} onClick={()=>{agents.reload();onOpen(value);}}>{label}</button>)}</nav><div className="wb-content"><button ref={toggle} type="button" className="wb-nav-toggle" disabled={!layoutDisplay.available} aria-controls={navigationId} aria-expanded={layoutDisplay.value.sidebarVisible} onClick={()=>layoutDisplay.setPreference('sidebarVisible',!layoutDisplay.value.sidebarVisible)}>{layoutDisplay.value.sidebarVisible?'收起工作台导航':'显示工作台导航'}</button><ResourceStatus {...capabilities} onRetry={capabilities.reload}/>{capabilities.data&&<><BrowserActionReadiness items={capabilities.data.workbench?.browser_action_readiness??[]}/>{panel}</>}</div></div></MutationPending.Provider></MutationPendingState.Provider>;
 }

@@ -81,7 +81,7 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,
      &&activity.detail.child_conversation_id&&activity.detail.child_session_ref&&activity.detail.role_ref
      &&child&&child!==activity.run_id
       ?{root_run_id:activity.run_id,child_session_ref:activity.detail.child_session_ref,child_run_id:child}:undefined;
-    return <li key={activity.activity_id} data-chat-search-activity={activity.activity_id} data-chat-search-ready={isExpanded?'true':'false'} style={{paddingInlineStart:Math.min(row.depth,8)*12}}>
+    return <li key={activity.activity_id} data-chat-search-activity={activity.activity_id} data-message-key={JSON.stringify(['activity',activity.run_id,activity.activity_id])} data-chat-search-ready={isExpanded?'true':'false'} style={{paddingInlineStart:Math.min(row.depth,8)*12}}>
      <button type="button" aria-expanded={isExpanded} onClick={()=>{navigation.current=undefined;onDisplayChange(previous=>({...previous,expanded:{...previous.expanded,[activity.activity_id]:!isExpanded}}));}}>
       <span aria-hidden="true">{isExpanded?'收起':'展开'} </span>{activityKindLabels[activity.kind]} · {activity.title} · {activityStatusLabels[status]??activityStatusLabels.unknown}<span data-chat-search-ignore>{row.children>0?` · ${row.children} 个子步骤`:''}</span>
      </button>

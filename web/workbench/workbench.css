@@ -31,3 +31,4 @@ html[data-theme=dark] .wb-home,html[data-theme=dark] .wb-layout{--wb-muted:#9baa
 .wb-git-review dl{min-width:0;margin:0}.wb-git-review dd{margin-inline-start:0;overflow-wrap:anywhere}.wb-git-head strong,.wb-git-head code{min-width:0;overflow-wrap:anywhere}
 
 .wb-git-branches{min-width:0;margin:12px 0}.wb-git-branches ul{max-height:20rem;overflow:auto;padding-left:20px}.wb-git-branches li{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0}.wb-git-branches code{min-width:0;overflow-wrap:anywhere}
+.wb-layout .wb-nav[hidden]{display:none}.wb-nav-toggle{margin-bottom:14px}

@@ -42,7 +42,8 @@ import {ConversationForkWriter,conversationForkRetrySource} from './conversation
 import {ConversationForkAction} from './conversation-fork-action.mjs';
 import PromptComposer from './PromptComposer';
 import MessageThinking from './MessageThinking';
-import {useMessageDisplayPreferences} from './useToolDisplayPreference';
+import {useLayoutDisplayPreferences,useMessageDisplayPreferences} from './useToolDisplayPreference';
+import {useScrollFollow} from './vendor/pilotdeck-use-scroll-follow';
 import ConversationHistorySearch from './ConversationHistorySearch';
 import {AssistantReplyQuoteAction,AssistantReplyQuotes,replyQuoteMessage,type AssistantReplyQuote} from './AssistantReplyQuote';
 import {appendVoiceText} from './voice-draft-controller.mjs';
@@ -150,7 +151,8 @@ function ConversationMessageBody({message,onOpenReference}:{message:Message;onOp
 }
 type ComposerDraft={text:string;replyQuotes:AssistantReplyQuote[];textReferences:FileSelectionReference[];goalMode:boolean};
 function ConversationContent({id,onClose,onReload,onTaskSource,onForkConversation,ordinary=false}:ConversationProps){
- const {value:displayPreferences}=useMessageDisplayPreferences();
+ const {value:displayPreferences}=useMessageDisplayPreferences(),{value:layoutPreferences}=useLayoutDisplayPreferences();
+ const [returnVersion,setReturnVersion]=useState(0),returnToLatest=useRef(false),initialPosition=useRef(true);
  const [,render]=useState(0),[draft,setDraft]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[expanded,setExpanded]=useState<Record<string,boolean>>({}),[maxBytes,setMaxBytes]=useState<number>(),[preview,setPreview]=useState<{name:string;text?:string;url?:string;unsupported?:boolean;truncated?:boolean;loading?:boolean}>(),[forkStates,setForkStates]=useState<Record<string,{state:string;retryable:boolean;error:string}>>({});
  const [voice,setVoice]=useState<Capabilities['voice']>(),[voiceBusy,setVoiceBusy]=useState(false),draftRef=useRef(draft),conversationRegion=useRef<HTMLElement>(null),previewRequest=useRef<AbortController|undefined>(undefined);
  const [replyQuotes,setReplyQuotes]=useState<AssistantReplyQuote[]>([]);
@@ -279,6 +281,28 @@ function ConversationContent({id,onClose,onReload,onTaskSource,onForkConversatio
  const selectedHistoryIndex=displayedMessages.findIndex(message=>message.message_id===historySelection);
  const historyStart=selectedHistoryIndex<0?Math.max(0,displayedMessages.length-200):Math.max(0,Math.min(selectedHistoryIndex-50,displayedMessages.length-200));
  const renderedMessages=useMemo(()=>displayedMessages.slice(historyStart,historyStart+200),[displayedMessages,historyStart]);
+ const stateReady=Boolean(state);
+ const scrollFollow=useScrollFollow({containerRef:conversationRegion,windowViewport:true,enabled:stateReady&&layoutPreferences.autoScrollToBottom,
+  scopeKey:JSON.stringify([fileOwner,id]),contentSelector:'[data-conversation-follow-content]',canFollow:()=>taskDraftScope()===fileOwner&&!historySelection
+   &&!conversationRegion.current?.querySelector('[role="search"], [role="dialog"], [role="alertdialog"]')&&(window.getSelection()?.isCollapsed??true)});
+ useLayoutEffect(()=>{
+  if(!initialPosition.current||!stateReady)return;
+  initialPosition.current=false;
+  if(renderedMessages.length&&!historySelection&&!scrollFollow.getIsPaused())scrollFollow.scheduleInitialPosition();
+ },[stateReady,renderedMessages.length,historySelection,scrollFollow.getIsPaused,scrollFollow.scheduleInitialPosition]);
+ useEffect(()=>{if(historySelection)scrollFollow.pause();},[historySelection,scrollFollow.pause]);
+ useEffect(()=>{
+  const pauseSelection=()=>{const selection=window.getSelection();if(!scrollFollow.getIsPaused()&&selection&&!selection.isCollapsed&&conversationRegion.current?.contains(selection.anchorNode))scrollFollow.pause();};
+  document.addEventListener('selectionchange',pauseSelection);return()=>document.removeEventListener('selectionchange',pauseSelection);
+ },[scrollFollow.pause,scrollFollow.getIsPaused]);
+ useLayoutEffect(()=>{
+  if(!returnToLatest.current||historySelection)return;
+  returnToLatest.current=false;scrollFollow.scrollToBottom();scrollFollow.scheduleInitialPosition();
+ },[returnVersion,historySelection,renderedMessages,scrollFollow.scrollToBottom,scrollFollow.scheduleInitialPosition]);
+ const requestLatest=()=>{returnToLatest.current=true;setHistorySelection('');setReturnVersion(value=>value+1);};
+ const inspectDisplay=(target:EventTarget)=>{
+  if(target instanceof Element&&!target.closest('.jot-prompt-composer')&&target.closest('button,a,summary,select,input,textarea,[contenteditable="true"]'))scrollFollow.pause();
+ };
  const conversationRuns=state?(Object.values(state.runs) as Run[]).filter(value=>value.conversation_id===id)
   .sort((a,b)=>b.created_at.localeCompare(a.created_at)||b.run_id.localeCompare(a.run_id)):[];
  const diagnosticRun=conversationRuns[0];
@@ -476,7 +500,7 @@ function ConversationContent({id,onClose,onReload,onTaskSource,onForkConversatio
   }else setPreview({name:file.relative_path||file.file_name,unsupported:true});
  });
  const download=(file:Artifact)=>void action(async()=>{const response=await fetch(`${base}/v1/artifacts/${encodeURIComponent(file.artifact_id)}/download?version=${file.version}`,{credentials:'same-origin'});if(!response.ok)throw new Error('文件暂不可下载');const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download=file.file_name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
- return <FileTextReferenceContext.Provider value={{owner:fileOwner,conversationId:id,disabled:quoteLocked,regionDisabled,printViews:modeCaps?.reference_snapshots?.office_print_views,nativeSources:modeCaps?.reference_snapshots?.native_file_sources,regionRenderers:modeCaps?.reference_snapshots?.region_renderers,cellViews:modeCaps?.reference_snapshots?.xlsx_cell_views,onAdd:addFileReference,onAddMany:addFileReferences,onAddRegion:addRegionReference}}><section ref={conversationRegion} data-chat-search-scope tabIndex={-1} className="workbench-conversation jot-goal-stop-focus-target" aria-label={ordinary?"Ordinary conversation":"Role conversation"}><button disabled={busy||goalPending||terminalInputPending||controller.pendingMessage||!!draftBackup||controller.draftDirty||!!controller.draftSavePromise||draftSnapshot!==JSON.stringify(controller.draft)||quoteCount>0||uploads.entries.length>0||modelMutation.pending||modeWriter.pending||cancelWriter.pending} onClick={onClose}>返回工作台</button><h2>{ordinary?'我的对话':'角色对话'}</h2>{ordinary&&conversation&&<button type="button" className="jot-conversation-mode" style={{fontStyle:'italic',fontWeight:700,background:'transparent',border:0,color:'inherit'}} aria-label={`切换到 ${chatMode?'work':'chat'}`} disabled={!canToggle} onClick={()=>void saveMode()}>{chatMode?'chat':'work'}</button>}<p role="status">{controller.connection==='connected'?'已连接':controller.connection==='reconnecting'?'正在重新连接':'正在连接'}{run?` · ${run.status}`:''}</p>{controller.error&&<p role="alert">{controller.error}</p>}
+ return <FileTextReferenceContext.Provider value={{owner:fileOwner,conversationId:id,disabled:quoteLocked,regionDisabled,printViews:modeCaps?.reference_snapshots?.office_print_views,nativeSources:modeCaps?.reference_snapshots?.native_file_sources,regionRenderers:modeCaps?.reference_snapshots?.region_renderers,cellViews:modeCaps?.reference_snapshots?.xlsx_cell_views,onAdd:addFileReference,onAddMany:addFileReferences,onAddRegion:addRegionReference}}><section ref={conversationRegion} data-chat-search-scope data-stream-scroll-viewport onClickCapture={event=>inspectDisplay(event.target)} onFocusCapture={event=>{if(event.target instanceof Element&&event.target.matches('input,textarea,select,[contenteditable="true"]'))inspectDisplay(event.target);}} tabIndex={-1} className="workbench-conversation jot-goal-stop-focus-target" aria-label={ordinary?"Ordinary conversation":"Role conversation"}><div data-conversation-follow-content><button disabled={busy||goalPending||terminalInputPending||controller.pendingMessage||!!draftBackup||controller.draftDirty||!!controller.draftSavePromise||draftSnapshot!==JSON.stringify(controller.draft)||quoteCount>0||uploads.entries.length>0||modelMutation.pending||modeWriter.pending||cancelWriter.pending} onClick={onClose}>返回工作台</button><h2>{ordinary?'我的对话':'角色对话'}</h2>{ordinary&&conversation&&<button type="button" className="jot-conversation-mode" style={{fontStyle:'italic',fontWeight:700,background:'transparent',border:0,color:'inherit'}} aria-label={`切换到 ${chatMode?'work':'chat'}`} disabled={!canToggle} onClick={()=>void saveMode()}>{chatMode?'chat':'work'}</button>}<p role="status">{controller.connection==='connected'?'已连接':controller.connection==='reconnecting'?'正在重新连接':'正在连接'}{run?` · ${run.status}`:''}</p>{controller.error&&<p role="alert">{controller.error}</p>}
  {onReload&&<div data-chat-search-ignore><button type="button" disabled={busy||!!reloadUnsafe} onClick={reloadInterface}>保存并重载界面</button>{reloadUnsafe&&<small>请先处理当前运行、交互或未确认操作，再重载界面。</small>}</div>}
  <ConversationDisplayBoundary label="会话搜索"><ConversationHistorySearch root={conversationRegion} conversationId={id} messages={displayedMessages} activities={activityValues} runs={state?.runs??{}} onRevealActivity={revealActivity} onLoadActivityHistory={loadActivityHistory} {...(state?.snapshotSeq?{activityHistorySeq:state.snapshotSeq}:{})} {...(state?.seq?{resultSearchSeq:state.seq}:{})} renderedRevision={renderedMessages} revealedMessageId={historySelection} ready={Boolean(state)} onReveal={revealHistoryMessage} {...(state?.historyComplete!==undefined?{historyComplete:state.historyComplete}:{})} {...(state?.nextHistoryCursor?{historyCursor:state.nextHistoryCursor}:{})} onHistoryLoaded={retainHistory}/></ConversationDisplayBoundary>
  {diagnosticRun&&<ConversationDisplayBoundary label="会话终端"><ConversationTerminals key={`terminals:${id}`} conversationId={id} runId={run?.run_id??diagnosticRun.run_id} onInputPendingChange={setTerminalInputPending}/></ConversationDisplayBoundary>}
@@ -518,7 +542,7 @@ function ConversationContent({id,onClose,onReload,onTaskSource,onForkConversatio
    const pendingForkForMessage=forkWriter.pending&&pendingFork?.sourceConversationId===id&&pendingFork?.throughMessageId===message.message_id;
    const forkActionVisible=message.status==='complete'&&Boolean(onForkConversation)
     &&(pendingForkForMessage||modeCaps?.conversation_forks?.available===true)&&(!forkWriter.pending||pendingForkForMessage);
-   return <article key={message.message_id} className={message.role}>
+   return <article key={message.message_id} data-message-key={JSON.stringify(['message',message.message_id])} className={message.role}>
     <small>{message.role==='user'?'YOU':'JOT'}</small>
     {message.status==='complete'&&onTaskSource&&<button disabled={busy||goalPending||terminalInputPending||messageLocked||modeWriter.pending||cancelWriter.pending||uploads.entries.length>0} onClick={()=>onTaskSource({conversation_id:id,message})}>设为持续任务</button>}
     {forkActionVisible&&<ConversationForkAction source={conversationForkRetrySource(conversation,pendingFork,message.message_id)} message={message} writer={forkWriter}
@@ -577,5 +601,6 @@ function ConversationContent({id,onClose,onReload,onTaskSource,onForkConversatio
   keepVoiceVisible voiceActive={voiceBusy} voiceControl={<VoiceInput id={id} voice={voice} disabled={!state||busy||goalPending||messageLocked||modelMutation.pending||modeWriter.pending||cancelWriter.pending||chatUnavailable} onText={appendTranscript} onBusyChange={setVoiceBusy}/>}
   goalMenu={ordinary&&!chatMode?<button type="button" role="menuitemcheckbox" disabled={messageLocked} aria-checked={goalMode} onClick={()=>setGoalMode(value=>!value)}>目标模式{goalMode?' ✓':''}</button>:undefined}
   responding={Boolean(run)} stopDisabled={busy||cancelWriter.pending||messageLocked||run?.status==='cancelling'} onStop={run?()=>cancelTask():undefined}/>
- </section></FileTextReferenceContext.Provider>;
+ {(scrollFollow.canReturnToLatest||!!historySelection)&&<button type="button" className="jot-conversation-return-latest" data-chat-search-ignore onClick={requestLatest}>回到会话末尾</button>}
+ </div></section></FileTextReferenceContext.Provider>;
 }

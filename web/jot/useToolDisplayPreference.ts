@@ -6,7 +6,8 @@ import {subscribeTaskDraftScope,taskDraftScope} from './client';
 type Preference<T>={scope:string;value:T;persisted:boolean};
 const sync='jot:tool-display-preference',toolDefaults={autoExpandTools:false};
 const messageDefaults={showThinking:true,inlineThinking:false,sendByCtrlEnter:false};
-// Only the two declared namespaces retain one account-scoped storage-failure fallback each.
+const layoutDefaults={autoScrollToBottom:true,sidebarVisible:true};
+// Only the three declared namespaces retain one account-scoped storage-failure fallback each.
 const volatile=new Map<string,Preference<Record<string,boolean>>>();
 function load<T extends Record<string,boolean>>(namespace:string,scope:string,defaults:T):Preference<T>{
  const fallback={scope,value:defaults,persisted:false};
@@ -50,3 +51,4 @@ export function useToolDisplayPreference(){
  return {enabled:state.value.autoExpandTools,persisted:state.persisted,available:state.available,setEnabled:(enabled:boolean)=>state.setPreference('autoExpandTools',enabled)};
 }
 export function useMessageDisplayPreferences(){return useBooleanDisplayPreferences('message-display',messageDefaults);}
+export function useLayoutDisplayPreferences(){return useBooleanDisplayPreferences('layout-display',layoutDefaults);}

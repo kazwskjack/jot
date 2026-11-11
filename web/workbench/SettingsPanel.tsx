@@ -3,7 +3,7 @@ import type {Caps,HostAdminClient,HostOnboardingSnapshot,HostReadinessResponse,H
 import {taskDraftScope} from '../jot/client';
 import {createHostSettingsSaveAttempt,hostSettingsSaveCommand} from './host-settings-save-attempt.mjs';
 import {createHostSettingsRecovery} from './host-settings-recovery.mjs';
-import {useMessageDisplayPreferences,useToolDisplayPreference} from '../jot/useToolDisplayPreference';
+import {useLayoutDisplayPreferences,useMessageDisplayPreferences,useToolDisplayPreference} from '../jot/useToolDisplayPreference';
 import HostCredentialsPanel from './HostCredentialsPanel';
 import PluginProfilesPanel from './PluginProfilesPanel';
 import HostReadinessPanel from './HostReadinessPanel';
@@ -28,7 +28,7 @@ function conflictVersion(error:unknown){
  return null;
 }
 export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminClient}){
- const toolDisplay=useToolDisplayPreference(),messageDisplay=useMessageDisplayPreferences();
+ const toolDisplay=useToolDisplayPreference(),messageDisplay=useMessageDisplayPreferences(),layoutDisplay=useLayoutDisplayPreferences();
  const readinessEnabled=hostCapabilityEnabled(caps,'host_readiness');
  const settingsNamespace=typeof caps.workbench?.host_settings_write_namespace==='string'&&/^[a-z][a-z0-9._-]{0,127}$/.test(caps.workbench.host_settings_write_namespace)&&caps.workbench.host_settings_write_namespace!=='jot-host-policy'?caps.workbench.host_settings_write_namespace:null;
  const settingsEnabled=hostCapabilityEnabled(caps,'host_settings')&&settingsNamespace!==null;
@@ -195,7 +195,10 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
     {messageDisplay.value.showThinking&&<label className="wb-checkbox"><input type="checkbox" checked={messageDisplay.value.inlineThinking} disabled={!messageDisplay.available} onChange={event=>messageDisplay.setPreference('inlineThinking',event.currentTarget.checked)}/>以行内样式显示思考内容</label>}
     <label className="wb-checkbox"><input type="checkbox" checked={messageDisplay.value.sendByCtrlEnter} disabled={!messageDisplay.available} onChange={event=>messageDisplay.setPreference('sendByCtrlEnter',event.currentTarget.checked)}/>使用 Ctrl/Cmd + Enter 发送</label>
     <p className="wb-settings-note">开启快捷键选项后，Enter 换行；Shift + Enter 始终换行。</p>
-    {!toolDisplay.available?<p role="status">当前账户身份尚未确认，暂不能保存偏好。</p>:(!toolDisplay.persisted||!messageDisplay.persisted)&&<p role="status">浏览器未保存此偏好，当前页面内的选择仍然有效，刷新后可能恢复之前的设置。</p>}
+    <label className="wb-checkbox"><input type="checkbox" checked={layoutDisplay.value.autoScrollToBottom} disabled={!layoutDisplay.available} onChange={event=>layoutDisplay.setPreference('autoScrollToBottom',event.currentTarget.checked)}/>自动滚动到会话末尾</label>
+    <p className="wb-settings-note">上滑阅读或打开检索后暂停跟随，可用“回到会话末尾”返回最新位置。</p>
+    <label className="wb-checkbox"><input type="checkbox" checked={layoutDisplay.value.sidebarVisible} disabled={!layoutDisplay.available} onChange={event=>layoutDisplay.setPreference('sidebarVisible',event.currentTarget.checked)}/>显示工作台导航</label>
+    {!toolDisplay.available?<p role="status">当前账户身份尚未确认，暂不能保存偏好。</p>:(!toolDisplay.persisted||!messageDisplay.persisted||!layoutDisplay.persisted)&&<p role="status">浏览器未保存此偏好，当前页面内的选择仍然有效，刷新后可能恢复之前的设置。</p>}
    </section>
    {caps.workbench?.plugin_profiles===true&&<PluginProfilesPanel key={currentTaskScope} scopeKey={currentTaskScope} onPendingChange={reportPluginPending}/>}
    {settingsReadEnabled&&<HostCredentialsPanel client={client} scopeKey={currentTaskScope}/>}
