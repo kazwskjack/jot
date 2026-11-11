@@ -31,7 +31,7 @@ export function createDesktopCaptionMenu({owner,getWindow,appOrigin,Menu,getTemp
   if(!Number.isFinite(zoom)||zoom<=0){close();return;}
   const button=buttons.find(item=>item.id===id);
   const x=Math.max(0,Math.min(bounds.width,Math.round((button?.x??12)*zoom)));
-  const y=owner.isFullScreen()?0:Math.max(0,Math.min(bounds.height,Math.round(((button?.y??0)+(button?.height??32))*zoom)));
+  const y=owner.isFullScreen()?0:Math.min(bounds.height,32);
   notify(id??'all');
   try{menu.popup({window:owner,x,y,callback:()=>{
    if(popup!==menu)return;

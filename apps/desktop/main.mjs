@@ -1,3 +1,4 @@
+import {createDesktopWindowChrome,windowChromeOptions} from './window-chrome.mjs';
 import {createDesktopCaptionMenu} from './caption-menu.mjs';
 import {mkdir} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
@@ -228,11 +229,11 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   session.defaultSession.setPermissionRequestHandler(permissionRequestHandler);
   session.defaultSession.setPermissionCheckHandler(permissionCheckHandler);
   const window=new BrowserWindow({
-   width:1200,height:820,minWidth:880,minHeight:620,show:false,autoHideMenuBar:true,
+   width:1200,height:820,minWidth:880,minHeight:620,show:false,autoHideMenuBar:true,...windowChromeOptions(),
    webPreferences:desktopWebPreferences(paths.preloadPath)
   });
   mainWindow=window;
-  let commandMenu=null,captionMenu=null;
+  let commandMenu=null,captionMenu=null,windowChrome=null;
   const resetCommandMenu=()=>{captionMenu?.close();commandMenu?.reset();};
   const commandNavigationStarted=(_event,_url,inPlace,mainFrame)=>{if(mainFrame===true&&inPlace!==true)resetCommandMenu();};
   const syncNotificationPermission=()=>{
@@ -251,7 +252,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   const downloadHandler=(event,_item,contents)=>{if(contents===window.webContents)event.preventDefault();};
   window.webContents.session.on('will-download',downloadHandler);
   let recoveryTimer=null,recoveryAttempts=0,stableTimer=null;
-  const didFinishLoadHandler=()=>{deliverPendingTaskNavigation(window);if(recoveryTimer){clearTimeout(recoveryTimer);recoveryTimer=null;}if(stableTimer)clearTimeout(stableTimer);stableTimer=setTimeout(()=>{stableTimer=null;recoveryAttempts=0;},30000);stableTimer.unref?.();};
+  const didFinishLoadHandler=()=>{windowChrome?.publish();deliverPendingTaskNavigation(window);if(recoveryTimer){clearTimeout(recoveryTimer);recoveryTimer=null;}if(stableTimer)clearTimeout(stableTimer);stableTimer=setTimeout(()=>{stableTimer=null;recoveryAttempts=0;},30000);stableTimer.unref?.();};
   const renderProcessGoneHandler=(_event,details)=>{
    resetCommandMenu();
    report(new Error('renderer_process_gone:'+String(details?.reason??'unknown')));
@@ -264,7 +265,9 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   window.webContents.on('render-process-gone',renderProcessGoneHandler);
   window.on('close',event=>{if(!shuttingDown&&tray&&!tray.isDestroyed()){event.preventDefault();window.hide();}});
   commandMenu=createDesktopCommandMenu({Menu,getWindow:()=>mainWindow,appOrigin,restoreWindow,openNotificationSettings,requestQuit:()=>app.quit()});
+  if(process.platform==='win32'||process.platform==='linux')window.setMenuBarVisibility(false);
   if(process.platform==='win32'||process.platform==='linux')captionMenu=createDesktopCaptionMenu({owner:window,getWindow:()=>mainWindow,appOrigin,Menu,getTemplate:()=>commandMenu.template(true),getCursor:typeof electron.screen?.getCursorScreenPoint==='function'?()=>electron.screen.getCursorScreenPoint():null});
+  if(['win32','linux','darwin'].includes(process.platform))windowChrome=createDesktopWindowChrome({owner:window,getWindow:()=>mainWindow,appOrigin,getMenus:()=>commandMenu.template().map(item=>item.id).filter(id=>typeof id==='string')});
   try{
    tray=new Tray(nativeImage.createFromBuffer(buildTrayIconPng()));
    tray.setToolTip('Jot');
@@ -277,6 +280,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
     if(value.owner_scope!==commandMenu.getState().owner_scope||value.blocked||!value.ready)captionMenu?.close();
     commandMenu.setState(value);
    },
+   readWindowChrome:windowChrome?()=>windowChrome.read():null,setWindowTheme:windowChrome?theme=>windowChrome.setTheme(theme):null,
    showCaptionMenu:captionMenu?value=>captionMenu.show(value):null,closeCaptionMenu:captionMenu?()=>captionMenu.close():null,
    selectFile:async()=>{
     const parent=mainWindow;
@@ -292,7 +296,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   const destroyWindow=()=>{
    if(recoveryTimer)clearTimeout(recoveryTimer);if(stableTimer)clearTimeout(stableTimer);
    window.off('focus',syncNotificationPermission);
-   captionMenu?.dispose();commandMenu?.reset();window.webContents.off('did-start-navigation',commandNavigationStarted);
+   windowChrome?.dispose();captionMenu?.dispose();commandMenu?.reset();window.webContents.off('did-start-navigation',commandNavigationStarted);
    window.webContents.off('did-finish-load',didFinishLoadHandler);window.webContents.off('render-process-gone',renderProcessGoneHandler);
    window.webContents.off('will-navigate',denyNavigation);window.webContents.off('will-redirect',denyNavigation);
    window.webContents.session.off('will-download',downloadHandler);

@@ -46,9 +46,22 @@ ipcRenderer.on('desktop:caption-menu',(_event,value)=>{
  const safe=Object.freeze({protocol:1,id:value.id});
  for(const listener of captionMenuListeners)try{listener(safe);}catch{}
 });
+const chromePalette=theme=>theme==='light'?{background:'#faf9f6',caption:'#f0eee9',symbol:'#242731'}:{background:'#101217',caption:'#171a21',symbol:'#eef0f5'};
+const windowChromeListeners=new Set();
+function windowChromeState(value){
+ if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='caption_height,fullscreen,menus,palette,platform,protocol,revision,theme'||value.protocol!==1||!Number.isSafeInteger(value.revision)||value.revision<1||
+  value.platform!==process.platform||!['win32','linux','darwin'].includes(value.platform)||typeof value.fullscreen!=='boolean'||!['dark','light'].includes(value.theme)||
+  value.caption_height!==(value.platform==='darwin'?48:32)||!Array.isArray(value.menus)||value.menus.length>6||new Set(value.menus).size!==value.menus.length||value.menus.some(id=>id==='all'||!captionMenuIds.has(id)))return null;
+ const palette=chromePalette(value.theme);
+ if(!value.palette||Object.keys(value.palette).sort().join(',')!=='background,caption,symbol'||Object.keys(palette).some(key=>value.palette[key]!==palette[key]))return null;
+ return Object.freeze({protocol:1,revision:value.revision,platform:value.platform,theme:value.theme,fullscreen:value.fullscreen,caption_height:value.caption_height,palette:Object.freeze(palette),menus:Object.freeze([...value.menus])});
+}
+ipcRenderer.on('desktop:window-chrome',(_event,value)=>{const state=windowChromeState(value);if(state)for(const listener of windowChromeListeners)try{listener(state);}catch{}});
 const invoke=(channel,payload)=>ipcRenderer.invoke(channel,payload);
 const bridge=Object.freeze({
  platform:process.platform,
+ getWindowChrome:()=>invoke('window.chrome.read'),
+ setWindowTheme:theme=>invoke('window.chrome.theme',{theme}),
  showCaptionMenu:value=>invoke('menu.caption.show',value),
  closeCaptionMenu:()=>invoke('menu.caption.close'),
  onCaptionMenu(listener){if(typeof listener!=='function')throw TypeError('desktop_listener_invalid');captionMenuListeners.add(listener);return()=>captionMenuListeners.delete(listener);},
@@ -92,5 +105,94 @@ const bridge=Object.freeze({
   return ()=>openNotificationSettingsListeners.delete(listener);
  }
 });
+// Desktop-owned caption adapts PilotDeck 783499ff preloadChrome; AGPL-3.0.
+function installWindowChrome(){
+ const platform=process.platform;if(!['win32','linux','darwin'].includes(platform))return;
+ const install=()=>{
+  const root=document.documentElement;if(!root||!document.body||document.getElementById('jot-window-caption'))return;
+  let disposed=false,serial=0,active=null,savedFocus=null,fullscreen=false,lastRevision=0;
+  let desiredTheme=root.dataset.theme==='light'?'light':'dark';
+  if(!root.hasAttribute('data-theme')){try{desiredTheme=localStorage.getItem('jot-theme')==='light'?'light':'dark';}catch{}root.dataset.theme=desiredTheme;}
+  const host=document.createElement('div');host.id='jot-window-caption';
+  const shadow=host.attachShadow({mode:'closed'}),style=document.createElement('style');
+  style.textContent=`:host{position:fixed;top:0;left:0;height:var(--jot-caption-height);width:100%;z-index:10000;display:block;background:var(--jot-caption-bg);color:var(--jot-caption-fg);-webkit-app-region:drag;user-select:none;font:13px system-ui}
+   :host([hidden]){display:none}:host([data-platform=win32]),:host([data-platform=linux]){left:env(titlebar-area-x,0px);width:env(titlebar-area-width,calc(100% - 150px))}
+   nav{display:flex;align-items:center;height:100%;padding:0 8px;gap:2px;white-space:nowrap}button{-webkit-app-region:no-drag;padding:0 10px;height:calc(100% - 8px);max-height:32px;border:0;border-radius:5px;color:inherit;background:transparent;font:inherit;cursor:default}
+   button:hover,button[aria-expanded=true]{background:color-mix(in srgb,currentColor 10%,transparent)}button:focus-visible{outline:2px solid #818cf8;outline-offset:-2px}button[hidden]{display:none}span{padding-left:96px}p{position:absolute;top:100%;margin:0;padding:8px;background:var(--jot-caption-bg);color:var(--jot-caption-fg);-webkit-app-region:no-drag}`;
+  const sheet=document.createElement('style');sheet.textContent=`html[data-jot-desktop-platform]{--jot-caption-height:${platform==='darwin'?48:32}px;scroll-padding-top:var(--jot-caption-height)}
+   html[data-jot-desktop-platform=win32],html[data-jot-desktop-platform=linux]{--jot-caption-height:env(titlebar-area-height,32px)}
+   html[data-jot-desktop-fullscreen]{--jot-caption-height:0px}html[data-jot-desktop-platform] body{margin-top:var(--jot-caption-height)!important;background:var(--jot-window-bg);color:var(--jot-caption-fg)}`;
+  host.dataset.platform=platform;root.dataset.jotDesktopPlatform=platform;
+  const nav=document.createElement('nav'),notice=document.createElement('p');notice.hidden=true;notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');
+  const definitions=[['menu-jot','Jot','Jot','a'],['menu-file','文件','File','f'],['menu-edit','编辑','Edit','e'],['menu-view','查看','View','v'],['menu-go','前往','Go','g'],['menu-help','帮助','Help','h']];
+  const buttons=definitions.map(([id])=>{const button=document.createElement('button');button.type='button';button.dataset.menu=id;button.setAttribute('aria-haspopup','menu');button.setAttribute('aria-expanded','false');button.hidden=id==='menu-help';nav.append(button);return button;});
+  if(platform==='darwin'){const label=document.createElement('span');label.textContent='Jot';nav.replaceChildren(label);}else nav.setAttribute('role','menubar');
+  shadow.append(style,nav,notice);document.head.append(sheet);document.body.append(host);
+  const paint=()=>{
+   const palette=chromePalette(desiredTheme);root.style.setProperty('--jot-window-bg',palette.background);root.style.setProperty('--jot-caption-bg',palette.caption);root.style.setProperty('--jot-caption-fg',palette.symbol);
+   const zh=!root.lang||root.lang.toLowerCase().startsWith('zh');nav.setAttribute('aria-label',zh?'应用菜单':'Application menu');
+   buttons.forEach((button,index)=>{button.textContent=definitions[index][zh?1:2];button.title=`${button.textContent} (Alt+${definitions[index][3].toUpperCase()})`;});
+  };
+  const restoreFocus=()=>{const node=savedFocus;savedFocus=null;if(document.activeElement===host&&node instanceof HTMLElement&&node.isConnected&&node.getClientRects().length&&!node.closest('[hidden],[inert],[aria-hidden=true]'))node.focus({preventScroll:true});};
+  const setActive=id=>{active=id;buttons.forEach(button=>button.setAttribute('aria-expanded',String(button.dataset.menu===id)));if(id===null)restoreFocus();};
+  const captionEvent=value=>{if(!disposed)setActive(value.id);};captionMenuListeners.add(captionEvent);
+  const applyState=value=>{
+   const state=windowChromeState(value);if(disposed||!state||state.revision<lastRevision)return;lastRevision=state.revision;
+   fullscreen=state.fullscreen;root.toggleAttribute('data-jot-desktop-fullscreen',fullscreen);host.hidden=fullscreen;
+   for(const button of buttons)button.hidden=!state.menus.includes(button.dataset.menu);
+   // Theme belongs to the page preference. A late native reply cannot replace it.
+   paint();if(fullscreen)setActive(null);
+  };windowChromeListeners.add(applyState);
+  const openMenu=async(button,keyboard=false)=>{
+   if(disposed||button?.hidden)return;
+   const id=button?.dataset.menu??null,target=id??'all';if(active===target)return;
+   if(keyboard&&!savedFocus){savedFocus=document.activeElement;if(button&&!fullscreen)button.focus({preventScroll:true});}
+   const request=++serial;notice.hidden=true;setActive(target);
+   const geometry=fullscreen?[]:buttons.filter(item=>!item.hidden).map(item=>{const r=item.getBoundingClientRect();return {id:item.dataset.menu,x:r.x,y:r.y,width:r.width,height:r.height};});
+   try{await invoke('menu.caption.show',{...(id?{id}:{}),buttons:geometry});}
+   catch{if(!disposed&&request===serial){notice.textContent=(!root.lang||root.lang.startsWith('zh'))?'菜单暂不可用。':'Menu unavailable.';notice.hidden=false;}}
+   finally{if(!disposed&&request===serial)setActive(null);}
+  };
+  buttons.forEach((button,index)=>{
+   button.setAttribute('role','menuitem');button.tabIndex=index===0?0:-1;
+   button.addEventListener('pointerdown',event=>event.preventDefault());
+   button.addEventListener('click',()=>void openMenu(button));
+   // Native hover tracking switches menus without accumulating renderer IPC waits.
+   button.addEventListener('keydown',event=>{
+    if(event.defaultPrevented||event.isComposing||event.keyCode===229)return;
+    const visible=buttons.filter(item=>!item.hidden),position=visible.indexOf(button);
+    if(event.key==='ArrowLeft'||event.key==='ArrowRight'){
+     event.preventDefault();const next=visible[(position+(event.key==='ArrowRight'?1:visible.length-1))%visible.length];
+     for(const item of buttons)item.tabIndex=item===next?0:-1;next?.focus();if(active)void openMenu(next,true);
+    }else if(event.key==='ArrowDown'){event.preventDefault();void openMenu(button,true);}
+   });
+  });
+  const keydown=event=>{
+   if(platform==='darwin'||event.defaultPrevented||event.ctrlKey||event.metaKey||event.shiftKey||event.isComposing||event.keyCode===229||event.getModifierState?.('AltGraph'))return;
+   if(event.key==='Escape'&&active){event.preventDefault();void invoke('menu.caption.close').catch(()=>{});}
+   else if(event.key==='F10'&&!event.altKey){event.preventDefault();void openMenu(undefined,true);}
+   else if(event.altKey){const index=definitions.findIndex(item=>item[3]===event.key.toLowerCase());if(index>=0&&!buttons[index].hidden){event.preventDefault();void openMenu(buttons[index],true);}}
+  };
+  let sentTheme=null;
+  const syncTheme=()=>{
+   if(disposed)return;desiredTheme=root.dataset.theme==='light'?'light':'dark';paint();
+   if(sentTheme===desiredTheme)return;const requested=desiredTheme;sentTheme=requested;
+   void invoke('window.chrome.theme',{theme:requested}).then(applyState).catch(()=>{if(sentTheme===requested)sentTheme=null;});
+  };
+  const observer=new MutationObserver(syncTheme);observer.observe(root,{attributes:true,attributeFilter:['data-theme','lang']});
+  window.addEventListener('keydown',keydown);paint();
+  void invoke('window.chrome.read').then(value=>{applyState(value);syncTheme();}).catch(syncTheme);
+  const dispose=()=>{
+   if(disposed)return;disposed=true;serial+=1;observer.disconnect();window.removeEventListener('keydown',keydown);
+   captionMenuListeners.delete(captionEvent);windowChromeListeners.delete(applyState);savedFocus=null;
+   host.remove();sheet.remove();root.removeAttribute('data-jot-desktop-platform');root.removeAttribute('data-jot-desktop-fullscreen');
+   root.style.removeProperty('--jot-caption-bg');root.style.removeProperty('--jot-caption-fg');root.style.removeProperty('--jot-window-bg');
+  };window.addEventListener('pagehide',dispose,{once:true});
+
+ };window.addEventListener('pageshow',event=>{if(event.persisted)install();});
+ if(document.readyState==='loading')window.addEventListener('DOMContentLoaded',install,{once:true});else install();
+}
+
 contextBridge.exposeInMainWorld('jotDesktop',bridge);
+installWindowChrome();
 })();
