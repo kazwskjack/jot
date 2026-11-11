@@ -1,3 +1,4 @@
+import {createDesktopDiagnosticLog} from './diagnostic-log.mjs';
 import {createDesktopHelp} from './desktop-help.mjs';
 import {createLinuxCaptionMenu} from './linux-caption-menu.mjs';
 import {createDesktopWindowChrome,windowChromeOptions} from './window-chrome.mjs';
@@ -87,8 +88,8 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   write:async state=>{const saved=await saveDesktopNotificationState(statePath,state);deviceNotificationEnabled=saved.preferences.enabled;return saved;}
  };
  let appOrigin='',mainWindow=null,tray=null,removeIpcHandlers=null,quitConfirmed=false,shutdownPromise=null,shuttingDown=false,queuedTaskNavigation=null;
- let permissionRequestHandler=null,permissionCheckHandler=null;
- const report=error=>{console.error('[Jot desktop]',error);};
+ let permissionRequestHandler=null,permissionCheckHandler=null,diagnostics=null;
+ const report=error=>{try{diagnostics?.record('desktop-error',{error});}catch{}console.error('[Jot desktop]',error);};
  const restoreWindow=()=>{
   if(!showWindow||!mainWindow||mainWindow.isDestroyed())return;
   if(mainWindow.isMinimized())mainWindow.restore();
@@ -199,15 +200,15 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
     if(!samePath(dirname(process.execPath),active.releaseRoot))throw new Error('desktop_update_current_release_mismatch');
     const {buildServer}=await loadJotServer();
     if(typeof buildServer!=='function')throw new Error('desktop_update_current_loader_invalid');
-    return startLocalBackendImpl({buildServer,userDataPath:updatePolicy.userDataRoot,publicRoot:join(active.releaseRoot,'dist')});
+    return startLocalBackendImpl({buildServer,diagnostics,userDataPath:updatePolicy.userDataRoot,publicRoot:join(active.releaseRoot,'dist')});
    }
    const loaded=await updateHostConfig.loadActiveRelease({policy:updatePolicy,releaseOps:updateHostConfig.releaseOps,releaseId:deployment.active.releaseId,
     manifestSha256:deployment.active.manifestSha256,releaseRoot:active.releaseRoot});
    if(!loaded||typeof loaded.buildServer!=='function')throw new Error('desktop_update_active_loader_invalid');
-   return startLocalBackendImpl({buildServer:loaded.buildServer,userDataPath:updatePolicy.userDataRoot,publicRoot:join(active.releaseRoot,'dist')});
+   return startLocalBackendImpl({buildServer:loaded.buildServer,diagnostics,userDataPath:updatePolicy.userDataRoot,publicRoot:join(active.releaseRoot,'dist')});
   }
   const {buildServer}=await loadJotServer();
-  return startLocalBackendImpl({buildServer,userDataPath,publicRoot:paths.publicRoot});
+  return startLocalBackendImpl({buildServer,diagnostics,userDataPath,publicRoot:paths.publicRoot});
  };
  const backendFactory=async()=>{hostBackend=await createBackend();return hostBackend;};
  const windowFactory=async(origin)=>{
@@ -257,6 +258,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   const didFinishLoadHandler=()=>{windowChrome?.publish();deliverPendingTaskNavigation(window);if(recoveryTimer){clearTimeout(recoveryTimer);recoveryTimer=null;}if(stableTimer)clearTimeout(stableTimer);stableTimer=setTimeout(()=>{stableTimer=null;recoveryAttempts=0;},30000);stableTimer.unref?.();};
   const renderProcessGoneHandler=(_event,details)=>{
    resetCommandMenu();
+   diagnostics?.record('renderer-process-gone',{reason:details?.reason});
    report(new Error('renderer_process_gone:'+String(details?.reason??'unknown')));
    if(shuttingDown||window.isDestroyed()||recoveryAttempts>=3)return;
    recoveryAttempts++;
@@ -266,7 +268,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   window.webContents.on('did-finish-load',didFinishLoadHandler);
   window.webContents.on('render-process-gone',renderProcessGoneHandler);
   window.on('close',event=>{if(!shuttingDown&&tray&&!tray.isDestroyed()){event.preventDefault();window.hide();}});
-  desktopHelp=createDesktopHelp({app,owner:window,getWindow:()=>mainWindow,appOrigin,dialog,clipboard:electron.clipboard,shell:electron.shell,getReleaseId:()=>supervisorBootstrap?.scope?.releaseId??null,
+  desktopHelp=createDesktopHelp({app,owner:window,getWindow:()=>mainWindow,appOrigin,dialog,clipboard:electron.clipboard,shell:electron.shell,getReleaseId:()=>supervisorBootstrap?.scope?.releaseId??null,getLogFile:()=>diagnostics?.getFile()??null,
    getBuildInfo:()=>{
     if(!supervisorProducer)return null;
     const context=supervisorProducer.identity();
@@ -323,6 +325,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
  };
  let startupOperationId=null,startupRestoredStartup=null;
  lifecycle=createDesktopLifecycleImpl({app,backendFactory,windowFactory,onError:report,beforeStart:async()=>{
+  if(!diagnostics){diagnostics=createDesktopDiagnosticLog({userDataPath});diagnostics.record('session-start');}
   if(supervisorBootstrap&&(supervisorBootstrap.scope.restoredNonce!==(restoredStartupNonce??null)))
    throw new Error('desktop_host_supervisor_bootstrap_unavailable');
   if(updateHostEnabled&&updatePolicy.profile==='desktop-electron'){
@@ -367,7 +370,8 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   event.preventDefault();
   if(shutdownPromise)return;
   shuttingDown=true;notificationRuntime.closeAll();
-  shutdownPromise=lifecycle.stop('quit').then(()=>{
+  shutdownPromise=lifecycle.stop('quit').then(async()=>{
+   try{await diagnostics?.close();}catch{}
    quitConfirmed=true;app.quit();
   }).catch(error=>{
    report(error);shuttingDown=false;shutdownPromise=null;restoreWindow();

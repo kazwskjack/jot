@@ -1,12 +1,12 @@
 // Native help/about adapts PilotDeck 783499ff desktopAbout/applicationMenu; AGPL-3.0.
 import {mkdir} from 'node:fs/promises';
-import {isAbsolute} from 'node:path';
+import {dirname,isAbsolute} from 'node:path';
 import {release} from 'node:os';
 import {isDesktopAppUrl} from './desktop-security.mjs';
 const projectWebsite='https://github.com/kazwskjack/jot';
 const links=Object.freeze({docs:projectWebsite+'#readme',issues:projectWebsite+'/issues',website:projectWebsite});
 const safe=value=>typeof value==='string'&&value.length>0&&value.length<=160&&!/[\x00-\x1f\x7f]/.test(value)?value:null;
-export function createDesktopHelp({app,owner,getWindow,appOrigin,dialog,clipboard,shell,getReleaseId,getBuildInfo,onError=()=>{}}){
+export function createDesktopHelp({app,owner,getWindow,appOrigin,dialog,clipboard,shell,getReleaseId,getBuildInfo,getLogFile,onError=()=>{}}){
  let disposed=false,pending=false;
  const valid=()=>!disposed&&getWindow()===owner&&!owner.isDestroyed()&&!owner.webContents.isDestroyed?.()&&!owner.webContents.isCrashed?.()&&isDesktopAppUrl(owner.webContents.getURL(),appOrigin);
  const read=()=>{
@@ -39,15 +39,16 @@ export function createDesktopHelp({app,owner,getWindow,appOrigin,dialog,clipboar
  };
  const run=async action=>{
   if(!valid()||pending)return Object.freeze({accepted:false});
-  if(!['docs','issues','logs','version','about'].includes(action))throw Error('desktop_help_action_invalid');
+  if(!['docs','issues','logs','log-directory','version','about'].includes(action))throw Error('desktop_help_action_invalid');
   pending=true;
   try{
    if(action==='version')copy(read());
    else if(action==='about')await about();
-   else if(action==='logs'){
-    const path=app.getPath('logs');
+   else if(action==='logs'||action==='log-directory'){
+    const provided=await getLogFile?.();
+    const path=action==='logs'?provided:typeof provided==='string'&&isAbsolute(provided)?dirname(provided):app.getPath('logs');
     if(typeof path!=='string'||!isAbsolute(path)||typeof shell?.openPath!=='function')throw Error('desktop_help_logs_unavailable');
-    await mkdir(path,{recursive:true});if(!valid())return Object.freeze({accepted:false});
+    if(action==='log-directory')await mkdir(path,{recursive:true});if(!valid())return Object.freeze({accepted:false});
     if(await shell.openPath(path))throw Error('desktop_help_logs_open_failed');
    }else await openWebsite(action);
    return Object.freeze({accepted:true});

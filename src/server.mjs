@@ -51,6 +51,7 @@ export async function buildServer(options={}){
   };
   const agent=new Agent(store,{provider:options.provider??(demo?demoProvider:modelProvider({baseUrl:process.env.JOT_MODEL_URL,key:process.env.JOT_MODEL_KEY,model:process.env.JOT_MODEL})),chatRoute:chat,tools,maxWorkers:options.maxWorkers??process.env.JOT_WORKERS,maxSteps:options.maxSteps??process.env.JOT_MAX_STEPS,approvalTimeoutMs:options.approvalTimeoutMs??process.env.JOT_APPROVAL_TIMEOUT_MS});
   const app=Fastify({logger:false,bodyLimit:1500000}),streams=new Set();
+  if(typeof options.onDiagnosticResponse==='function')app.addHook('onResponse',async(_req,reply)=>{if(reply.statusCode>=500)try{options.onDiagnosticResponse(reply.statusCode);}catch{}});
   app.addHook('onRequest',async(req,reply)=>{
     const host=req.headers.host??'localhost';
     const local=/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host),viewer=host.split(':')[0]===officeViewerHost&&/^[^:]+(:\d+)?$/.test(host);
@@ -63,7 +64,7 @@ export async function buildServer(options={}){
     if(req.url.startsWith('/workbench-api/')&&!['GET','HEAD'].includes(req.method)&&!sameToken(req.headers['x-csrf-token'],csrf))return reply.code(403).send({error:'token_required'});
     reply.header('Cache-Control','no-store').header('X-Content-Type-Options','nosniff').header('Referrer-Policy','no-referrer');
   });
-  app.setErrorHandler((error,req,reply)=>{const frameworkStatus=typeof error.code==='string'&&error.code.startsWith('FST_ERR_')&&Number.isInteger(error.statusCode)&&error.statusCode>=400&&error.statusCode<500?error.statusCode:500;const status=error.validation?400:reply.statusCode>=400?reply.statusCode:frameworkStatus;reply.code(status).send({error:error.validation?'invalid_input':status===500?'request_failed':error.message});});
+  app.setErrorHandler((error,req,reply)=>{try{options.onDiagnosticError?.(error);}catch{}const frameworkStatus=typeof error.code==='string'&&error.code.startsWith('FST_ERR_')&&Number.isInteger(error.statusCode)&&error.statusCode>=400&&error.statusCode<500?error.statusCode:500;const status=error.validation?400:reply.statusCode>=400?reply.statusCode:frameworkStatus;reply.code(status).send({error:error.validation?'invalid_input':status===500?'request_failed':error.message});});
   registerWorkbenchProxy(app,workbench,csrf);
   app.get('/api/capabilities',async()=>({mode:demo?'demo':'agent',csrf,model_configured:Boolean(process.env.JOT_MODEL_URL&&process.env.JOT_MODEL)||Boolean(options.provider),conversation_modes:{default:chat?'chat':'work',work:{supported:true},chat:{ready:Boolean(chat)}},tools:tools.definitions.map(t=>t.function.name),limits:{max_message_chars:8000,max_file_bytes:1000000,workers:agent.maxWorkers,per_conversation:1,max_steps:agent.maxSteps,approval_timeout_ms:agent.approvalTimeoutMs}}));
   app.get('/api/conversations',async()=>store.conversations());

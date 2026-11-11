@@ -24,7 +24,7 @@ export function createDesktopCommandMenu({Menu,getWindow,appOrigin,restoreWindow
   {id:'menu-view',label:'查看',submenu:[{...action('toggle-sidebar','显示工作台导航','CmdOrCtrl+B'),type:'checkbox',checked:state.sidebar_visible,registerAccelerator:false},{type:'separator'},
    {role:'resetZoom',label:'实际大小'},{role:'zoomIn',label:'放大'},{role:'zoomOut',label:'缩小'},{role:'togglefullscreen',label:'切换全屏'}]},
   {id:'menu-go',label:'前往',submenu:[action('chat','我的对话'),action('files','共同文件'),action('skills','当前会话技能'),action('scheduled-tasks','持续任务')]},
-  {id:'menu-help',label:'帮助',role:'help',submenu:[helpItem('docs','使用文档'),helpItem('issues','反馈问题／功能建议…'),{type:'separator'},helpItem('logs','打开日志目录'),helpItem('version','复制版本信息'),...(platform!=='darwin'?[{type:'separator'},helpItem('about','关于 Jot')]:[])]},
+  {id:'menu-help',label:'帮助',role:'help',submenu:[helpItem('docs','使用文档'),helpItem('issues','反馈问题／功能建议…'),{type:'separator'},helpItem('logs','打开宿主日志文件'),helpItem('log-directory','打开日志目录'),helpItem('version','复制版本信息'),...(platform!=='darwin'?[{type:'separator'},helpItem('about','关于 Jot')]:[])]},
   ...(platform==='darwin'?[{role:'windowMenu',label:'窗口',submenu:[{role:'minimize',label:'最小化'},{role:'zoom',label:'缩放'},{type:'separator'},{role:'front',label:'全部置于前面'}]}]:[]),
  ];
  };
