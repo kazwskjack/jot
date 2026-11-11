@@ -1,6 +1,7 @@
 // Fixed owned conversation UI failures; unknown/raw content stays unchanged.
 import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
 const english:Record<string,string>={
+ "区域引用的截图附件尚未完成核对，请在附件区重试或移除引用。": "The region reference screenshot attachment is not yet verified. Retry it in the attachments area or remove the reference.",
  "原成员请求结果尚未确认": "The original member request result is unconfirmed.",
  "无法清除已停止成员的请求记录": "Unable to clear the stopped member’s request record.",
  "无法读取成员列表": "Unable to read the member list.",
