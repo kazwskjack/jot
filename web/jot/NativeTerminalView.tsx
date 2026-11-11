@@ -1,5 +1,6 @@
 import {useApplicationLanguage,useApplicationText} from './application-language';
 import {terminalUiMessage} from './terminal-ui-messages';
+import ProviderTerminalCommands from './ProviderTerminalCommands';
 import {useEffect,useRef,useState} from 'react';
 import {request,requestTerminalStream} from './client';
 import {loadTerminalAssets,type TerminalApi} from './terminal-assets';
@@ -223,6 +224,14 @@ export default function NativeTerminalView(props:Props) {
     return dispose;
   },[conversationId,runId,terminal.id,options,revision]);
   function sendKey(data:string){const current=live.current;if(current?.writable&&!current.abort.signal.aborted){current.clearPrompt();current.sender?.write(applyKeys(data));current.terminal.focus();}}
+  function sendProviderCommand(command:string){
+    const current=live.current;
+    if(!current?.writable||current.abort.signal.aborted||!current.sender?.canWrite||current.sender.hasPending
+      ||command.length>4096||!command.trim()||/[\x00-\x1f\x7f]/.test(command))return false;
+    resetKeys();current.clearPrompt();
+    if(!current.sender.write(command+'\r'))return false;
+    setNotice('命令输入已排队等待原生确认，登录结果请查看提供方原始输出。');current.terminal.focus();return true;
+  }
   function choosePrompt(data:string) {
     const current=live.current;
     if(!prompt||!current?.writable||current!==prompt.connection||current.abort.signal.aborted||current.sender?.hasPending
@@ -243,6 +252,7 @@ export default function NativeTerminalView(props:Props) {
       <button type="button" onClick={()=>live.current?.terminal.scrollToBottom()}>{t("滚动到底部","Scroll to Bottom")}</button>
       <button type="button" onClick={props.onClose}>{t("断开视图","Disconnect View")}</button>
     </div>
+    <ProviderTerminalCommands terminal={info} disabled={!writable||pending} onSend={sendProviderCommand}/>
     <div ref={host} aria-label={t("原生终端屏幕","Native Terminal Screen")} style={{height:'min(55vh,480px)',minHeight:180,minWidth:0,overflow:'hidden',marginTop:8,background:'#101318'}}/>
     {prompt&&writable&&<div role="group" aria-label={t("终端当前编号选项","Current Terminal Numbered Options")} style={{display:'flex',flexWrap:'wrap',gap:6,marginTop:8}}>
       {prompt.options.map(option=><button type="button" key={option.number} disabled={pending} onPointerDown={event=>event.preventDefault()}

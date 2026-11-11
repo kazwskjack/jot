@@ -1,6 +1,7 @@
 import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
 
 const english:Record<string,string>={
+  "命令输入已排队等待原生确认，登录结果请查看提供方原始输出。": "Command input is queued for native acknowledgement. Check the provider’s original output for the login result.",
   "无法恢复历史终端请求": "Cannot Recover Historical Terminal Requests",
   "无法保留原终端请求": "Cannot Retain the Original Terminal Request",
   "终端回执暂时无法核对，原请求已保留。": "The terminal receipt cannot be reconciled right now. The original request is retained.",
