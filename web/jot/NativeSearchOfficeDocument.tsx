@@ -4,7 +4,7 @@ import {OfficeContent} from './ActivityToolFileOffice';
 import {normalizeOfficePreviewContent,officePreviewFormat} from '../../packages/gateway/src/artifacts/document-preview-content';
 import {ApiError,request,taskDraftScope} from './client';
 import type {NativeMemberOfficeDocumentPage} from '../../packages/gateway/contracts/types';
-import {nativeMemberReferenceSource,nativeMemberDownloadUrl,type NativeMemberPreviewSource} from './activity-file-preview-client';
+import {nativeMemberViewingSource,nativeMemberDownloadUrl,type NativeMemberPreviewSource} from './activity-file-preview-client';
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
 
 export default function NativeSearchOfficeDocument({source,expectedOpenSha,expectedOpenProof,expectedFile,officeFocus,officeTextFocus,onOpened}:{source:NativeMemberPreviewSource;expectedOpenSha?:string|undefined;expectedOpenProof?:string|undefined;expectedFile?:{sha256:string;size:number}|undefined;officeFocus?:OfficeCellFocus|undefined;officeTextFocus?:OfficeTextFocus|undefined;onOpened?:(sha:string,proof?:string)=>boolean}){
@@ -59,7 +59,7 @@ export default function NativeSearchOfficeDocument({source,expectedOpenSha,expec
    <p>{page.size_bytes} 字节 · SHA-256 <code>{page.sha256}</code></p>
    <a href={nativeMemberDownloadUrl(source)+'&open_sha256='+page.open_sha256+(page.open_proof?'&open_proof='+page.open_proof:'')} download={source.member.path.split(/[\\/]/).at(-1)||'file'} onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载此结构化来源</a>
    {page.document.truncated&&<p role="status">当前解析结果存在截断，请对照完整打开文件。</p>}
-   <section className="jot-office-content" data-chat-search-content={JSON.stringify(['native-office',identity,page.open_sha256])}><OfficeContent key={JSON.stringify([page.open_sha256,officeFocus?.key,officeTextFocus?.key])} value={page.document} source={nativeMemberReferenceSource(source,{openSha:page.open_sha256,sha256:page.sha256,size:page.size_bytes,proof:page.open_proof})} officeFocus={officeFocus} officeTextFocus={officeTextFocus}/></section>
+   <section className="jot-office-content" data-chat-search-content={JSON.stringify(['native-office',identity,page.open_sha256])}><OfficeContent key={JSON.stringify([page.open_sha256,officeFocus?.key,officeTextFocus?.key])} value={page.document} source={nativeMemberViewingSource(source,{openSha:page.open_sha256,sha256:page.sha256,size:page.size_bytes,proof:page.open_proof})} officeFocus={officeFocus} officeTextFocus={officeTextFocus}/></section>
   </>}
   {current?.error&&<p role="alert">{current.error}</p>}
   <button type="button" onClick={()=>setRevision(value=>value+1)}>重新解析同次打开来源</button>

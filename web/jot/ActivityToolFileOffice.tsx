@@ -18,7 +18,7 @@ import ActivityToolFileBytes from './ActivityToolFileBytes';
 import ActivityToolFileDocx from './ActivityToolFileDocx';
 import ActivityToolFilePptx from './ActivityToolFilePptx';
 import ActivityToolFileXlsx from './ActivityToolFileXlsx';
-import type {ListedFilePreviewSource} from './activity-file-preview-client';
+import {fileViewingReferenceSource,type FileViewingIdentity,type ListedFilePreviewSource} from './activity-file-preview-client';
 import {officePreviewFormat,normalizeOfficePreviewContent,type OfficeDocumentPreview,type SpreadsheetRawValue} from '../../packages/gateway/src/artifacts/document-preview-content';
 
 type VisualAdmission={protocol:1;ready:boolean;reason?:'source_limit'|'format_invalid'|'source_unverified'};
@@ -63,10 +63,10 @@ function spreadsheetReferenceContext(sheet:Extract<OfficeDocumentPreview,{kind:'
  const surroundingValues=matrix(top,left,Math.min(range.bottom-top+2,20,1048576-top+1),Math.min(range.right-left+2,30,16384-left+1));
  return {headers,surroundingValues,incomplete:headerRows>0&&!headers||!surroundingValues};
 }
-function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocumentPreview,{kind:'xlsx'}>;source?:FileReferenceIdentity|undefined;officeFocus?:OfficeCellFocus}){
+function SpreadsheetContent({value,source,viewingSource,officeFocus}:{value:Extract<OfficeDocumentPreview,{kind:'xlsx'}>;source?:FileReferenceIdentity|undefined;viewingSource?:FileViewingIdentity|undefined;officeFocus?:OfficeCellFocus}){
  const context=useContext(FileTextReferenceContext),owner=taskDraftScope();
  const root=useRef<HTMLElement>(null),jumped=useRef(false);
- const storageKey=source?officeViewIdentity(source,owner,'structured-xlsx'):undefined;
+ const storageKey=viewingSource?officeViewIdentity(viewingSource,owner,'structured-xlsx'):undefined;
  const stored=useMemo(()=>storageKey&&!officeFocus?readOfficeView(storageKey,owner,'structured-xlsx'):undefined,[storageKey,owner,officeFocus?.key]);
  const saved=stored?.kind==='structured-xlsx'?stored:undefined;
  const ranges=useMemo(()=>officeFocus?.value.reference.locator.ranges.map(cellRangeCoordinates)??[],[officeFocus]);
@@ -252,7 +252,7 @@ function OfficeText({text,match}:{text:string;match?:{start:number;end:number}})
  if(!match)return <>{text}</>;
  return <>{text.slice(0,match.start)}<mark data-office-reference-text>{text.slice(match.start,match.end)}</mark>{text.slice(match.end)}</>;
 }
-function OfficeDocumentContent({value,source,officeTextFocus}:{value:Exclude<OfficeDocumentPreview,{kind:'xlsx'}>;source?:FileReferenceIdentity|undefined;officeTextFocus?:OfficeTextFocus}){
+function OfficeDocumentContent({value,source,viewingSource,officeTextFocus}:{value:Exclude<OfficeDocumentPreview,{kind:'xlsx'}>;source?:FileReferenceIdentity|undefined;viewingSource?:FileViewingIdentity|undefined;officeTextFocus?:OfficeTextFocus}){
  const root=useRef<HTMLElement>(null),jumped=useRef(false),owner=taskDraftScope();
  const view=useMemo(()=>officeTextView(value),[value]);
  const focused=useMemo(()=>{
@@ -263,7 +263,7 @@ function OfficeDocumentContent({value,source,officeTextFocus}:{value:Exclude<Off
   return resolveOfficeTextReference(view,original.reference);
  },[view,source,owner,officeTextFocus]);
  const viewKind=value.kind==='docx'?'structured-docx':'structured-pptx';
- const storageKey=source?officeViewIdentity(source,owner,viewKind):undefined;
+ const storageKey=viewingSource?officeViewIdentity(viewingSource,owner,viewKind):undefined;
  const stored=useMemo(()=>storageKey&&!officeTextFocus?readOfficeView(storageKey,owner,viewKind):undefined,[storageKey,owner,viewKind,officeTextFocus?.key]);
  const saved=stored?.kind==='structured-docx'||stored?.kind==='structured-pptx'?stored:undefined;
  const initialPart=focused?.block.part??storedPage(saved?.part,value.kind==='docx'&&value.tables.length?2:1);
@@ -318,10 +318,12 @@ function OfficeDocumentContent({value,source,officeTextFocus}:{value:Exclude<Off
   </>}
  </section>;
 }
-export function OfficeContent({value,source,officeFocus,officeTextFocus}:{value:OfficeDocumentPreview;source?:FileReferenceIdentity|undefined;officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus}){
+export function OfficeContent({value,source,officeFocus,officeTextFocus}:{value:OfficeDocumentPreview;source?:FileViewingIdentity|undefined;officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus}){
  const owner=taskDraftScope(),identity=source?officeViewIdentity(source,owner,value.kind==='xlsx'?'structured-xlsx':value.kind==='docx'?'structured-docx':'structured-pptx'):'unbound-'+value.kind;
- if(value.kind==='xlsx')return <SpreadsheetContent key={JSON.stringify([identity,officeFocus?.key])} value={value} source={source} officeFocus={officeFocus}/>;
- return <OfficeDocumentContent key={JSON.stringify([identity,officeTextFocus?.key])} value={value} source={source} officeTextFocus={officeTextFocus}/>;
+ const referenceSource=source?fileViewingReferenceSource(source):undefined,cellFocus=referenceSource?officeFocus:undefined,textFocus=referenceSource?officeTextFocus:undefined;
+ const content=value.kind==='xlsx'?<SpreadsheetContent key={JSON.stringify([identity,cellFocus?.key])} value={value} source={referenceSource} viewingSource={source} officeFocus={cellFocus}/>
+  :<OfficeDocumentContent key={JSON.stringify([identity,textFocus?.key])} value={value} source={referenceSource} viewingSource={source} officeTextFocus={textFocus}/>;
+ return <>{source?.native_source&&!referenceSource&&<p>此打开内容没有引用凭据，可阅读和下载；文字与单元格引用暂不可用。</p>}{content}</>;
 }
 
 export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus;printFocus?:OfficePrintFocus}){
