@@ -308,7 +308,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
     if(reset)captionMenu?.close();commandMenu.setState(value);
     if(reset)linuxCaptionMenu?.invalidate();else linuxCaptionMenu?.refresh();
    },
-   appearanceImages:{save:bytes=>{const current=appearanceContext();return appearanceStore.saveImage(bytes,current);},read:id=>{const current=appearanceContext();return appearanceStore.readImage(id,current);},delete:id=>{const current=appearanceContext();return appearanceStore.deleteImage(id,current);}},
+   appearanceImages:{recover:()=>{const current=appearanceContext();return appearanceStore.recoverImages(current);},save:bytes=>{const current=appearanceContext();return appearanceStore.saveImage(bytes,current);},read:id=>{const current=appearanceContext();return appearanceStore.readImage(id,current);},delete:id=>{const current=appearanceContext();return appearanceStore.deleteImage(id,current);}},
    readAppearance:()=>appearanceStore?.read()??null,writeAppearance:async request=>{
     if(shuttingDown||!appearanceStore)throw Error('desktop_appearance_unavailable');
     const current=appearanceContext();

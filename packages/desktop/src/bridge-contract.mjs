@@ -2,7 +2,7 @@ import {normalizeLightAppearance,isImageId,MAX_BACKGROUND_BYTES} from './light-a
 import {parseCaptionMenuRequest,parseCaptionProjectionCommand} from './caption-menu-contract.mjs';
 import {parseDesktopMenuState} from './menu-commands.mjs';
 const notificationEvents=new Set(['changed','completed','failed','needs_confirmation']);
-const channels=new Set(['appearance.image.save','appearance.image.read','appearance.image.delete','appearance.read','appearance.write','desktop.about.read','menu.caption.items','menu.caption.activate','menu.caption.dismiss','window.chrome.read','window.chrome.theme','window.chrome.appearance','menu.caption.show','menu.caption.close','menu.state.set','notification.show','notification.dismiss','notification.state.read','notification.state.initialize','notification.permission.read','preferences.read','preferences.write','window.openTask',
+const channels=new Set(['appearance.image.recover','appearance.image.save','appearance.image.read','appearance.image.delete','appearance.read','appearance.write','desktop.about.read','menu.caption.items','menu.caption.activate','menu.caption.dismiss','window.chrome.read','window.chrome.theme','window.chrome.appearance','menu.caption.show','menu.caption.close','menu.state.set','notification.show','notification.dismiss','notification.state.read','notification.state.initialize','notification.permission.read','preferences.read','preferences.write','window.openTask',
  'update.status','update.check','update.download','update.pause','update.resume','update.cancel','update.activate','dialog.selectFile']);
 const hasOwn=(value,key)=>Object.prototype.hasOwnProperty.call(value,key);
 
@@ -26,7 +26,7 @@ function taskIdentity(value,code){
 
 export function parseDesktopCommand(channel,value){
  if(typeof channel!=='string'||!channels.has(channel))fail('desktop_ipc_channel_denied');
- if(channel==='window.chrome.read'||channel==='desktop.about.read'||channel==='appearance.read'){if(value!==undefined)fail('desktop_ipc_payload_invalid');return Object.freeze({channel,payload:null});}
+ if(channel==='window.chrome.read'||channel==='desktop.about.read'||channel==='appearance.read'||channel==='appearance.image.recover'){if(value!==undefined)fail('desktop_ipc_payload_invalid');return Object.freeze({channel,payload:null});}
  if(channel==='appearance.image.save'){
   if(!(value instanceof Uint8Array)||!(value.buffer instanceof ArrayBuffer)||value.byteLength===0||value.byteLength>MAX_BACKGROUND_BYTES)fail('desktop_appearance_image_invalid');
   return Object.freeze({channel,payload:value});

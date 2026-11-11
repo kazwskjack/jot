@@ -17,7 +17,7 @@ export default function LightAppearanceControls({light,dark,onLight,zh}:{light:R
   <h3 id={id}>{zh?'浅色外观':'Light appearance'}</h3>
   {dark&&<p>{zh?'浅色配色在浅色主题下生效。':'Palettes apply to the light theme.'} <button type="button" disabled={light.unavailable} onClick={onLight}>{zh?'切换浅色':'Use light theme'}</button></p>}
   {light.saveFailed&&<p role="alert">{zh?'外观暂未保存，请重试。':'Appearance could not be saved. Please try again.'}</p>}
-  <fieldset disabled={dark||light.unavailable}><legend>{zh?'配色':'Palette'}</legend><div className="jot-appearance-presets" role="group" aria-label={zh?'预设配色':'Palette presets'}>
+  <fieldset disabled={dark||light.unavailable||light.cleanupPending||light.recoveryPending}><legend>{zh?'配色':'Palette'}</legend><div className="jot-appearance-presets" role="group" aria-label={zh?'预设配色':'Palette presets'}>
    {(Object.keys(labels) as LightPreset[]).map(preset=>{const colors=preset==='custom'?light.value.custom:LIGHT_PRESETS[preset];return <button type="button" key={preset} aria-pressed={light.value.preset===preset} onClick={()=>light.update(current=>({...current,preset}))}><span className="jot-appearance-swatch" aria-hidden="true" style={{background:colors.background,borderColor:colors.accent}}/>{labels[preset]}</button>;})}
   </div><ColorControl label={zh?'强调色':'Accent'} value={palette.accent} onChange={value=>color('accent',value)}/><ColorControl label={zh?'背景颜色':'Background color'} value={palette.background} onChange={value=>color('background',value)}/>
   <button type="button" onClick={()=>light.update(current=>({...current,preset:'default',custom:normalizeLightAppearance().custom}))}>{zh?'重置配色':'Reset palette'}</button></fieldset>

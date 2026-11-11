@@ -31,7 +31,7 @@ export function useThemePreference(){
 }
 
 export function ThemeSelector({preference,zh=false}:{preference:ThemePreference;zh?:boolean}){
- return <div className="jot-theme-control"><select className="jot-theme-select" aria-label={zh?'外观主题':'Appearance theme'} value={preference.mode} disabled={preference.unavailable} onChange={event=>{if(validMode(event.target.value))preference.changeMode(event.target.value);}}>
+ return <div className="jot-theme-control"><select className="jot-theme-select" aria-label={zh?'外观主题':'Appearance theme'} value={preference.mode} disabled={preference.unavailable||preference.light.cleanupPending||preference.light.recoveryPending} onChange={event=>{if(validMode(event.target.value))preference.changeMode(event.target.value);}}>
   <option value="system">{zh?'跟随系统':'System'}</option><option value="light">{zh?'浅色':'Light'}</option><option value="dark">{zh?'深色':'Dark'}</option>
  </select><details className="jot-appearance-popover" onKeyDown={event=>{if(event.key==='Escape'&&!event.defaultPrevented&&!event.nativeEvent.isComposing&&event.currentTarget.open){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>{zh?'配色':'Palette'}</summary><LightAppearanceControls light={preference.light} dark={preference.theme==='dark'} onLight={()=>preference.changeMode('light')} zh={zh}/></details>{preference.unavailable?<span role="status">{zh?'桌面外观设置暂不可用。':'Desktop appearance settings are unavailable.'}</span>:preference.pending?<span role="status">{zh?'正在保存外观…':'Saving appearance…'}</span>:preference.saveFailed&&<span role="status">{zh?'外观暂未保存，请重试。':'Appearance could not be saved. Please try again.'}</span>}</div>;
 }

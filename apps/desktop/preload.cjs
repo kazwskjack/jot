@@ -83,6 +83,7 @@ const bridge=Object.freeze({
  saveAppearanceImage:bytes=>invoke('appearance.image.save',bytes),
  readAppearanceImage:id=>invoke('appearance.image.read',{id}),
  deleteAppearanceImage:id=>invoke('appearance.image.delete',{id}),
+ recoverAppearanceImages:()=>invoke('appearance.image.recover'),
  getDesktopAbout:()=>invoke('desktop.about.read'),
  getWindowChrome:()=>invoke('window.chrome.read'),
  setWindowTheme:theme=>invoke('window.chrome.theme',{theme}),

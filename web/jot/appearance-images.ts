@@ -1,8 +1,32 @@
 // Adapts PilotDeck 783499ff appearanceImages and uses Jot's shared image preflight; AGPL-3.0.
 import {appearanceImageSize} from '../../packages/desktop/src/appearance-image.mjs';
 import {LIGHT_APPEARANCE_KEY,LEGACY_LIGHT_APPEARANCE_KEY,MAX_BACKGROUND_BYTES,isImageId,normalizeLightAppearance,type LightAppearance} from '../../packages/desktop/src/light-appearance.mjs';
-type Bridge={getAppearance?:()=>unknown;saveAppearanceImage?:(bytes:Uint8Array)=>Promise<unknown>;readAppearanceImage?:(id:string)=>Promise<unknown>;deleteAppearanceImage?:(id:string)=>Promise<unknown>};
+type Bridge={getAppearance?:()=>unknown;saveAppearanceImage?:(bytes:Uint8Array)=>Promise<unknown>;readAppearanceImage?:(id:string)=>Promise<unknown>;deleteAppearanceImage?:(id:string)=>Promise<unknown>;recoverAppearanceImages?:()=>Promise<unknown>};
 const native=()=>{const bridge=(window as Window&{jotDesktop?:Bridge}).jotDesktop;return typeof bridge?.getAppearance==='function'?bridge:null;};
+const imageProtocol='jot.appearance.image.v1',stageDuration=30*60*1000;
+type ManagedImage={protocol:typeof imageProtocol;id:string;stage:null|{owner:string;expiresAt:number}};
+let pageOwner:string|null=null;
+const owner=()=>pageOwner??=(identifier().slice(0,-4));
+const metadataKey=(id:string)=>'jot.metadata.'+id;
+function managedImage(value:unknown,id:string):ManagedImage|null{
+ if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='id,protocol,stage')return null;
+ const row=value as Record<string,unknown>;
+ if(row.protocol!==imageProtocol||row.id!==id||!isImageId(row.id))return null;
+ if(row.stage!==null){
+  if(!row.stage||typeof row.stage!=='object'||Array.isArray(row.stage)||Object.keys(row.stage).sort().join(',')!=='expiresAt,owner')return null;
+  const stage=row.stage as Record<string,unknown>;
+  if(typeof stage.owner!=='string'||!isImageId(stage.owner+'.png')||!Number.isSafeInteger(stage.expiresAt)||Number(stage.expiresAt)<0)return null;
+ }
+ return value as ManagedImage;
+}
+const imageBlob=(value:unknown)=>value instanceof Blob?value:null;
+export type ImageRecovery={protocol:1;removed:number;retained:number;scanned:number;complete:boolean};
+function recoveryResult(value:unknown):ImageRecovery{
+ if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='complete,protocol,removed,retained,scanned')throw Error('appearance_image_reply_invalid');
+ const row=value as Record<string,unknown>;
+ if(row.protocol!==1||typeof row.complete!=='boolean'||['removed','retained','scanned'].some(key=>!Number.isSafeInteger(row[key])||Number(row[key])<0||Number(row[key])>128)||Number(row.removed)+Number(row.retained)>Number(row.scanned))throw Error('appearance_image_reply_invalid');
+ return value as ImageRecovery;
+}
 const canceled=()=>Error('appearance_image_cancelled');
 function database():Promise<IDBDatabase>{
  return new Promise((resolve,reject)=>{
@@ -37,7 +61,20 @@ type BrowserReceipt={value:LightAppearance;previousImageId:string|null};
 export async function writeBrowserLight(update:(value:LightAppearance)=>LightAppearance,canCommit:()=>boolean):Promise<BrowserReceipt>{
  const saved:{receipt:BrowserReceipt|null}={receipt:null};
  const write=()=>{if(!canCommit())throw canceled();const before=readBrowserLight(),next=normalizeLightAppearance(update(before));localStorage.setItem(LIGHT_APPEARANCE_KEY,JSON.stringify(next));const receipt={value:next,previousImageId:before.background.imageId};saved.receipt=receipt;return receipt;};
- try{return await transaction<BrowserReceipt>('readwrite',(_store,done)=>done(write()));}
+ try{return await transaction<BrowserReceipt>('readwrite',(store,done,fail)=>{
+  const before=readBrowserLight(),next=normalizeLightAppearance(update(before)),id=next.background.imageId;
+  if(!id){done(write());return;}
+  const request=store.get(id);request.onsuccess=()=>{try{
+   const newReference=id!==before.background.imageId;
+   if(newReference&&!imageBlob(request.result))throw Error('appearance_image_missing');
+   const metadata=store.get(metadataKey(id));metadata.onsuccess=()=>{try{
+    const row=managedImage(metadata.result,id);
+    if(newReference&&metadata.result!==undefined&&!row)throw Error('appearance_image_storage_invalid');
+    if(newReference&&row?.stage&&(row.stage.expiresAt<=Date.now()||row.stage.owner!==owner()))throw Error('appearance_image_stage_expired');
+    if(row?.stage)store.put({...row,stage:null},metadataKey(id));done(write());
+   }catch(error){fail(error);}};
+  }catch(error){fail(error);}};
+ });}
  catch(error){
   // localStorage can succeed even when the otherwise read-only barrier transaction aborts.
   const committed=saved.receipt;
@@ -58,9 +95,9 @@ async function saveBrowserImage(blob:Blob,canCommit:()=>boolean):Promise<string>
   let count=0,total=0,scanned=0;const cursor=store.openCursor();
   cursor.onsuccess=()=>{try{
    const item=cursor.result;
-   if(item){if(++scanned>128)throw Error('appearance_image_quota');if(isImageId(item.key)){if(!(item.value instanceof Blob))throw Error('appearance_image_storage_invalid');count++;total+=item.value.size;}item.continue();return;}
+   if(item){if(++scanned>128)throw Error('appearance_image_quota');if(isImageId(item.key)){const blob=imageBlob(item.value);if(!blob)throw Error('appearance_image_storage_invalid');count++;total+=blob.size;}item.continue();return;}
    if(count>=32||total+blob.size>160*1024*1024)throw Error('appearance_image_quota');
-   if(!canCommit())throw canceled();store.add(blob,id);done(id);
+   if(!canCommit())throw canceled();store.add(blob,id);store.add({protocol:imageProtocol,id,stage:{owner:owner(),expiresAt:Date.now()+stageDuration}} satisfies ManagedImage,metadataKey(id));done(id);
   }catch(error){fail(error);}};
  });
 }
@@ -68,13 +105,22 @@ export async function deleteBackgroundImage(id:string):Promise<boolean>{
  if(!isImageId(id))throw Error('appearance_image_invalid');
  const bridge=native();
  if(bridge){if(typeof bridge.deleteAppearanceImage!=='function')throw Error('appearance_image_unavailable');const result=await bridge.deleteAppearanceImage(id);if(typeof result!=='boolean')throw Error('appearance_image_reply_invalid');return result;}
- return transaction<boolean>('readwrite',(store,done)=>{if(readBrowserLight().background.imageId===id){done(false);return;}store.delete(id);done(true);});
+ return transaction<boolean>('readwrite',(store,done,fail)=>{if(readBrowserLight().background.imageId===id){done(false);return;}
+  const request=store.get(id);request.onsuccess=()=>{try{
+   if(request.result!==undefined&&!imageBlob(request.result))throw Error('appearance_image_storage_invalid');
+   const metadata=store.get(metadataKey(id));metadata.onsuccess=()=>{try{
+    const row=managedImage(metadata.result,id);if(metadata.result!==undefined&&!row)throw Error('appearance_image_storage_invalid');
+    if(row?.stage&&row.stage.owner!==owner()&&row.stage.expiresAt>Date.now()){done(false);return;}
+    store.delete(id);if(row)store.delete(metadataKey(id));done(true);
+   }catch(error){fail(error);}};
+  }catch(error){fail(error);}};
+ });
 }
 export async function loadBackgroundImage(id:string):Promise<string>{
  if(!isImageId(id))throw Error('appearance_image_invalid');const bridge=native();let blob:Blob;
  if(bridge){if(typeof bridge.readAppearanceImage!=='function')throw Error('appearance_image_unavailable');const bytes=await bridge.readAppearanceImage(id);
   if(!(bytes instanceof Uint8Array)||bytes.byteLength>MAX_BACKGROUND_BYTES)throw Error('appearance_image_invalid');blob=new Blob([new Uint8Array(bytes)],{type:id.toLowerCase().endsWith('.png')?'image/png':'image/webp'});
- }else blob=await transaction<Blob>('readonly',(store,done,fail)=>{const request=store.get(id);request.onsuccess=()=>request.result instanceof Blob?done(request.result):fail(Error('appearance_image_missing'));});
+ }else blob=await transaction<Blob>('readonly',(store,done,fail)=>{const request=store.get(id);request.onsuccess=()=>{const blob=imageBlob(request.result);if(blob)done(blob);else fail(Error('appearance_image_missing'));};});
  if(blob.size<=0||blob.size>MAX_BACKGROUND_BYTES)throw Error('appearance_image_invalid');
  const bytes=new Uint8Array(await blob.arrayBuffer()),mime=id.toLowerCase().endsWith('.png')?'image/png':'image/webp';
  if(!appearanceImageSize(bytes,mime,{stored:true}))throw Error('appearance_image_invalid');
@@ -111,4 +157,29 @@ export async function saveBackgroundImage(file:File,canContinue:()=>boolean):Pro
   if(!isImageId(result)||!result.endsWith('.png'))throw Error('appearance_image_reply_invalid');id=result;
  }else id=await saveBrowserImage(blob,canContinue);
  if(!canContinue()){await deleteBackgroundImage(id).catch(()=>{});throw canceled();}return id;
+}
+
+export async function recoverBackgroundImages():Promise<ImageRecovery>{
+ const bridge=native();
+ if(bridge){if(typeof bridge.recoverAppearanceImages!=='function')throw Error('appearance_image_unavailable');return recoveryResult(await bridge.recoverAppearanceImages());}
+ return transaction<ImageRecovery>('readwrite',(store,done,fail)=>{
+  const reference=readBrowserLight().background.imageId,result:ImageRecovery={protocol:1,removed:0,retained:0,scanned:0,complete:true},cursor=store.openCursor();
+  cursor.onsuccess=()=>{try{
+   const item=cursor.result;if(!item){done(result);return;}if(result.scanned>=128){result.complete=false;done(result);return;}result.scanned++;
+   if(isImageId(item.key)){
+    const id=item.key,metadata=store.get(metadataKey(id));metadata.onsuccess=()=>{try{
+     const row=managedImage(metadata.result,id),blob=imageBlob(item.value);
+     if(id===reference||!row||!blob||blob.size<=0||blob.size>MAX_BACKGROUND_BYTES||row.stage&&row.stage.expiresAt>Date.now())result.retained++;
+     else{item.delete();store.delete(metadataKey(id));result.removed++;}item.continue();
+    }catch(error){fail(error);}};return;
+   }
+   if(typeof item.key==='string'&&item.key.startsWith('jot.metadata.')){
+    const id=item.key.slice('jot.metadata.'.length),row=managedImage(item.value,id);
+    if(row){const request=store.get(id);request.onsuccess=()=>{try{
+     if(request.result===undefined){if(id===reference||row.stage&&row.stage.expiresAt>Date.now())result.retained++;else item.delete();}item.continue();
+    }catch(error){fail(error);}};return;}
+   }
+   result.retained++;item.continue();
+  }catch(error){fail(error);}};
+ });
 }

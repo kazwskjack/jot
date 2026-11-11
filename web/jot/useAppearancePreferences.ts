@@ -1,5 +1,5 @@
 // Adapts PilotDeck 783499ff ThemeContext/appearance persistence; AGPL-3.0.
-import {deleteBackgroundImage,writeBrowserLight} from './appearance-images';
+import {deleteBackgroundImage,writeBrowserLight,recoverBackgroundImages,type ImageRecovery} from './appearance-images';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {LIGHT_APPEARANCE_KEY,LEGACY_LIGHT_APPEARANCE_KEY,normalizeLightAppearance,type LightAppearance,type ThemeMode} from '../../packages/desktop/src/light-appearance.mjs';
 type Preferences={themeMode:ThemeMode;lightAppearance:LightAppearance};
@@ -35,19 +35,36 @@ function initial(){
  return {bridge,native,unavailable,value:native?.stored?{themeMode:native.themeMode,lightAppearance:native.lightAppearance}:browser.value,migrate:!!bridge&&!!native?.writable&&!native.stored&&browser.saved};
 }
 export function useAppearancePreferences(){
- const [start]=useState(initial),[value,setValue]=useState(start.value),[error,setError]=useState(start.unavailable?'unavailable':''),[unavailable,setUnavailable]=useState(start.unavailable),[pending,setPending]=useState(0),[cleanupFailures,setCleanupFailures]=useState<string[]>([]),[cleanupPending,setCleanupPending]=useState(false);
- const current=useRef(value),saved=useRef(value),revision=useRef(start.native?.revision??0),sequence=useRef(0),queued=useRef(0),queue=useRef(Promise.resolve()),blocked=useRef(start.unavailable),mounted=useRef(true),migrated=useRef(false),failedCleanup=useRef(new Set<string>()),cleaning=useRef(false),volatileMode=useRef(false);
+ const [start]=useState(initial),[value,setValue]=useState(start.value),[error,setError]=useState(start.unavailable?'unavailable':''),[unavailable,setUnavailable]=useState(start.unavailable),[pending,setPending]=useState(0),[cleanupFailures,setCleanupFailures]=useState<string[]>([]),[cleanupPending,setCleanupPending]=useState(false),[recoveryPending,setRecoveryPending]=useState(false),[recovery,setRecovery]=useState<ImageRecovery|null>(null),[recoveryError,setRecoveryError]=useState(false);
+ const current=useRef(value),saved=useRef(value),revision=useRef(start.native?.revision??0),sequence=useRef(0),queued=useRef(0),queue=useRef(Promise.resolve()),blocked=useRef(start.unavailable),mounted=useRef(true),migrated=useRef(false),failedCleanup=useRef(new Set<string>()),deferredCleanup=useRef(new Set<string>()),cleaning=useRef(false),recovering=useRef(false),recoveryActive=useRef(false),volatileMode=useRef(false);
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
- const discardImage=useCallback(async(id:string)=>{
+ const cleanupNow=useCallback(async(id:string)=>{
   try{await deleteBackgroundImage(id);failedCleanup.current.delete(id);}
   catch{if(failedCleanup.current.size<32)failedCleanup.current.add(id);}
   if(mounted.current)setCleanupFailures([...failedCleanup.current]);
  },[]);
- const retryCleanup=useCallback(async()=>{
-  if(cleaning.current)return;cleaning.current=true;setCleanupPending(true);
-  try{for(const id of [...failedCleanup.current]){if(!mounted.current)break;await discardImage(id);}}
-  finally{cleaning.current=false;if(mounted.current)setCleanupPending(false);}
- },[discardImage]);
+ const discardImage=useCallback(async(id:string)=>{
+  // Native pending references do not include writes still queued in this renderer.
+  if(queued.current||recoveryActive.current){if(deferredCleanup.current.size<32)deferredCleanup.current.add(id);return;}
+  await cleanupNow(id);
+ },[cleanupNow]);
+ const drainCleanup=useCallback(async function drain(includeFailures:boolean):Promise<void>{
+  if(cleaning.current||recoveryActive.current||queued.current||!mounted.current)return;
+  const ids=new Set([...deferredCleanup.current,...(includeFailures?failedCleanup.current:[])]);if(!ids.size)return;
+  cleaning.current=true;setCleanupPending(true);
+  try{for(const id of ids){if(!mounted.current||queued.current)break;deferredCleanup.current.delete(id);await cleanupNow(id);}}
+  finally{cleaning.current=false;if(mounted.current){setCleanupPending(false);if(!queued.current&&deferredCleanup.current.size)void drain(false);}}
+ },[cleanupNow]);
+ const retryCleanup=useCallback(()=>drainCleanup(true),[drainCleanup]);
+ const recoverUnusedImages=useCallback(async()=>{
+  if(recovering.current||queued.current||cleaning.current||blocked.current||!mounted.current)return;
+  recovering.current=true;setRecoveryPending(true);setRecovery(null);setRecoveryError(false);
+  try{
+   await drainCleanup(true);if(!mounted.current)return;if(queued.current)throw Error('appearance_image_busy');
+   recoveryActive.current=true;const result=await recoverBackgroundImages();if(mounted.current)setRecovery(result);
+  }catch{if(mounted.current)setRecoveryError(true);}
+  finally{recovering.current=false;recoveryActive.current=false;if(mounted.current){setRecoveryPending(false);void drainCleanup(false);}}
+ },[drainCleanup]);
  const change=useCallback((patch:Partial<Preferences>,onSaved?:(saved:boolean)=>void,lightUpdate?:(value:LightAppearance)=>LightAppearance)=>{
   if(blocked.current){onSaved?.(false);return false;}
   if(queued.current>=32){setError('busy');onSaved?.(false);return false;}
@@ -78,9 +95,9 @@ export function useAppearancePreferences(){
     if(mounted.current&&request===sequence.current){current.current=start.bridge?saved.current:{...saved.current,themeMode:current.current.themeMode};setValue(current.current);setError(blocked.current?'unavailable':'save');}
     onSaved?.(false);
    }
-  }).catch(()=>{onSaved?.(false);if(mounted.current)setError('save');}).finally(()=>{queued.current=Math.max(0,queued.current-1);if(mounted.current){setPending(queued.current);if(!start.bridge&&!queued.current)try{const latest=browserPreferences(true).value;saved.current=latest;current.current=volatileMode.current?{...latest,themeMode:current.current.themeMode}:latest;setValue(current.current);}catch{}}});
+  }).catch(()=>{onSaved?.(false);if(mounted.current)setError('save');}).finally(()=>{queued.current=Math.max(0,queued.current-1);if(mounted.current){setPending(queued.current);if(!start.bridge&&!queued.current)try{const latest=browserPreferences(true).value;saved.current=latest;current.current=volatileMode.current?{...latest,themeMode:current.current.themeMode}:latest;setValue(current.current);}catch{}if(!queued.current)void drainCleanup(false);}});
   return true;
- },[start,discardImage]);
+ },[start,discardImage,drainCleanup]);
  useEffect(()=>{if(start.migrate&&!migrated.current){migrated.current=true;change(current.current);}},[start,change]);
  useEffect(()=>{
   if(start.bridge)return;
@@ -95,5 +112,5 @@ export function useAppearancePreferences(){
  const changeMode=useCallback((themeMode:ThemeMode)=>change({themeMode}),[change]);
  const updateLight=useCallback((update:(v:LightAppearance)=>LightAppearance)=>change({lightAppearance:normalizeLightAppearance(update(current.current.lightAppearance))},undefined,update),[change]);
  const commitLight=useCallback((update:(v:LightAppearance)=>LightAppearance)=>new Promise<boolean>(resolve=>{change({lightAppearance:normalizeLightAppearance(update(current.current.lightAppearance))},resolve,update);}),[change]);
- return {value,changeMode,updateLight,commitLight,error,pending,unavailable,native:!!start.bridge,discardImage,retryCleanup,cleanupFailed:cleanupFailures.length>0,cleanupPending};
+ return {value,changeMode,updateLight,commitLight,error,pending,unavailable,native:!!start.bridge,discardImage,retryCleanup,cleanupFailed:cleanupFailures.length>0,cleanupPending,recoverUnusedImages,recoveryPending,recovery,recoveryError};
 }

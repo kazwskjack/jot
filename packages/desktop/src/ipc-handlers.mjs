@@ -17,6 +17,7 @@ export function registerDesktopIpcHandlers({ipcMain,appOrigin,getWindow,stateSto
  };
  const appearanceRead=(event,payload)=>{try{trusted(event);parseDesktopCommand('appearance.read',payload);event.returnValue=readAppearance();}catch{event.returnValue=null;}};
  const routes=new Map([
+  ['appearance.image.recover',async()=>{if(!appearanceImages)throw Error('desktop_appearance_image_unavailable');return appearanceImages.recover();}],
   ['appearance.image.save',async(_event,payload)=>{if(!appearanceImages)throw Error('desktop_appearance_image_unavailable');return appearanceImages.save(payload);}],
   ['appearance.image.read',async(_event,payload)=>{if(!appearanceImages)throw Error('desktop_appearance_image_unavailable');return appearanceImages.read(payload.id);}],
   ['appearance.image.delete',async(_event,payload)=>{if(!appearanceImages)throw Error('desktop_appearance_image_unavailable');return appearanceImages.delete(payload.id);}],

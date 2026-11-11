@@ -10,7 +10,7 @@ function Slider({label,value,min=0,max,unit,onChange}:{label:string;value:number
 export default function BackgroundAppearanceControls({light,dark,zh}:{light:ReturnType<typeof useLightAppearance>;dark:boolean;zh:boolean}){
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),input=useRef<HTMLInputElement>(null),alive=useRef(true),working=useRef(false),generation=useRef(0),context=useRef({dark,unavailable:light.unavailable});context.current={dark,unavailable:light.unavailable};
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;generation.current++;};},[]);
- const id=useId(),background=light.value.background,disabled=dark||light.unavailable||busy||light.cleanupPending;
+ const id=useId(),background=light.value.background,disabled=dark||light.unavailable||busy||light.cleanupPending||light.recoveryPending;
  const message=(cause:unknown)=>{const text=cause instanceof Error?cause.message:'';return text.includes('_quota')?(zh?'本机图片存储已满，请先清理未使用的图片后重试。':'Image storage is full. Clean up unused images and try again.'):text==='appearance_image_dimensions'?(zh?'图片尺寸超出限制或无法读取，请选择较小的图片。':'Image dimensions exceed the limit or cannot be read. Choose a smaller image.'):text==='appearance_image_invalid'?(zh?'请选择不超过 10MiB 的 PNG、JPG 或 WebP 图片。':'Choose a PNG, JPG or WebP image under 10MiB.'):text==='appearance_image_save_unconfirmed'?(zh?'未能确认图片设置已保存，请重试。':'The image settings could not be confirmed as saved. Please try again.'):(zh?'本地图片暂时无法保存，请重试。':'The local image could not be saved. Please try again.');};
  const upload=async(file?:File)=>{
   if(!file||disabled||light.pending||working.current)return;working.current=true;setBusy(true);setError('');const ticket=++generation.current;
@@ -22,7 +22,7 @@ export default function BackgroundAppearanceControls({light,dark,zh}:{light:Retu
   finally{working.current=false;if(alive.current&&generation.current===ticket){setBusy(false);if(input.current)input.current.value='';}}
  };
  const commit=async(update:(value:LightAppearance)=>LightAppearance)=>{
-  if(disabled||light.pending||working.current)return;working.current=true;setBusy(true);setError('');const ticket=++generation.current;
+  if(light.unavailable||busy||light.cleanupPending||light.recoveryPending||light.pending||working.current)return;working.current=true;setBusy(true);setError('');const ticket=++generation.current;
   try{if(!await light.commit(update)&&alive.current&&generation.current===ticket)setError(message(Error('appearance_image_save_unconfirmed')));}
   catch(cause){if(alive.current&&generation.current===ticket)setError(message(cause));}
   finally{working.current=false;if(alive.current&&generation.current===ticket)setBusy(false);}
@@ -58,7 +58,10 @@ export default function BackgroundAppearanceControls({light,dark,zh}:{light:Retu
     </>}
    </>}
   </fieldset>
-  {light.cleanupFailed&&<p role="status">{zh?'部分旧图片尚未清理，文件已保留。':'Some unused images could not be cleaned up and were retained.'} <button type="button" disabled={busy||!!light.pending||light.cleanupPending} onClick={()=>void light.retryCleanup()}>{zh?'重试清理':'Retry cleanup'}</button></p>}
-  <button type="button" disabled={disabled||!!light.pending} onClick={()=>void commit(()=>normalizeLightAppearance())}>{zh?'重置浅色外观':'Reset light appearance'}</button>
+  {light.cleanupFailed&&<p role="status">{zh?'部分旧图片尚未清理，文件已保留。':'Some unused images could not be cleaned up and were retained.'} <button type="button" disabled={busy||!!light.pending||light.cleanupPending||light.recoveryPending} onClick={()=>void light.retryCleanup()}>{zh?'重试清理':'Retry cleanup'}</button></p>}
+  <button type="button" disabled={light.unavailable||busy||!!light.pending||light.cleanupPending||light.recoveryPending} onClick={()=>void light.recoverUnusedImages()}>{light.recoveryPending?(zh?'正在清理…':'Cleaning up…'):(zh?'清理未使用背景图':'Clean up unused backgrounds')}</button>
+  {light.recoveryError&&<p role="status">{zh?'本次清理未能完成，请稍后重试。':'Cleanup could not finish. Please try again later.'}</p>}
+  {light.recovery&&<p role="status">{zh?`已清理 ${light.recovery.removed} 张未使用图片。`:`Removed ${light.recovery.removed} unused images.`}{light.recovery.retained>0&&(zh?' 在用、暂存或无法确认归属的内容已保留。':' In-use, staged or unrecognized items were retained.')}{!light.recovery.complete&&(zh?' 本次扫描已达上限，仍可能有未扫描内容。':' The scan limit was reached; some items may remain unscanned.')}</p>}
+  <button type="button" disabled={light.unavailable||busy||light.cleanupPending||light.recoveryPending||!!light.pending} onClick={()=>void commit(()=>normalizeLightAppearance())}>{zh?'重置浅色外观':'Reset light appearance'}</button>
  </>;
 }

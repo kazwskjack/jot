@@ -43,14 +43,19 @@ export async function createDesktopAppearanceStore({userDataPath,decodeImage}={}
   const bytes=await readFile();
   if((bytes?hash(bytes):null)!==fingerprint){writable=false;error='desktop_appearance_conflict';throw Error(error);}
  };
- let pendingImageId=null,assetWork=null,assetDirectoryInfo=null,imageReads=0;const deleting=new Set();
- const referenced=id=>state.lightAppearance.background.imageId===id||pendingImageId===id;
+ let pendingImageId=null,assetWork=null,assetDirectoryInfo=null,imageReads=0;const deleting=new Set(),staged=new Map();
+ const imageKey=id=>typeof id==='string'?id.toLowerCase():null;
+ const referenced=id=>imageKey(state.lightAppearance.background.imageId)===imageKey(id)||imageKey(pendingImageId)===imageKey(id);
+ const purgeStages=()=>{for(const [id,live] of staged){let active=false;try{active=live()===true;}catch{}if(!active)staged.delete(id);}};
  const write=async(request,canCommit=()=>true)=>{
   if(!writable||writing)throw Error(writable?'desktop_appearance_busy':error);
   if(request.expectedRevision!==state.revision||state.revision>=Number.MAX_SAFE_INTEGER)throw Error('desktop_appearance_conflict');
   const next={version:1,revision:state.revision+1,themeMode:request.themeMode,lightAppearance:normalizeLightAppearance(request.lightAppearance)};
   if(!mode(next.themeMode))throw Error('desktop_appearance_invalid');
-  if(deleting.has(next.lightAppearance.background.imageId))throw Error('desktop_appearance_busy');
+  if(deleting.has(imageKey(next.lightAppearance.background.imageId)))throw Error('desktop_appearance_busy');
+  // Initial legacy restoration may retain a missing identity; later new references must exist.
+  const newReference=stored&&next.lightAppearance.background.imageId&&imageKey(next.lightAppearance.background.imageId)!==imageKey(state.lightAppearance.background.imageId);
+  if(newReference&&assetWork)throw Error('desktop_appearance_image_busy');
   const bytes=Buffer.from(JSON.stringify(next)+'\n');if(bytes.length>maxBytes)throw Error('desktop_appearance_invalid');
   const temporary=join(directory,'.desktop-appearance.'+process.pid+'.'+randomUUID()+'.tmp');
   pendingImageId=next.lightAppearance.background.imageId;
@@ -58,11 +63,12 @@ export async function createDesktopAppearanceStore({userDataPath,decodeImage}={}
    let handle,created=false;
    try{
     await unchanged();if(!canCommit())throw Error('desktop_window_unavailable');
+    if(newReference){const image=await imageFile(next.lightAppearance.background.imageId);await image.handle.close();}
     handle=await open(temporary,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|noFollow,0o600);created=true;
     await handle.writeFile(bytes);await handle.sync();await handle.close();handle=null;
     await unchanged();if(!canCommit())throw Error('desktop_window_unavailable');
     await rename(temporary,file);created=false;
-    state=next;stored=true;fingerprint=hash(bytes);return read();
+    state=next;stored=true;fingerprint=hash(bytes);staged.delete(imageKey(next.lightAppearance.background.imageId));return read();
    }finally{
     await handle?.close().catch(()=>{});
     if(created)try{await checkDirectory();await unlink(temporary);}catch{}
@@ -79,9 +85,9 @@ export async function createDesktopAppearanceStore({userDataPath,decodeImage}={}
  };
  const imageFile=async id=>{
   if(!isImageId(id))throw Error('desktop_appearance_image_invalid');
-  const path=join(await imageDirectory(),id);let handle;
+  const directory=await imageDirectory();let path=join(directory,'jot-'+id),handle;
   try{
-   handle=await open(path,constants.O_RDONLY|noFollow);const info=await handle.stat(),entry=await lstat(path);
+   try{handle=await open(path,constants.O_RDONLY|noFollow);}catch(cause){if(cause.code!=='ENOENT')throw cause;path=join(directory,id);handle=await open(path,constants.O_RDONLY|noFollow);}const info=await handle.stat(),entry=await lstat(path);
    if(!info.isFile()||info.nlink!==1||entry.isSymbolicLink()||entry.dev!==info.dev||entry.ino!==info.ino||info.size<=0||info.size>MAX_BACKGROUND_BYTES||!same(await realpath(path),path))throw Error('desktop_appearance_image_invalid');
    return {path,handle,info};
   }catch(cause){await handle?.close().catch(()=>{});throw cause;}
@@ -98,16 +104,16 @@ export async function createDesktopAppearanceStore({userDataPath,decodeImage}={}
   const directory=await imageDirectory(true),entries=await opendir(directory);let count=0,total=0,scanned=0;
   for await(const entry of entries){
    if(++scanned>128)throw Error('desktop_appearance_image_quota');
-   if(isImageId(entry.name)){const info=await lstat(join(directory,entry.name));if(!info.isFile()||info.isSymbolicLink()||info.nlink!==1)throw Error('desktop_appearance_image_path_unsafe');count++;total+=info.size;}
+   if(isImageId(entry.name)||entry.name.startsWith('jot-')&&isImageId(entry.name.slice(4))){const info=await lstat(join(directory,entry.name));if(!info.isFile()||info.isSymbolicLink()||info.nlink!==1)throw Error('desktop_appearance_image_path_unsafe');count++;total+=info.size;}
   }
-  // shortcut: failed cleanup retains assets within this quota; add owned orphan recovery if remnants reach it.
-  if(count>=32||total+bytes.length>160*1024*1024)throw Error('desktop_appearance_image_quota');
+  purgeStages();
+  if(count>=32||staged.size>=32||total+bytes.length>160*1024*1024)throw Error('desktop_appearance_image_quota');
   if(!canCommit())throw Error('desktop_window_unavailable');
-  const id=randomUUID()+'.png',path=join(directory,id);let handle,created=false,keep=false;
+  const id=randomUUID()+'.png',path=join(directory,'jot-'+id);let handle,created=false,keep=false;
   try{
    handle=await open(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|noFollow,0o600);created=true;
    await handle.writeFile(bytes);await handle.sync();await handle.close();handle=null;
-   await imageDirectory();if(!canCommit())throw Error('desktop_window_unavailable');keep=true;return id;
+   await imageDirectory();if(!canCommit())throw Error('desktop_window_unavailable');staged.set(imageKey(id),canCommit);keep=true;return id;
   }finally{await handle?.close().catch(()=>{});if(created&&!keep)try{await imageDirectory();await unlink(path);}catch{}}
  });
  const readImage=async(id,canCommit=()=>true)=>{
@@ -122,19 +128,44 @@ export async function createDesktopAppearanceStore({userDataPath,decodeImage}={}
  };
  const deleteImage=(id,canCommit=()=>true)=>mutateImage(async()=>{
   if(!isImageId(id))throw Error('desktop_appearance_image_invalid');
-  if(referenced(id))return false;deleting.add(id);let file;
+  if(referenced(id))return false;deleting.add(imageKey(id));let file;
   try{
    await unchanged();if(referenced(id))return false;
-   try{file=await imageFile(id);}catch(cause){if(cause.code==='ENOENT')return true;throw cause;}
+   try{file=await imageFile(id);}catch(cause){if(cause.code==='ENOENT'){staged.delete(imageKey(id));return true;}throw cause;}
    await file.handle.close();file.handle=null;await imageDirectory();await unchanged();
    if(referenced(id))return false;if(!canCommit())throw Error('desktop_window_unavailable');
-   await unlink(file.path);return true;
-  }finally{await file?.handle?.close().catch(()=>{});deleting.delete(id);}
+   await unlink(file.path);staged.delete(imageKey(id));return true;
+  }finally{await file?.handle?.close().catch(()=>{});deleting.delete(imageKey(id));}
+ });
+ const recoverImages=(canCommit=()=>true)=>mutateImage(async()=>{
+  await unchanged();purgeStages();let directory;
+  try{directory=await imageDirectory();}catch(cause){if(cause.code==='ENOENT')return {protocol:1,removed:0,retained:0,scanned:0,complete:true};throw cause;}
+  let scanned=0,removed=0,retained=0,complete=true;const entries=await opendir(directory);
+  for await(const entry of entries){
+   if(scanned>=128){complete=false;break;}scanned++;
+   // Only the new reserved managed namespace is eligible; legacy/unknown entries are retained.
+   if(!entry.name.startsWith('jot-')||!isImageId(entry.name.slice(4))){retained++;continue;}
+   const id=entry.name.slice(4),key=imageKey(id);purgeStages();
+   if(referenced(id)||staged.has(key)){retained++;continue;}
+   deleting.add(key);let handle;
+   try{
+    const path=join(directory,entry.name);handle=await open(path,constants.O_RDONLY|noFollow);
+    const info=await handle.stat(),entryInfo=await lstat(path);
+    if(!info.isFile()||info.nlink!==1||info.size>MAX_BACKGROUND_BYTES||entryInfo.isSymbolicLink()||entryInfo.dev!==info.dev||entryInfo.ino!==info.ino||!same(await realpath(path),path)){retained++;continue;}
+    await handle.close();handle=null;await imageDirectory();await unchanged();
+    const last=await lstat(path);
+    if(last.isSymbolicLink()||!last.isFile()||last.nlink!==1||last.ino!==info.ino||last.dev!==info.dev||last.size!==info.size||last.mtimeMs!==info.mtimeMs){retained++;continue;}
+    if(referenced(id)||staged.has(key)){retained++;continue;}if(!canCommit())throw Error('desktop_window_unavailable');
+    await unlink(path);removed++;
+   }catch(cause){if(cause.code==='ENOENT')continue;if(!writable||!canCommit())throw cause;retained++;}
+   finally{await handle?.close().catch(()=>{});deleting.delete(key);}
+  }
+  return {protocol:1,removed,retained,scanned,complete};
  });
  const flush=async()=>{
   if(!writing&&!assetWork)return true;let timer;
   try{await Promise.race([Promise.allSettled([writing,assetWork]),new Promise(resolve=>{timer=setTimeout(resolve,1000);timer.unref?.();})]);return !writing&&!assetWork;}
   finally{if(timer)clearTimeout(timer);}
  };
- return Object.freeze({read,write,saveImage,readImage,deleteImage,flush});
+ return Object.freeze({read,write,saveImage,readImage,deleteImage,recoverImages,flush});
 }
