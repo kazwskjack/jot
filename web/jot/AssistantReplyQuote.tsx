@@ -1,3 +1,4 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
 // Selection behavior adapted from PilotDeck 783499ff, AssistantReplyQuoteAction.tsx
 // and assistantReplyReference.ts. Adapted portions retain AGPL-3.0 terms.
 import React,{useEffect,useRef,useState,type RefObject} from 'react';
@@ -19,6 +20,7 @@ type Action={quote:AssistantReplyQuote;range:Range;source:HTMLElement;top:number
 type Props={root:RefObject<HTMLElement|null>;conversationId:string;disabled:boolean;onAdd:(quote:AssistantReplyQuote)=>boolean};
 
 export function AssistantReplyQuoteAction({root,conversationId,disabled,onAdd}:Props){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const [action,setAction]=useState<Action|null>(null);
  const button=useRef<HTMLButtonElement>(null),add=useRef(onAdd);
  add.current=onAdd;
@@ -75,24 +77,25 @@ export function AssistantReplyQuoteAction({root,conversationId,disabled,onAdd}:P
    ||range.toString().replace(/\u00a0/g,' ').trim().slice(0,8000).trimEnd()!==quote.selectedText){setAction(null);return;}
   if(add.current(quote)){window.getSelection()?.removeAllRanges();setAction(null);}
  };
- return createPortal(<button ref={button} type="button" className="jot-assistant-quote-action"
+ return createPortal(<button ref={button} lang={language} type="button" className="jot-assistant-quote-action"
   style={{top:action.top,left:action.left}} onPointerDown={event=>event.preventDefault()}
-  onMouseDown={event=>event.preventDefault()} onClick={commit}>引用到当前对话</button>,document.body);
+  onMouseDown={event=>event.preventDefault()} onClick={commit}>{t('引用到当前对话','Quote in This Chat')}</button>,document.body);
 }
 
 export function AssistantReplyQuotes({quotes,disabled,onChange}:{quotes:AssistantReplyQuote[];disabled:boolean;onChange:(quotes:AssistantReplyQuote[])=>void}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  if(!quotes.length)return null;
- return <section className="jot-assistant-quotes" aria-label="待发送的回复引用">
-  <div>回复引用 · {quotes.length} <button type="button" disabled={disabled} onClick={()=>onChange([])}>清空引用</button></div>
+ return <section lang={language} className="jot-assistant-quotes" aria-label={t('待发送的回复引用','Reply Quotes to Send')}>
+  <div>{t('回复引用','Reply Quotes')} · {quotes.length} <button type="button" disabled={disabled} onClick={()=>onChange([])}>{t("清空引用","Clear Quotes")}</button></div>
   {quotes.map((quote,index)=><div key={quote.id}>
-   <details><summary>引用 {index+1} · {quote.selectedText.slice(0,60)}</summary>
+   <details><summary>{t('引用','Quote')} {index+1} · {quote.selectedText.slice(0,60)}</summary>
     <blockquote>{quote.selectedText}</blockquote>
-    <small>原消息 {quote.messageId}</small>
-    {quote.truncated&&<p role="status">引用已截取前 8000 个字符。</p>}
-    <details><summary>附近上下文</summary><pre>{quote.surroundingText}</pre></details>
+    <small>{t('原消息','Original Message')} {quote.messageId}</small>
+    {quote.truncated&&<p role="status">{t("引用已截取前 8000 个字符。","The quote is limited to the first 8000 characters.")}</p>}
+    <details><summary>{t("附近上下文","Surrounding Context")}</summary><pre>{quote.surroundingText}</pre></details>
    </details>
-   <button type="button" disabled={disabled} aria-label={`移除引用 ${index+1}`} onClick={()=>onChange(quotes.filter(value=>value.id!==quote.id))}>移除</button>
+   <button type="button" disabled={disabled} aria-label={t(`移除引用 ${index+1}`,`Remove Quote ${index+1}`)} onClick={()=>onChange(quotes.filter(value=>value.id!==quote.id))}>{t("移除","Remove")}</button>
   </div>)}
-  <small>引用随当前账户与会话的草稿保存，确认发送后清空。离开前请确认草稿保存完成。</small>
+  <small>{t("引用随当前账户与会话的草稿保存，确认发送后清空。离开前请确认草稿保存完成。","Quotes are saved with the draft for the current account and conversation, and cleared after sending is confirmed. Confirm that the draft is saved before leaving.")}</small>
  </section>;
 }

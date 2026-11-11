@@ -36,7 +36,29 @@ const english:Record<string,string>={
  "对话设置结果尚未确认，请重试原请求": "The conversation setting result is unconfirmed. Retry the original request.",
  "没有待确认的对话设置": "No conversation setting is awaiting confirmation.",
  "请先重试原新建请求": "Retry the original creation request first.",
- "读取失败": "Unable to read the data."
+ "读取失败": "Unable to read the data.",
+ "登录用户已变化，请重新进入原用户的对话核对操作。": "The signed-in user has changed. Return to the original user’s conversation to check the operation.",
+ "无法保存或读取目标操作回执，请检查浏览器存储后刷新。": "Unable to save or read goal-operation receipts. Check browser storage and refresh.",
+ "会话有待恢复内容，请先恢复当前任务。": "The conversation has content awaiting recovery. Recover the current task first.",
+ "操作仍在处理中，请重试原操作。": "The operation is still processing. Retry the original operation.",
+ "目标或运行状态已变化，请刷新后确认。": "The goal or run state has changed. Refresh to confirm.",
+ "操作结果尚未确认，请核对后重试原操作。": "The operation result is unconfirmed. Check it before retrying the original operation.",
+ "续跑状态暂不可用，请稍后刷新。": "Continuation readiness is unavailable. Refresh later.",
+ "目标或操作回执暂不可用，请检查浏览器存储后刷新。": "The goal or operation receipts are unavailable. Check browser storage and refresh.",
+ "VOICE_UNAVAILABLE：语音服务暂不可用，请稍后重试": "VOICE_UNAVAILABLE: Voice service is unavailable. Try again later.",
+ "VOICE_DRAFT_TOO_LONG：识别文字超出消息上限，请缩短草稿后重新录音": "VOICE_DRAFT_TOO_LONG: Recognized text exceeds the message limit. Shorten the draft before recording again.",
+ "VOICE_SCOPE_CHANGED：用户范围已变化，请重新打开对话": "VOICE_SCOPE_CHANGED: The user scope has changed. Reopen the conversation.",
+ "VOICE_RECORDING_UNSUPPORTED：此浏览器无法录音，请使用支持麦克风的 HTTPS 浏览器": "VOICE_RECORDING_UNSUPPORTED: This browser cannot record audio. Use an HTTPS browser with microphone support.",
+ "VOICE_MICROPHONE_TIMEOUT：麦克风启动超时，请检查浏览器权限后重试": "VOICE_MICROPHONE_TIMEOUT: Microphone startup timed out. Check browser permissions before retrying.",
+ "麦克风权限被拒绝 (NotAllowedError)：请在浏览器权限中允许麦克风后重试": "Microphone permission was denied (NotAllowedError). Allow microphone access in browser permissions before retrying.",
+ "VOICE_TEXT_EMPTY": "VOICE_TEXT_EMPTY: No recognized text is available.",
+ "VOICE_SCOPE_UNAVAILABLE": "VOICE_SCOPE_UNAVAILABLE: The current user scope is unconfirmed.",
+ "VOICE_RECORDING_FAILED": "VOICE_RECORDING_FAILED: Audio recording failed.",
+ "VOICE_TRANSCRIPTION_FAILED": "VOICE_TRANSCRIPTION_FAILED: Transcription failed.",
+ "VOICE_AUDIO_EMPTY": "VOICE_AUDIO_EMPTY: No audio was recorded.",
+ "VOICE_AUDIO_TOO_LARGE": "VOICE_AUDIO_TOO_LARGE: Audio exceeds the size limit.",
+ "VOICE_AUDIO_LIMIT_INVALID": "VOICE_AUDIO_LIMIT_INVALID: Recording limits are invalid.",
+ "VOICE_RECORDING_CLOSED": "VOICE_RECORDING_CLOSED: The recording is closed."
 };
 export function conversationUiError(value:string,language:ApplicationLanguage){
  return language==='en'&&Object.hasOwn(english,value)?english[value]!:value;

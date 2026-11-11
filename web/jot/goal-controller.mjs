@@ -74,9 +74,10 @@ export class ConversationGoalController {
   }finally{this.requests.delete(abort);this.busy=false;this.changed();}
  }
 }
-export function goalPresentation(goal){
+export function goalPresentation(goal,language='zh-CN'){
  const label=goal.phase==='active'?(goal.activation==='armed'?'目标进行中':'目标待继续'):({paused:'目标已暂停',blocked:'目标需要处理',complete:'目标已完成'}[goal.phase]);
- return {label,actions:goal.phase==='complete'?['stop']:goal.phase==='active'&&goal.activation==='armed'?['pause','stop']:['resume','stop']};
+ const en={'目标进行中':'Goal Active','目标待继续':'Goal Ready to Continue','目标已暂停':'Goal Paused','目标需要处理':'Goal Needs Attention','目标已完成':'Goal Complete'};
+ return {label:language==='en'&&Object.hasOwn(en,label)?en[label]:label,actions:goal.phase==='complete'?['stop']:goal.phase==='active'&&goal.activation==='armed'?['pause','stop']:['resume','stop']};
 }
 export function goalPrompt(text,enabled=false){
  if(!enabled)return text;
@@ -91,8 +92,9 @@ export function goalControlError(error){
  return '操作结果尚未确认，请核对后重试原操作。';
 }
 
-export function goalResumeHint(readiness){
- return ({DISABLED:'续跑功能尚未启用。',NO_SESSION:'目标会话尚未就绪。',RUN_BUSY:'请等待当前执行结束后再继续。',UNCONFIRMED_CONTROL:'上次恢复结果待核对，暂不能再次启动。',HOST_UNAVAILABLE:'续跑服务暂不可用，请稍后刷新。'}[readiness?.reason])??'正在检查续跑状态…';
+export function goalResumeHint(readiness,language='zh-CN'){
+ const labels=language==='en'?{DISABLED:'Goal continuation is not enabled.',NO_SESSION:'The goal session is not ready.',RUN_BUSY:'Wait for the current execution to finish before continuing.',UNCONFIRMED_CONTROL:'The previous recovery result needs confirmation; another execution cannot start yet.',HOST_UNAVAILABLE:'The continuation service is unavailable. Refresh later.'}:{DISABLED:'续跑功能尚未启用。',NO_SESSION:'目标会话尚未就绪。',RUN_BUSY:'请等待当前执行结束后再继续。',UNCONFIRMED_CONTROL:'上次恢复结果待核对，暂不能再次启动。',HOST_UNAVAILABLE:'续跑服务暂不可用，请稍后刷新。'};
+ return Object.hasOwn(labels,readiness?.reason)?labels[readiness.reason]:language==='en'?'Checking continuation readiness…':'正在检查续跑状态…';
 }
 
 export function latestGoalRun(runs,conversationId){
@@ -100,7 +102,8 @@ export function latestGoalRun(runs,conversationId){
  return candidates.find(run=>['queued','starting','running','waiting_user','waiting_approval','cancelling'].includes(run.status))??candidates.sort((a,b)=>String(b.created_at??'').localeCompare(String(a.created_at??''))||String(b.run_id).localeCompare(String(a.run_id)))[0];
 }
 
-export function goalExecutionHint(execution){
+export function goalExecutionHint(execution,language='zh-CN'){
  if(!execution||!['interrupted','failed'].includes(execution.status))return '';
- return ({GOAL_CONTEXT_RECOVERY_REQUIRED:'本次未启动：会话有待恢复内容，目标已保留。',GOAL_REVISION_CHANGED:'本次未启动：目标已变化，请刷新后确认。',GOAL_NOT_RESUMABLE:'本次未启动：当前目标暂不能继续。',GOAL_RESUME_NOT_APPLIED:'本次未启动，目标已保留，请核对后重试。'}[execution.error_code])??'续跑未完成，请核对执行记录后重试。';
+ const labels=language==='en'?{GOAL_CONTEXT_RECOVERY_REQUIRED:'This execution did not start: the conversation needs recovery. The goal is retained.',GOAL_REVISION_CHANGED:'This execution did not start: the goal changed. Refresh to confirm.',GOAL_NOT_RESUMABLE:'This execution did not start: the goal cannot currently continue.',GOAL_RESUME_NOT_APPLIED:'This execution did not start. The goal is retained; check before retrying.'}:{GOAL_CONTEXT_RECOVERY_REQUIRED:'本次未启动：会话有待恢复内容，目标已保留。',GOAL_REVISION_CHANGED:'本次未启动：目标已变化，请刷新后确认。',GOAL_NOT_RESUMABLE:'本次未启动：当前目标暂不能继续。',GOAL_RESUME_NOT_APPLIED:'本次未启动，目标已保留，请核对后重试。'};
+ return Object.hasOwn(labels,execution.error_code)?labels[execution.error_code]:language==='en'?'Continuation did not complete. Check the execution record before retrying.':'续跑未完成，请核对执行记录后重试。';
 }
