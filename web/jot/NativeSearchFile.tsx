@@ -7,7 +7,7 @@ import {taskDraftScope} from './client';
 import {listedFileImageType} from './ActivityToolFileImage';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
-import {nativeMemberReferenceSource,readNativeMemberPreviewBytes,type NativeMemberPreviewSource,type NativeMemberOpenedBytes} from './activity-file-preview-client';
+import {nativeMemberViewingSource,nativeMemberReferenceSource,readNativeMemberPreviewBytes,type NativeMemberPreviewSource,type NativeMemberOpenedBytes} from './activity-file-preview-client';
 
 const NativeSearchOfficePrint=lazy(()=>import('./NativeSearchOfficePrint'));
 const NativeSearchOfficeDocument=lazy(()=>import('./NativeSearchOfficeDocument'));
@@ -89,7 +89,7 @@ export default function NativeSearchFile({source,expected,printPin,focus,officeF
     </nav>
    </>:office?.native?<ConversationDisplayBoundary key={opened.openSha} label="原生Office预览"><Suspense fallback={<p role="status">正在载入Office查看器…</p>}><NativeSearchFileOffice key={JSON.stringify([opened.openSha,office.kind])} kind={office.kind} bytes={opened.bytes} source={nativeMemberReferenceSource(source,opened)} officeFocus={officeFocus} officeTextFocus={officeTextFocus} officeRegionFocus={officeRegionFocus}/></Suspense></ConversationDisplayBoundary>
     :opened.imageUrl?<img src={opened.imageUrl} alt={source.member.path} style={{maxWidth:'100%',height:'auto'}} onError={()=>{setRaw(true);setState({identity,opened,error:'浏览器无法显示此图片格式，当前显示原始字节。'});}}/>
-    :pdf?<ConversationDisplayBoundary key={opened.openSha} label="原生PDF预览"><Suspense fallback={<p role="status">正在载入PDF查看器…</p>}><NativeSearchFilePdf key={opened.openSha} bytes={opened.bytes} source={nativeMemberReferenceSource(source,opened)} focus={focus}/></Suspense></ConversationDisplayBoundary>
+    :pdf?<ConversationDisplayBoundary key={opened.openSha} label="原生PDF预览"><Suspense fallback={<p role="status">正在载入PDF查看器…</p>}><NativeSearchFilePdf key={opened.openSha} bytes={opened.bytes} source={nativeMemberViewingSource(source,opened)} focus={focus}/></Suspense></ConversationDisplayBoundary>
     :text!==undefined?<>
      <pre data-chat-search-content={JSON.stringify(['native-opened-file',identity,opened.openSha,offset])}>{text.slice(offset,end)}</pre>
      <nav aria-label="打开文件正文翻页" data-chat-search-ignore>

@@ -1,4 +1,4 @@
-import type {FileReferenceIdentity} from './FileTextReferences';
+import type {FileViewingIdentity} from './activity-file-preview-client';
 import type {OfficePrintView} from '../../packages/gateway/contracts/types';
 import {taskDraftScope} from './client';
 import type {OfficePrintPreview} from './activity-file-preview-client';
@@ -12,10 +12,10 @@ export type PdfViewState={page:number;zoom:Zoom;rotation:number;continuous:boole
 export const defaultPdfView:PdfViewState={page:1,zoom:'width',rotation:0,continuous:false,position:0,left:0};
 const limit=32,memory=new Map<string,PdfViewState>();
 type Entry={key:string;view:PdfViewState};
-export function pdfViewIdentity(source:FileReferenceIdentity,owner:string,print?:Pick<OfficePrintPreview,'sha256'|'size'|'pageCount'>){
+export function pdfViewIdentity(source:FileViewingIdentity,owner:string,print?:Pick<OfficePrintPreview,'sha256'|'size'|'pageCount'>){
  const {conversationId,runId,activityId,resultSha,file}=source;
  const native=source.native_source;
- // The signed open digest already binds the exact native path, keeping long-path keys bounded.
+ // The verified open digest already binds the exact native path, keeping long-path keys bounded.
  const values=native?['native-open/v1',owner,conversationId,runId,activityId,resultSha,native.membersSha,native.memberIndex,native.openSha,file.sha256,file.size,native.asOfSeq??null]
   :[owner,conversationId,runId,activityId,resultSha,file.path,file.version,file.sha256,file.size];
  if(print)values.push('libreoffice',print.sha256,print.size,print.pageCount);

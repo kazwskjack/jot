@@ -121,18 +121,37 @@ export async function readNativeMemberPreviewBytes(source:NativeMemberPreviewSou
  }catch(error){await response.body?.cancel().catch(()=>{});throw error;}
 }
 
-/** Only a verified opened source with a server receipt can enter native quote actions. */
-export function nativeMemberReferenceSource(source:NativeMemberPreviewSource,opened:{openSha:string;sha256:string;size:number;proof?:string|undefined}):import('./FileTextReferences').FileReferenceIdentity|undefined{
- if(!opened.proof)return;
+type ReferenceIdentity=import('./FileTextReferences').FileReferenceIdentity;
+type NativeProvenance=NonNullable<ReferenceIdentity['native_source']>;
+export type NativeFileViewingIdentity=Omit<ReferenceIdentity,'native_source'|'file'>&{file:{path:string;sha256:string;size:number;version?:never};native_source:Omit<NativeProvenance,'proof'>&{proof?:string|undefined}};
+export type FileViewingIdentity=ReferenceIdentity|NativeFileViewingIdentity;
+export type FileViewingSource=FileViewingIdentity&{openedBytes?:Uint8Array};
+export type FileVisualSource=ReferenceIdentity&{openedBytes?:Uint8Array};
+
+/** Viewing identity binds verified bytes without granting native quote authority. */
+export function nativeMemberViewingSource(source:NativeMemberPreviewSource,opened:{openSha:string;sha256:string;size:number;proof?:string|undefined}):NativeFileViewingIdentity{
  return {conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,
   file:{path:source.member.path,sha256:opened.sha256,size:opened.size},
-  native_source:{protocol:1,membersSha:source.membersSha,memberIndex:source.member.index,openSha:opened.openSha,proof:opened.proof,
+  native_source:{protocol:1,membersSha:source.membersSha,memberIndex:source.member.index,openSha:opened.openSha,...(opened.proof?{proof:opened.proof}:{}),
    ...(source.asOfSeq!==undefined?{asOfSeq:source.asOfSeq}:{})}};
 }
 
-export type FileVisualSource=import('./FileTextReferences').FileReferenceIdentity&{openedBytes?:Uint8Array};
+/** Only a verified opened source with a server receipt can enter native quote actions. */
+export function fileViewingReferenceSource(source:FileViewingIdentity):ReferenceIdentity|undefined{
+ const {conversationId,runId,activityId,resultSha,file,native_source}=source;
+ if(native_source){
+  const proof=native_source.proof;if(typeof proof!=='string'||proof.length!==43||!/^[A-Za-z0-9_-]{43}$/.test(proof))return;
+  return {conversationId,runId,activityId,resultSha,file:{path:file.path,sha256:file.sha256,size:file.size},native_source:{...native_source,proof}};
+ }
+ if(typeof file.version!=='number')return;
+ return {conversationId,runId,activityId,resultSha,file:{path:file.path,version:file.version,sha256:file.sha256,size:file.size}};
+}
+export function nativeMemberReferenceSource(source:NativeMemberPreviewSource,opened:{openSha:string;sha256:string;size:number;proof?:string|undefined}):ReferenceIdentity|undefined{
+ return fileViewingReferenceSource(nativeMemberViewingSource(source,opened));
+}
+
 /** Visual readers take a private copy of the same verified native opening. */
-export async function readFileVisualSourceBytes(source:FileVisualSource,owner:string,signal:AbortSignal,maxBytes=OFFICE_NATIVE_SOURCE_MAX_BYTES):Promise<Uint8Array>{
+export async function readFileVisualSourceBytes(source:FileViewingSource,owner:string,signal:AbortSignal,maxBytes=OFFICE_NATIVE_SOURCE_MAX_BYTES):Promise<Uint8Array>{
  const check=()=>{signal.throwIfAborted();if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');};
  check();
  if(source.openedBytes!==undefined){

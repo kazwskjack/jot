@@ -1,4 +1,3 @@
-import type {FileReferenceIdentity} from './FileTextReferences';
 import PdfFileRegionReference from './PdfFileRegionReference';
 import PdfFileTextReferenceAction from './PdfFileTextReferenceAction';
 import {capturePdfView,defaultPdfView,pdfViewIdentity,readPdfView,writePdfView,type PdfViewState,type PdfReferenceFocus} from './pdf-file-view-state';
@@ -13,18 +12,19 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import {taskDraftScope} from './client';
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
-import {readFileVisualSourceBytes,type FileVisualSource,type OfficePrintPreview} from './activity-file-preview-client';
+import {fileViewingReferenceSource,readFileVisualSourceBytes,type FileViewingSource,type OfficePrintPreview} from './activity-file-preview-client';
 import ActivityToolFileBytes from './ActivityToolFileBytes';
 
 pdfjs.GlobalWorkerOptions.workerSrc=workerUrl;
 const assets=new URL('pdfjs/6.1.200/',new URL(workerUrl,document.baseURI)).href;
 
-export default function ActivityToolFilePdf(props:FileVisualSource&{focus?:PdfReferenceFocus;officePrint?:OfficePrintPreview&{onRetry:()=>void;focus?:PdfReferenceFocus}}){
+export type PdfViewingPrint=Omit<OfficePrintPreview,'proof'>&{proof?:string|undefined;onRetry:()=>void;focus?:PdfReferenceFocus|undefined};
+export default function ActivityToolFilePdf(props:FileViewingSource&{focus?:PdfReferenceFocus|undefined;officePrint?:PdfViewingPrint|undefined}){
  const {conversationId,runId,activityId,resultSha,file,officePrint}=props,owner=taskDraftScope();
  const identity=pdfViewIdentity(props,owner,officePrint);
  const sourceFocus=officePrint?officePrint.focus:props.focus;
- const source=useMemo<FileReferenceIdentity>(()=>({conversationId,runId,activityId,resultSha,...(props.native_source?{native_source:props.native_source,file:{path:file.path,sha256:file.sha256,size:file.size}}:{file:{path:file.path,version:file.version!,sha256:file.sha256,size:file.size}})}),[conversationId,runId,activityId,resultSha,file.path,file.version,file.sha256,file.size,identity,props.native_source?.proof]);
- const printView=useMemo(()=>officePrint?{protocol:1 as const,sha256:officePrint.sha256,size:officePrint.size,pageCount:officePrint.pageCount,proof:officePrint.proof}:undefined,[officePrint?.sha256,officePrint?.size,officePrint?.pageCount,officePrint?.proof]);
+ const printView=useMemo(()=>officePrint&&typeof officePrint.proof==='string'&&officePrint.proof.length===43&&/^[A-Za-z0-9_-]{43}$/.test(officePrint.proof)?{protocol:1 as const,sha256:officePrint.sha256,size:officePrint.size,pageCount:officePrint.pageCount,proof:officePrint.proof}:undefined,[officePrint?.sha256,officePrint?.size,officePrint?.pageCount,officePrint?.proof]);
+ const source=useMemo(()=>officePrint&&!printView?undefined:fileViewingReferenceSource(props),[conversationId,runId,activityId,resultSha,file.path,file.version,file.sha256,file.size,identity,props.native_source?.proof,!!officePrint,printView]);
  const focus=useRef(sourceFocus);focus.current=sourceFocus;
  const referenceJump=useRef<{key:string;page:number}|undefined>(undefined);
  const root=useRef<HTMLElement>(null),viewport=useRef<HTMLDivElement>(null),scale=useRef(1);
@@ -88,6 +88,11 @@ export default function ActivityToolFilePdf(props:FileVisualSource&{focus?:PdfRe
   setState({identity});setChallenge(undefined);setPassword('');setActionError('');
   const load=async()=>{
    const bytes=officePrint?officePrint.bytes.slice():await readFileVisualSourceBytes(props,owner,controller.signal,20*1024*1024);controller.signal.throwIfAborted();
+   if(officePrint){
+    if(bytes.byteLength!==officePrint.size||bytes.byteLength>20*1024*1024)throw Error('转换PDF大小与来源结果不一致。');
+    const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes.slice())),byte=>byte.toString(16).padStart(2,'0')).join('');
+    controller.signal.throwIfAborted();if(digest!==officePrint.sha256)throw Error('转换PDF摘要与来源结果不一致。');
+   }
    if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');
    loading=pdfjs.getDocument({data:bytes,cMapUrl:assets+'cmaps/',cMapPacked:true,standardFontDataUrl:assets+'standard_fonts/',wasmUrl:assets+'wasm/'});
    loading.onPassword=(update,reason)=>{if(!cancelled){setPassword('');setChallenge({identity,update,invalid:reason===pdfjs.PasswordResponses.INCORRECT_PASSWORD});}};
@@ -154,8 +159,9 @@ export default function ActivityToolFilePdf(props:FileVisualSource&{focus?:PdfRe
   }}>
   <h4>{file.path} · 版本 {props.native_source?.openSha??file.version}</h4>
   {officePrint&&<p role="status">LibreOffice转换PDF · {officePrint.pageCount}页 · 摘要 <code>{officePrint.sha256}</code>。文字引用按近似页定位保存。</p>}
-  {officePrint&&<details><summary>转换来源证明</summary><code>{officePrint.proof}</code></details>}
-  {document&&<><PdfFileTextReferenceAction root={root} source={source} rotation={currentView.rotation} printView={printView}/><PdfFileRegionReference root={viewport} source={source} page={page} rotation={currentView.rotation} printView={printView}/></>}
+  {officePrint?.proof&&<details><summary>转换来源证明</summary><code>{officePrint.proof}</code></details>}
+  {document&&source&&<><PdfFileTextReferenceAction root={root} source={source} rotation={currentView.rotation} printView={printView}/><PdfFileRegionReference root={viewport} source={source} page={page} rotation={currentView.rotation} printView={printView}/></>}
+  {document&&props.native_source&&!source&&<p>此打开内容没有完整引用凭据，可阅读和下载；文字与选区引用暂不可用。</p>}
   {!props.native_source&&typeof file.version==='number'&&<ActivityToolFileBytes key={identity} conversationId={conversationId} runId={runId} activityId={activityId} resultSha={resultSha} file={{path:file.path,version:file.version,sha256:file.sha256,size:file.size}}/>}
   {challenge?.identity===identity&&<form onSubmit={event=>{event.preventDefault();challenge.update(password);setPassword('');setChallenge(undefined);}}>
    <label>PDF密码<input type="password" autoComplete="current-password" value={password} onChange={event=>setPassword(event.target.value)}/></label>
