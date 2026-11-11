@@ -1,3 +1,5 @@
+import {useApplicationLanguage} from '../jot/application-language';
+import {gitUiMessage} from './git-ui-messages';
 import React,{useEffect,useLayoutEffect,useRef,useState} from 'react';
 import type {GitReviewPrepare,GitReviewIntent} from './types';
 import {pathId,workbenchApi} from './client';
@@ -7,6 +9,8 @@ export type GitReviewDraft={project:string;snapshot:string;paths:string[];action
 const titles:Record<GitReviewPrepare['action'],string>={stage:'暂存选定文件',unstage:'取消选定文件的暂存',commit:'提交全部已暂存文件',discard:'丢弃选定的工作区修改','delete-untracked':'删除选定的未跟踪文件'};
 type Command={path:string;body:unknown};
 export default function GitReview({draft,onClose,onBusy,allowIndexExecution=false,allowCommitExecution=false,initialReview}:{draft:GitReviewDraft;onClose:()=>void;onBusy:(busy:boolean)=>void;allowIndexExecution?:boolean;allowCommitExecution?:boolean;initialReview?:GitReviewIntent}){
+ const language=useApplicationLanguage();
+ const uiMessage=(value:string)=>gitUiMessage(value,language);
  const mutation=useGitMutationReceipt(draft.project),[action,setAction]=useState(draft.action),[message,setMessage]=useState(''),[review,setReview]=useState<GitReviewIntent|null>(initialReview??null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[verified,setVerified]=useState(!!initialReview),[stale,setStale]=useState(false);
  const command=useRef<Command|null>(null),alive=useRef(true),inflight=useRef(false),operationControl=useRef<HTMLSelectElement>(null),decisionControl=useRef<HTMLButtonElement>(null),base=`/projects/${pathId(draft.project)}/git/intents`;
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;onBusy(false);};},[onBusy]);
@@ -39,21 +43,21 @@ export default function GitReview({draft,onClose,onBusy,allowIndexExecution=fals
   }finally{end();}
  };
  const refresh=async()=>{if(!review||!begin())return;try{await readCurrent(review.intent_id);}catch{if(alive.current){setVerified(false);setError('当前审核状态尚未确认，请重试读取。');}}finally{end();}};
- return <section className="wb-form wb-git-review" aria-label="Git 变更审核"><div className="wb-toolbar"><h3>变更审核</h3><button type="button" disabled={locked} onClick={onClose}>关闭审核</button></div><p>审核不会修改仓库。</p><ul aria-label={review?.action==='commit'||!review&&action==='commit'?'全部已暂存文件':'审核文件'}>{(review?.paths??draft.paths).map(path=><li key={path}><code>{path}</code></li>)}</ul>
-   {!review?<><fieldset disabled={locked}><label>计划操作<select ref={operationControl} aria-label="计划操作" value={action} onChange={e=>setAction(e.target.value as GitReviewPrepare['action'])}>{draft.actions.map(value=><option key={value} value={value}>{titles[value]}</option>)}</select></label>{action==='commit'&&<label>提交说明<textarea aria-label="提交说明" maxLength={20000} value={message} onChange={e=>setMessage(e.target.value)}/></label>}</fieldset><button type="button" disabled={busy||mutation.pending||action==='commit'&&!message.trim()} onClick={()=>void send('prepare')}>生成审核</button></>
-    :<><p><strong>{titles[review.action]}</strong></p>{review.message!==undefined&&<pre aria-label="完整提交说明" style={{whiteSpace:'pre-wrap'}}>{review.message}</pre>}
-     {metadata&&<dl aria-label="固定提交元数据">
-      <dt>作者</dt><dd style={{whiteSpace:'pre-wrap'}}>{metadata.author.name} &lt;{metadata.author.email}&gt; · {metadata.author.timestamp}</dd>
-      <dt>提交者</dt><dd style={{whiteSpace:'pre-wrap'}}>{metadata.committer.name} &lt;{metadata.committer.email}&gt; · {metadata.committer.timestamp}</dd>
-      <dt>目标引用</dt><dd><code>{metadata.target_ref}</code> · {{branch:'分支',unborn:'首个提交',detached:'分离 HEAD'}[metadata.head_state]}</dd>
-      <dt>父提交</dt><dd><code>{metadata.parent_oid??'首个提交，无父提交'}</code></dd>
-      <dt>已暂存树</dt><dd><code>{metadata.tree_oid}</code> · {metadata.object_format}</dd>
-      <dt>说明编码与字节数</dt><dd>{metadata.encoding} · {metadata.message_bytes}</dd>
-      <dt>完整说明 SHA-256</dt><dd><code>{metadata.message_sha256}</code></dd>
-      <dt>操作者身份策略 SHA-256</dt><dd><code>{metadata.operator_policy_sha256}</code></dd>
+ return <section lang={language} className="wb-form wb-git-review" aria-label={uiMessage('Git 变更审核')}><div className="wb-toolbar"><h3>{uiMessage('变更审核')}</h3><button type="button" disabled={locked} onClick={onClose}>{uiMessage('关闭审核')}</button></div><p>{uiMessage('审核不会修改仓库。')}</p><ul aria-label={uiMessage(review?.action==='commit'||!review&&action==='commit'?'全部已暂存文件':'审核文件')}>{(review?.paths??draft.paths).map(path=><li key={path}><code>{path}</code></li>)}</ul>
+   {!review?<><fieldset disabled={locked}><label>{uiMessage('计划操作')}<select ref={operationControl} aria-label={uiMessage('计划操作')} value={action} onChange={e=>setAction(e.target.value as GitReviewPrepare['action'])}>{draft.actions.map(value=><option key={value} value={value}>{uiMessage(titles[value])}</option>)}</select></label>{action==='commit'&&<label>{uiMessage('提交说明')}<textarea aria-label={uiMessage('提交说明')} maxLength={20000} value={message} onChange={e=>setMessage(e.target.value)}/></label>}</fieldset><button type="button" disabled={busy||mutation.pending||action==='commit'&&!message.trim()} onClick={()=>void send('prepare')}>{uiMessage('生成审核')}</button></>
+    :<><p><strong>{uiMessage(titles[review.action])}</strong></p>{review.message!==undefined&&<pre aria-label={uiMessage('完整提交说明')} style={{whiteSpace:'pre-wrap'}}>{review.message}</pre>}
+     {metadata&&<dl aria-label={uiMessage('固定提交元数据')}>
+      <dt>{uiMessage('作者')}</dt><dd style={{whiteSpace:'pre-wrap'}}>{metadata.author.name} &lt;{metadata.author.email}&gt; · {metadata.author.timestamp}</dd>
+      <dt>{uiMessage('提交者')}</dt><dd style={{whiteSpace:'pre-wrap'}}>{metadata.committer.name} &lt;{metadata.committer.email}&gt; · {metadata.committer.timestamp}</dd>
+      <dt>{uiMessage('目标引用')}</dt><dd><code>{metadata.target_ref}</code> · {uiMessage({branch:'分支',unborn:'首个提交',detached:'分离 HEAD'}[metadata.head_state])}</dd>
+      <dt>{uiMessage('父提交')}</dt><dd><code>{metadata.parent_oid??uiMessage('首个提交，无父提交')}</code></dd>
+      <dt>{uiMessage('已暂存树')}</dt><dd><code>{metadata.tree_oid}</code> · {metadata.object_format}</dd>
+      <dt>{uiMessage('说明编码与字节数')}</dt><dd>{metadata.encoding} · {metadata.message_bytes}</dd>
+      <dt>{uiMessage('完整说明 SHA-256')}</dt><dd><code>{metadata.message_sha256}</code></dd>
+      <dt>{uiMessage('操作者身份策略 SHA-256')}</dt><dd><code>{metadata.operator_policy_sha256}</code></dd>
      </dl>}
-     {legacyCommit&&<p role="alert">此历史提交审核缺少固定作者、时间或目标信息，请取消后重新生成审核。</p>}<p role="status">{!verified?'当前审核状态尚未确认。':review.state==='prepared'?'等待批准。':review.state==='approved'?'审核已批准。':'审核已取消。'}</p><div className="wb-actions">{review.state==='prepared'&&<button ref={legacyCommit?undefined:decisionControl} type="button" disabled={locked||!verified||stale||legacyCommit} onClick={()=>void send('approve')}>批准审核</button>}{review.state!=='cancelled'&&<button ref={review.state==='prepared'&&!legacyCommit?undefined:decisionControl} type="button" disabled={locked||!verified} onClick={()=>void send('cancel')}>取消审核</button>}<button ref={review.state==='cancelled'?decisionControl:undefined} type="button" disabled={locked} onClick={()=>void refresh()}>刷新审核状态</button></div></>}
+     {legacyCommit&&<p role="alert">{uiMessage('此历史提交审核缺少固定作者、时间或目标信息，请取消后重新生成审核。')}</p>}<p role="status">{uiMessage(!verified?'当前审核状态尚未确认。':review.state==='prepared'?'等待批准。':review.state==='approved'?'审核已批准。':'审核已取消。')}</p><div className="wb-actions">{review.state==='prepared'&&<button ref={legacyCommit?undefined:decisionControl} type="button" disabled={locked||!verified||stale||legacyCommit} onClick={()=>void send('approve')}>{uiMessage('批准审核')}</button>}{review.state!=='cancelled'&&<button ref={review.state==='prepared'&&!legacyCommit?undefined:decisionControl} type="button" disabled={locked||!verified} onClick={()=>void send('cancel')}>{uiMessage('取消审核')}</button>}<button ref={review.state==='cancelled'?decisionControl:undefined} type="button" disabled={locked} onClick={()=>void refresh()}>{uiMessage('刷新审核状态')}</button></div></>}
   {review&&verified&&!legacyCommit&&(['stage','unstage'].includes(review.action)&&allowIndexExecution||review.action==='commit'&&allowCommitExecution)&&<GitIndexOperation key={review.intent_id} project={draft.project} review={review} allowDispatch={allowIndexExecution} allowCommitDispatch={allowCommitExecution} onReviewChange={setReview} onBusy={value=>{setExecutionBusy(value);onBusy(value)}}/>}
-  {error&&<p role="alert" className="wb-error">{error}</p>}{mutation.pending&&<button type="button" disabled={busy} onClick={()=>void send('retry')}>重试原请求</button>}
+  {error&&<p role="alert" className="wb-error">{uiMessage(error)}</p>}{mutation.pending&&<button type="button" disabled={busy} onClick={()=>void send('retry')}>{uiMessage('重试原请求')}</button>}
  </section>;
 }
