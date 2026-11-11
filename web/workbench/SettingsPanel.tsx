@@ -39,6 +39,7 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
  const beginMutation=useCallback(()=>{pendingCount.current+=1;reportPending(true);},[reportPending]);
  const endMutation=useCallback(()=>{pendingCount.current=Math.max(0,pendingCount.current-1);reportPending(pendingCount.current>0);},[reportPending]);
  const updatePending=useRef(false);
+ const canBeginUpdate=useCallback(()=>pendingCount.current===(updatePending.current?1:0),[]);
  const reportUpdatePending=useCallback((pending:boolean)=>{
   if(updatePending.current===pending)return;
   updatePending.current=pending;
@@ -194,7 +195,7 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
   <h2 data-desktop-target="settings" tabIndex={-1}>模型、凭据与安装设置</h2>
   <p className="wb-page-intro">查看模型目录、宿主状态及凭据入口，管理当前 Host profile 的设置与插件包。</p>
   <div className="wb-settings-grid">
-   <DesktopUpdatesPanel key={currentTaskScope} scopeKey={currentTaskScope} onPendingChange={reportUpdatePending}/>
+   <DesktopUpdatesPanel key={currentTaskScope} scopeKey={currentTaskScope} onPendingChange={reportUpdatePending} canBeginAction={canBeginUpdate}/>
    <section className="wb-form" aria-labelledby="wb-tool-display">
     <h3 id="wb-tool-display">会话显示</h3>
     <label className="wb-checkbox"><input type="checkbox" checked={toolDisplay.enabled} disabled={!toolDisplay.available} onChange={event=>toolDisplay.setEnabled(event.currentTarget.checked)}/>自动展开工具步骤</label>

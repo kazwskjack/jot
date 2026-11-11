@@ -3,7 +3,8 @@ export const updatePhases=['available','downloading','downloaded','verified','st
 export type UpdatePhase=typeof updatePhases[number];
 export type DesktopUpdateStatus={enabled:boolean;reason:string|null;phase:UpdatePhase|null;operationId:string|null;checking:boolean|null;actionPending:boolean|null;operationCommands:1|null;activeCommand:'download'|'activate'|null;cancelPending:boolean|null};
 export type DesktopUpdateCheck={available:boolean;operationId:string|null;phase:UpdatePhase|null;version:string;sequence:string;channel:string;platform:string;arch:string};
-export type DesktopUpdatesBridge={getUpdateStatus:()=>Promise<unknown>;checkForUpdate:()=>Promise<unknown>;onUpdateProgress?:(listener:(event:unknown)=>void)=>()=>void};
+export type DesktopUpdateAction='download'|'cancel'|'activate';
+export type DesktopUpdatesBridge={getUpdateStatus:()=>Promise<unknown>;checkForUpdate:()=>Promise<unknown>;downloadUpdate?:(operationId:string)=>Promise<unknown>;cancelUpdate?:(operationId:string)=>Promise<unknown>;activateUpdate?:(operationId:string)=>Promise<unknown>;onUpdateProgress?:(listener:(event:unknown)=>void)=>()=>void};
 const row=(value:unknown):Record<string,unknown>|null=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null;
 const uuid=(value:unknown):value is string=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const code=(value:unknown):value is string=>typeof value==='string'&&/^[a-z][a-z0-9_]{0,127}$/.test(value);
@@ -42,3 +43,11 @@ export function desktopUpdateProgress(value:unknown):boolean{
 export const updatePhaseLabel:Record<UpdatePhase,string>={available:'有待处理的更新候选',downloading:'下载阶段',downloaded:'已取得下载回执',verified:'签名校验阶段',staged:'已暂存',
  'awaiting-activation':'等待手动激活',activating:'激活阶段',active:'已切换活动版本，启动确认由宿主处理',cancelled:'已取消',failed:'操作失败',unknown:'操作状态未知'};
 export const canCheckDesktopUpdate=(status:DesktopUpdateStatus|null)=>status?.enabled===true&&status.checking===false&&status.actionPending===false;
+
+export function desktopUpdateActionAllowed(status:DesktopUpdateStatus|null,receipt:DesktopUpdateCheck|null,kind:DesktopUpdateAction):boolean{
+ if(!status?.enabled||status.operationCommands!==1||status.checking!==false||status.cancelPending!==false||!status.operationId||!status.phase)return false;
+ if(kind==='cancel')return (status.activeCommand===null||status.activeCommand==='download')&&
+  ['available','downloading','downloaded','verified','staged','awaiting-activation'].includes(status.phase);
+ if(status.actionPending!==false||!receipt?.available||receipt.operationId!==status.operationId)return false;
+ return kind==='activate'?status.phase==='awaiting-activation':['available','downloading','downloaded'].includes(status.phase);
+}
