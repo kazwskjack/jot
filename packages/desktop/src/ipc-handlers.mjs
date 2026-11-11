@@ -4,7 +4,7 @@ import {assertTrustedDesktopSender,parseDesktopCommand,parseDesktopNotificationR
 const operationIdPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const updatePhases=new Set(['available','downloading','downloaded','verified','staged','awaiting-activation','activating','active','cancelled','failed','unknown']);
 
-export function registerDesktopIpcHandlers({ipcMain,appOrigin,getWindow,stateStore,notificationRuntime,readPermission,selectFile,updateLifecycle=null,setMenuState=null,showCaptionMenu=null,closeCaptionMenu=null,readWindowChrome=null,setWindowTheme=null,setWindowAppearance=null,linuxCaptionMenu=null,readDesktopAbout=null,readAppearance=null,readAppearanceCapabilities=null,writeAppearance=null,appearanceImages=null}={}){
+export function registerDesktopIpcHandlers({ipcMain,appOrigin,getWindow,stateStore,notificationRuntime,readPermission,selectFile,updateLifecycle=null,setMenuState=null,showCaptionMenu=null,closeCaptionMenu=null,readWindowChrome=null,setWindowTheme=null,setWindowAppearance=null,linuxCaptionMenu=null,readDesktopAbout=null,readAppearance=null,readAppearanceCapabilities=null,writeAppearance=null,appearanceImages=null,notificationJournal=null}={}){
  if(typeof readAppearance==='function'&&(typeof ipcMain?.on!=='function'||typeof ipcMain?.removeListener!=='function'))throw Error('desktop_ipc_configuration_invalid');
  if(!ipcMain||typeof ipcMain.handle!=='function'||typeof ipcMain.removeHandler!=='function'||typeof getWindow!=='function'||
   !stateStore||typeof stateStore.read!=='function'||typeof stateStore.write!=='function'||!notificationRuntime||
@@ -33,7 +33,10 @@ export function registerDesktopIpcHandlers({ipcMain,appOrigin,getWindow,stateSto
   ['menu.caption.show',async(_event,payload)=>{if(typeof showCaptionMenu!=='function')throw Error('desktop_caption_unavailable');return showCaptionMenu(payload);}],
   ['menu.caption.close',async()=>{if(typeof closeCaptionMenu!=='function')throw Error('desktop_caption_unavailable');closeCaptionMenu();return Object.freeze({protocol:1,closed:true});}],
   ['menu.state.set',async(_event,payload)=>{if(typeof setMenuState!=='function')throw Error('desktop_menu_unavailable');setMenuState(payload);return Object.freeze({protocol:1,accepted:true});}],
-  ['notification.capabilities',async()=>Object.freeze({event_protocol:notificationRuntime.eventProtocol===2?2:1,delivery_protocol:notificationRuntime.deliveryProtocol===1?1:0,inspection_protocol:notificationRuntime.inspectionProtocol===1?1:0})],
+  ['notification.capabilities',async()=>Object.freeze({event_protocol:notificationRuntime.eventProtocol===2?2:1,delivery_protocol:notificationRuntime.deliveryProtocol===1?1:0,inspection_protocol:notificationRuntime.inspectionProtocol===1?1:0,journal_protocol:notificationJournal?1:0})],
+  ['notification.journal.read',async(_event,payload)=>{if(!notificationJournal)throw Error('desktop_notification_journal_unavailable');return notificationJournal.read(payload.scope);}],
+  ['notification.journal.write',async(_event,payload)=>{if(!notificationJournal)throw Error('desktop_notification_journal_unavailable');return notificationJournal.write(payload.scope,payload.expected_revision,payload.journal);}],
+  ['notification.journal.adopt',async(_event,payload)=>{if(!notificationJournal)throw Error('desktop_notification_journal_unavailable');return notificationJournal.adopt(payload.scope,payload.journal);}],
   ['notification.inspect',async(_event,payload)=>notificationRuntime.inspect(payload)],
   ['notification.state.read',async()=>stateStore.read()],
   ['notification.state.initialize',async(_event,payload)=>{

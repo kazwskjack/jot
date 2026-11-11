@@ -1,3 +1,4 @@
+import {DesktopNotificationJournalStore} from '../../packages/desktop/src/notification-journal-store.mjs';
 import {createDesktopStartupView} from './startup-view.mjs';
 import {createDesktopRendererRecovery} from './renderer-recovery.mjs';
 import {desktopLanguage,desktopText} from './desktop-text.mjs';
@@ -247,6 +248,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
  };
  const windowFactory=async(origin,_backend,prepared)=>{
   appOrigin=origin;
+  const notificationJournal=_backend?.service?.store?.db?new DesktopNotificationJournalStore(_backend.service.store.db):null;
   await app.whenReady();
   permissionRequestHandler=(webContents,permission,callback,details)=>{
    if(!mainWindow||mainWindow.isDestroyed()||webContents!==mainWindow.webContents||webContents.isDestroyed?.()){callback(false);return;}
@@ -359,7 +361,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   }catch(error){report(new Error('system_tray_unavailable:'+String(error?.message??error)));}
   const appearanceContext=()=>{if(shuttingDown||!appearanceStore)throw Error('desktop_appearance_unavailable');const frame=window.webContents.mainFrame,admittedDocument=appearanceDocument;return()=>appearanceDocument===admittedDocument&&mainWindow===window&&!window.isDestroyed()&&!window.webContents.isDestroyed?.()&&window.webContents.mainFrame===frame&&!(window.webContents.isLoadingMainFrame?.()??window.webContents.isLoading())&&!window.webContents.isCrashed?.()&&isDesktopAppUrl(window.webContents.getURL(),appOrigin);};
   removeIpcHandlers=registerDesktopIpcHandlers({
-   ipcMain,appOrigin,getWindow:()=>mainWindow,stateStore,notificationRuntime,
+   ipcMain,appOrigin,getWindow:()=>mainWindow,stateStore,notificationRuntime,notificationJournal,
    readPermission:permissionStatus,updateLifecycle,setMenuState:value=>{
     if(rendererRecovery?.isUnresponsive()){resetCommandMenu();return;}
     const reset=value.owner_scope!==commandMenu.getState().owner_scope||value.blocked||!value.ready;

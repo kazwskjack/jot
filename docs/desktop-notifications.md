@@ -12,7 +12,7 @@
 
 ## 未完成范围
 
-M20.04 尚未完成。工作台顶部已接入当前设备的通知设置及原菜单入口，原 showTaskNotification/initializeNotificationState 任务事件循环现已接入。旧 occurrence 证明、跨 origin 游标迁移、结束等待历史的归档、完整 OS 权限及 M24 发行/回退范围仍未完成。不能用轮询猜测完成、旧页面状态、WebPush 投递或内存点击记录冒充原任务完成与系统权限。
+M20.04 尚未完成。工作台顶部已接入当前设备的通知设置及原菜单入口，原 showTaskNotification/initializeNotificationState 任务事件循环现已接入。旧 occurrence 证明、未访问旧origin与迁移冲突恢复、结束等待历史的归档、完整 OS 权限及 M24 发行/回退范围仍未完成。不能用轮询猜测完成、旧页面状态、WebPush 投递或内存点击记录冒充原任务完成与系统权限。
 
 本次为底层源码增量，未运行测试、构建、Electron、浏览器或 OS 通知，也没有安装、重启或部署。
 
@@ -80,7 +80,7 @@ event_protocol2只确认身份能力，不是当前来源授权。新主进程�
 
 工作台账户会话内挂载 useDesktopTaskNotifications，普通浏览器无原生桥接则不启动。循环要求实际主进程 event_protocol2、delivery_protocol1、inspection_protocol1 及当前 origin 的 Web Locks；旧版本不回退发送。原可信 notification.inspect 仅按原事件身份读取 active/pending/seen/not_recorded，不执行或重发；not_recorded 不能证明从未展示。
 
-原账户 hash 作用域的 localStorage 保存原 event cursor、首次连接服务端时间基线和最多64条 pending身份/状态，不存候选正文或密钥。Web Lock 串行同 origin/账户的写者；每次保存核对原字节并回读确认。损坏/未知格式、写失败、外部覆盖或协议不符停止新发送，不静默清空。首次开启采用首次服务端读取时刻为基线，不推送此前历史；原账本仍按50项分页扫描，游标只越过已保存或已明确跳过的记录。普通同 origin 重载沿用原基线和游标，离线后产生的原事件仍可继续分页。
+原账户hash的localStorage现仅是只读旧记录迁移来源；权威游标、基线、pending/ended已改存原生userData/jot.db。Web Lock仍串行同origin/账户的前端循环，原生版本比较保护跨origin写入；不存候选正文或密钥。损坏/未知格式、写失败、外部覆盖或协议不符停止新发送，不静默清空。首次开启采用首次服务端读取时刻为基线，不推送此前历史；原账本仍按50项分页扫描，游标只越过已保存或已明确跳过的记录。普通同 origin 重载沿用原基线和游标，离线后产生的原事件仍可继续分页。
 
 每轮先读取原设备偏好，最多轮询核对8条待处理记录，位置轮转避免只处理前几条；再读取一页原事件。来源校验、候选及原task_settings逐字段核对身份与策略，来源失效则按原身份撤销。尚未有尝试的queued记录只有在原生核对后、最新服务端来源仍有效且设备开启时，才先保存dispatching，再调用原生show。shown/already_seen转为已显示观察；原生明确deferred才允许回到queued；unknown/in_progress、异常/错回执/中断均只核对，不重发。已确认但不再active的seen可从本地待处理队列移除；这不删除原生seen。
 
@@ -88,7 +88,7 @@ HTTP读取有12秒子AbortController，离开账户或超时会释放请求；�
 
 工作台显示未确认/队列满/不可用状态及“重新核对通知”；该按钮不重发不明记录。达到64条时保留未读游标，不丢弃记录继续吞新事件。用户仍可使用原通知的点击/动作或结束等待历史入口打开原task/occurrence，不创建或执行任务。偏好/权限不会自动申请，无测试通知。
 
-当前保留边界：结束等待现可释放未知队列位置，但本地未知历史上限64条，归档仍未接入；首次连接时间基线不是旧事件补发；localStorage/Web Lock受origin约束，发行时若端口/origin改变，跨origin持久游标迁移尚未实现；无Web Locks版本不会发送。旧无出生scope事件不伪造原权限，完整OS权限、撤销失败的系统表现和M24回退尚未验证或完成。源码接入不等于已运行，未执行测试、构建、HTTP、Electron或OS通知。
+当前保留边界：结束等待现可释放未知队列位置，但本地未知历史上限64条，归档仍未接入；首次连接时间基线不是旧事件补发；原生profile日志已接入，端口变化不再改变新日志位置；尚未访问旧origin的原浏览器副本及迁移冲突仍需恢复处理；无Web Locks版本不会发送。旧无出生scope事件不伪造原权限，完整OS权限、撤销失败的系统表现和M24回退尚未验证或完成。源码接入不等于已运行，未执行测试、构建、HTTP、Electron或OS通知。
 
 ## 保留未知并结束等待
 
@@ -102,4 +102,18 @@ pending最多64条，ended也最多64条且不自动轮替覆盖。历史剩余�
 
 来源事件重复读到时会核对pending或ended的原身份，ended不会重新排队；只读“重新核对”不撤销结束事实。首次连接、正常同origin恢复、64条容量和源失效处理沿用已有逻辑。
 
-已追踪 apps/desktop/backend.mjs：本地服务明确使用127.0.0.1随机端口0，再把实际origin提供给窗口。这意味着localStorage/Web Lock不能保证跨次启动沿用同一origin，不能用固定端口或仅改界面基线掩盖迁移缺口。下一步须接入原生userData/原后端持久存储及其现有写入/发行保留规则，保留当前origin未知和结束等待记录后再迁移。完整OS/旧occurrence/回退范围仍未完成。本次仅修改与审阅源码、提交Git，未运行产品、测试、构建、迁移或部署。
+已追踪 apps/desktop/backend.mjs：本地服务明确使用127.0.0.1随机端口0，再把实际origin提供给窗口。这意味着localStorage/Web Lock不能保证跨次启动沿用同一origin，不能用固定端口或仅改界面基线掩盖迁移缺口。现已接入下述原生userData/原后端持久存储，并保留当前origin旧副本与未知记录；未访问旧origin及冲突合并仍未解决。完整OS/旧occurrence/回退范围仍未完成。本次仅修改与审阅源码、提交Git，未运行产品、测试、构建、迁移或部署。
+
+## 原生profile持久日志与迁移
+
+DesktopNotificationJournalStore复用原 startLocalBackend返回service.store.db，即原userData/jot.db的同一SQLite连接；不另开连接、不关闭别人的数据库、不固定随机端口。窗口工厂在原backend生命周期内接入，可信主frame新增notification.journal.read/write/adopt，实际journal_protocol1能力由已安装的原生store报告。缺少原后端DB的旧适配器不给出该能力，新循环停止而不回退写浏览器日志。
+
+按原账户hash保存独立revision、规范化snapshot和SHA256。BEGIN IMMEDIATE中核对expected_revision后更新并读回，前端再核对原scope、revision+1和完全相同的规范化snapshot；未确认写入、版本冲突或损坏摘要都停止后续发送。所有旧同步commit/replace/结束等待写入均改为等待原生回执，发送前dispatching仍先持久化。只读方法只取当前scope一行，不加载其他账户日志；原SQLite连接及WAL/FULL策略继续由原后端拥有。
+
+journal格式、身份及结束等待校验抽为纯JS共享实现，主进程、IPC、浏览器迁移读取和前端回执使用同一规范化规则。旧格式1转为规范格式2保留所有原游标、基线、pending和ended事实，不改变原生seen JSON版本1/2，也不新增路径/目录授权。
+
+当前origin旧localStorage保留原字节，不再写入或删除。首次adopt把规范化旧snapshot和摘要、导入revision保存在不可改写导入表；同一旧摘要再次出现时只返回当前较新原生日志，不复位游标或恢复旧待处理状态。原生日志已存在且另一份旧数据不同、没有对应导入凭据时，事务拒绝合并并保留两边；不依据两个不透明游标猜先后。孤立导入凭据没有主日志或摘要损坏也不能冒充新账户空状态。
+
+后续正常启动即使本地端口变化，也从同一userData/jot.db和scope继续读原生日志，不重建新基线。尚未访问的旧origin不能凭空读取，浏览器存储被拒绝/损坏时不忽略旧数据继续初始化；冲突仍需有证据的恢复流程。待处理/结束等待历史各64条的原限额保留，历史归档仍未接入。
+
+原发行manifest已把jot.db列为用户数据保留项，新表随原数据库保留；未改发行目录或声称包已生成。源码还发现apps/desktop/package.json的package:portable引用当前候选中不存在的scripts/package-portable.mjs，属于未完成M24装配范围；本轮不声称新增模块已有安装包。本次未执行SQL、迁移、数据库打开、应用启动、打包、测试或部署。

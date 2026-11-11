@@ -1,10 +1,11 @@
+import {normalizeNotificationJournal,notificationJournalScope} from './notification-journal.mjs';
 import {isApplicationLanguage} from './application-language.mjs';
 import {normalizeInterfacePreferences} from './interface-preferences.mjs';
 import {normalizeLightAppearance,isImageId,MAX_BACKGROUND_BYTES} from './light-appearance.mjs';
 import {parseCaptionMenuRequest,parseCaptionProjectionCommand} from './caption-menu-contract.mjs';
 import {parseDesktopMenuState} from './menu-commands.mjs';
 const notificationEvents=new Set(['changed','completed','failed','needs_confirmation']);
-const channels=new Set(['appearance.capabilities','appearance.image.recover','appearance.image.save','appearance.image.read','appearance.image.delete','appearance.read','appearance.write','desktop.about.read','menu.caption.items','menu.caption.activate','menu.caption.dismiss','window.chrome.read','window.chrome.theme','window.chrome.appearance','menu.caption.show','menu.caption.close','menu.state.set','notification.capabilities','notification.inspect','notification.show','notification.dismiss','notification.state.read','notification.state.initialize','notification.permission.read','preferences.read','preferences.write','window.openTask',
+const channels=new Set(['appearance.capabilities','appearance.image.recover','appearance.image.save','appearance.image.read','appearance.image.delete','appearance.read','appearance.write','desktop.about.read','menu.caption.items','menu.caption.activate','menu.caption.dismiss','window.chrome.read','window.chrome.theme','window.chrome.appearance','menu.caption.show','menu.caption.close','menu.state.set','notification.capabilities','notification.journal.read','notification.journal.write','notification.journal.adopt','notification.inspect','notification.show','notification.dismiss','notification.state.read','notification.state.initialize','notification.permission.read','preferences.read','preferences.write','window.openTask',
  'update.status','update.check','update.download','update.pause','update.resume','update.cancel','update.activate','dialog.selectFile']);
 const hasOwn=(value,key)=>Object.prototype.hasOwnProperty.call(value,key);
 
@@ -63,6 +64,15 @@ export function parseDesktopCommand(channel,value){
  if(channel==='menu.caption.show')return Object.freeze({channel,payload:parseCaptionMenuRequest(value)});
  if(channel==='menu.caption.close'){if(value!==undefined)fail('desktop_caption_request_invalid');return Object.freeze({channel,payload:null});}
  if(channel==='menu.state.set')return Object.freeze({channel,payload:parseDesktopMenuState(value)});
+ if(['notification.journal.read','notification.journal.write','notification.journal.adopt'].includes(channel)){
+  const code='desktop_notification_journal_invalid';record(value,code);
+  exactKeys(value,channel==='notification.journal.read'?['scope']:channel==='notification.journal.write'?['scope','expected_revision','journal']:['scope','journal'],code);
+  const scope=notificationJournalScope(value.scope);
+  if(channel==='notification.journal.read')return Object.freeze({channel,payload:Object.freeze({scope})});
+  if(channel==='notification.journal.write'&&(!Number.isSafeInteger(value.expected_revision)||value.expected_revision<0||value.expected_revision>=Number.MAX_SAFE_INTEGER))fail(code);
+  const journal=normalizeNotificationJournal(value.journal);
+  return Object.freeze({channel,payload:Object.freeze({scope,journal,...(channel==='notification.journal.write'?{expected_revision:value.expected_revision}:{})})});
+ }
  if(channel==='notification.show'){
   const code='desktop_notification_invalid';record(value,code);
   const keys=['task_id','occurrence_id','generation','event_kind','title','body',...(Object.hasOwn(value,'event_id')?['event_id']:[])];exactKeys(value,keys,code);
