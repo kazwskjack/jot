@@ -34,5 +34,5 @@ export function createDesktopCommandMenu({Menu,getWindow,appOrigin,restoreWindow
   for(const command of desktopMenuCommands){const item=menu.getMenuItemById('jot:'+command);if(item){item.enabled=desktopMenuCommandEnabled(command,state);if(command==='toggle-sidebar')item.checked=state.sidebar_visible;}}
  };
  Menu.setApplicationMenu(menu);
- return {setState,reset:()=>setState(emptyDesktopMenuState),template,getState:()=>state};
+ return {setState,reset:()=>setState(emptyDesktopMenuState),template,getState:()=>state,getEpoch:()=>menuEpoch};
 }

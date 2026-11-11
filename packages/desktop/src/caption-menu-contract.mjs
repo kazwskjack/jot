@@ -15,3 +15,13 @@ export function parseCaptionMenuRequest(value){
  }
  return Object.freeze({id:value.id??null,buttons:Object.freeze(buttons)});
 }
+
+export function parseCaptionProjectionCommand(kind,value){
+ if(!['items','activate','dismiss'].includes(kind))throw Error('desktop_caption_request_invalid');
+ const allowed=kind==='items'?['id']:kind==='activate'?['token','index']:['token'];
+ if(!record(value)||Object.keys(value).sort().join(',')!==allowed.sort().join(','))throw Error('desktop_caption_request_invalid');
+ if(kind==='items'){if(!known(value.id))throw Error('desktop_caption_request_invalid');return Object.freeze({id:value.id});}
+ if(typeof value.token!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.token)||
+  kind==='activate'&&(!Number.isSafeInteger(value.index)||value.index<0||value.index>=64))throw Error('desktop_caption_request_invalid');
+ return Object.freeze(kind==='activate'?{token:value.token.toLowerCase(),index:value.index}:{token:value.token.toLowerCase()});
+}

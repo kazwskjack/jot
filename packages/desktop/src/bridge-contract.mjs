@@ -1,7 +1,7 @@
-import {parseCaptionMenuRequest} from './caption-menu-contract.mjs';
+import {parseCaptionMenuRequest,parseCaptionProjectionCommand} from './caption-menu-contract.mjs';
 import {parseDesktopMenuState} from './menu-commands.mjs';
 const notificationEvents=new Set(['changed','completed','failed','needs_confirmation']);
-const channels=new Set(['window.chrome.read','window.chrome.theme','menu.caption.show','menu.caption.close','menu.state.set','notification.show','notification.dismiss','notification.state.read','notification.state.initialize','notification.permission.read','preferences.read','preferences.write','window.openTask',
+const channels=new Set(['menu.caption.items','menu.caption.activate','menu.caption.dismiss','window.chrome.read','window.chrome.theme','menu.caption.show','menu.caption.close','menu.state.set','notification.show','notification.dismiss','notification.state.read','notification.state.initialize','notification.permission.read','preferences.read','preferences.write','window.openTask',
  'update.status','update.check','update.download','update.pause','update.resume','update.cancel','update.activate','dialog.selectFile']);
 const hasOwn=(value,key)=>Object.prototype.hasOwnProperty.call(value,key);
 
@@ -27,6 +27,7 @@ export function parseDesktopCommand(channel,value){
  if(typeof channel!=='string'||!channels.has(channel))fail('desktop_ipc_channel_denied');
  if(channel==='window.chrome.read'){if(value!==undefined)fail('desktop_ipc_payload_invalid');return Object.freeze({channel,payload:null});}
  if(channel==='window.chrome.theme'){const code='desktop_window_theme_invalid';record(value,code);exactKeys(value,['theme'],code);if(value.theme!=='dark'&&value.theme!=='light')fail(code);return Object.freeze({channel,payload:Object.freeze({theme:value.theme})});}
+ if(['menu.caption.items','menu.caption.activate','menu.caption.dismiss'].includes(channel))return Object.freeze({channel,payload:parseCaptionProjectionCommand(channel.split('.').at(-1),value)});
  if(channel==='menu.caption.show')return Object.freeze({channel,payload:parseCaptionMenuRequest(value)});
  if(channel==='menu.caption.close'){if(value!==undefined)fail('desktop_caption_request_invalid');return Object.freeze({channel,payload:null});}
  if(channel==='menu.state.set')return Object.freeze({channel,payload:parseDesktopMenuState(value)});
