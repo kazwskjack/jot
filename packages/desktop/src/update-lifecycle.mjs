@@ -86,7 +86,7 @@ function validateReceipt(staged,envelope){
 export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle,downloader,stateStore,platformSignatureVerifier,candidateProbe,hostLifecycle,
  desktopLifecycle,getHealthUrl,exitForHandoff,fetchEnvelope,relaunch,confirmActivation,probeRestoredRelease,getHostProcessContext}={}){
  const currentHostProcessContext=getHostProcessContext??(({releaseRoot})=>({pid:process.pid,execPath:process.execPath,releaseRoot}));
- let checked=null;
+ let checked=null,checking=false,actionPending=0;
  const contexts=new Map(),controllers=new Map(),progressListeners=new Set();
  const emitProgress=(operationId,phase)=>{
   const event=Object.freeze({operation_id:operationId,phase});
@@ -145,10 +145,10 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
 
  async function status(){
   const error=configurationError();
-  if(error)return Object.freeze({enabled:false,reason:error,phase:null});
+  if(error)return Object.freeze({enabled:false,reason:error,phase:null,checking,actionPending:actionPending>0});
   const state=await stateStore.read();
-  if(!state?.enabled)return Object.freeze({enabled:false,reason:state?.reason??'desktop_update_state_unavailable',phase:state?.state?.operation?.phase??null});
-  return Object.freeze({enabled:true,reason:null,phase:state.state?.operation?.phase??'available',operationId:state.state?.operation?.id??null});
+  if(!state?.enabled)return Object.freeze({enabled:false,reason:state?.reason??'desktop_update_state_unavailable',phase:state?.state?.operation?.phase??null,checking,actionPending:actionPending>0});
+  return Object.freeze({enabled:true,reason:null,phase:state.state?.operation?.phase??'available',operationId:state.state?.operation?.id??null,checking,actionPending:actionPending>0});
  }
 
  async function prepareStartup({restoredStartupNonce=null}={}){
@@ -341,6 +341,18 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
  }
 
  async function check(){
+  if(checking||actionPending>0)fail('desktop_update_command_pending');
+  checking=true;
+  try{return await checkCandidate();}finally{checking=false;}
+ }
+ // A check must not replace a downloading/staged context during another action.
+ // Cancellation retains its original ability to interrupt a running download.
+ async function updateAction(action,args){
+  if(checking)fail('desktop_update_command_pending');
+  actionPending+=1;
+  try{return await action(args);}finally{actionPending-=1;}
+ }
+ async function checkCandidate(){
   assertReady();
   const reconciled=await reconcile();if(!reconciled.enabled)fail(reconciled.reason??'desktop_update_state_unavailable');
   const loaded=await stateStore.read();if(!loaded.enabled)fail(loaded.reason??'desktop_update_state_unavailable');
@@ -587,6 +599,6 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
   if(typeof listener!=='function')fail('desktop_update_progress_listener_invalid');
   progressListeners.add(listener);return ()=>progressListeners.delete(listener);
  }
- return Object.freeze({status,check,download,cancel,activate,reconcile,prepareStartup,confirmStartup,confirmRestoredStartup,
+ return Object.freeze({status,check,download:()=>updateAction(download),cancel:args=>updateAction(cancel,args),activate:args=>updateAction(activate,args),reconcile,prepareStartup,confirmStartup,confirmRestoredStartup,
   handleRestoredStartupFailure,handleStartupFailure,rollbackPrevious,onProgress});
 }

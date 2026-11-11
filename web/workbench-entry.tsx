@@ -1,5 +1,6 @@
 import {useDesktopCommands,type DesktopUiCommand} from './jot/useDesktopCommands';
 import {useLayoutDisplayPreferences} from './jot/useToolDisplayPreference';
+import {desktopUpdatesBridge} from './workbench/desktop-updates';
 import {request,subscribeTaskDraftScope,taskDraftScope} from './jot/client';
 import {readWorkbenchRoute,writeWorkbenchRoute} from './jot/workbench-route-state';
 import {recordUiDiagnostic,registerUiDiagnostics} from './jot/ui-diagnostics';
@@ -84,7 +85,8 @@ function WorkbenchSession({owner}:{owner:string}){
  const filesContext=()=>surface.current?.querySelector<HTMLElement>('[data-desktop-workbench][data-desktop-files-ready="true"]');
  const commandEnabled=(command:DesktopUiCommand)=>{
   if(command==='find')return !!findTarget();
-  if(command==='toggle-sidebar'||command==='skills'||command==='check-updates')return !!target(command);
+  if(command==='toggle-sidebar'||command==='skills')return !!target(command);
+  if(command==='check-updates')return canNavigate()&&!!desktopUpdatesBridge()&&(!surface.current?.querySelector('[data-desktop-update-panel]')||!!target(command));
   if(command==='files')return canNavigate()&&Boolean(filesContext()?.dataset.desktopWorkspace);
   return canNavigate();
  };
@@ -92,7 +94,7 @@ function WorkbenchSession({owner}:{owner:string}){
   if(taskDraftScope()!==owner||!commandEnabled(command))return;setDesktopError('');
   if(command==='toggle-sidebar'){layoutDisplay.setPreference('sidebarVisible',!layoutDisplay.value.sidebarVisible);return;}
   if(command==='find'){const node=findTarget();node?.click();node?.focus();if(node instanceof HTMLInputElement)node.select();return;}
-  if(command==='skills'||command==='check-updates'){const node=target(command);node?.scrollIntoView({block:'nearest'});node?.focus();if(command==='check-updates')node?.click();return;}
+  if(command==='skills'){const node=target(command);node?.scrollIntoView({block:'nearest'});node?.focus();return;}
   const route=command==='new-conversation'||command==='chat'?'conversations':command==='new-project'?'projects':command==='files'?'shared-workspace':command==='scheduled-tasks'?'persistent-tasks':'settings';
   const workspace=command==='files'?filesContext()?.dataset.desktopWorkspace:undefined;
   setConversation('');setShowConversations(route==='conversations');if(route!=='conversations')setView(route);
@@ -116,6 +118,15 @@ function WorkbenchSession({owner}:{owner:string}){
    }else if(request.command==='new-conversation')node=target('new-conversation');
    else if(request.command==='chat')node=target('chat');
    else if(request.command==='settings')node=target('settings');
+    else if(request.command==='check-updates'){
+     const panel=surface.current?.querySelector<HTMLElement>('[data-desktop-update-panel]');
+     if(!panel||panel.dataset.desktopUpdateReady!=='true')return;
+     const action=target('check-updates');node=action??panel;
+     if(!visible(node))return;
+     // Consume the transient menu request before clicking. A disabled/policy-only
+     // panel receives focus without forcing a native command or replaying later.
+     finish();node.scrollIntoView({block:'nearest'});node.focus();action?.click();return;
+    }
    else if(request.command==='files'){
     node=target('files');if(node&&node.dataset.desktopWorkspace!==request.workspace){cancel();return;}
     if(node)node.click();
@@ -125,7 +136,7 @@ function WorkbenchSession({owner}:{owner:string}){
   };
   const schedule=()=>{if(!done&&!frame)frame=requestAnimationFrame(apply);};
   const observer=new MutationObserver(schedule),root=surface.current;
-  if(root)observer.observe(root,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled','hidden','data-desktop-workspace']});
+  if(root)observer.observe(root,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled','hidden','data-desktop-workspace','data-desktop-update-ready']});
   const timer=setTimeout(cancel,15000);schedule();
   return()=>{disposed=true;cancelAnimationFrame(frame);clearTimeout(timer);observer.disconnect();};
  },[desktopFocus,owner,view,conversation,showConversations,managementPending,taskSource,desktopOpenTask]);

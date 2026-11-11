@@ -6,6 +6,7 @@ import {createHostSettingsRecovery} from './host-settings-recovery.mjs';
 import {useLayoutDisplayPreferences,useMessageDisplayPreferences,useToolDisplayPreference} from '../jot/useToolDisplayPreference';
 import HostCredentialsPanel from './HostCredentialsPanel';
 import PluginProfilesPanel from './PluginProfilesPanel';
+import DesktopUpdatesPanel from './DesktopUpdatesPanel';
 import HostReadinessPanel from './HostReadinessPanel';
 import HostSettingsPanel from './HostSettingsPanel';
 import HostSettingsReadPanel from './HostSettingsReadPanel';
@@ -37,6 +38,12 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
  const reportPending=useContext(MutationPending),pendingCount=useRef(0);
  const beginMutation=useCallback(()=>{pendingCount.current+=1;reportPending(true);},[reportPending]);
  const endMutation=useCallback(()=>{pendingCount.current=Math.max(0,pendingCount.current-1);reportPending(pendingCount.current>0);},[reportPending]);
+ const updatePending=useRef(false);
+ const reportUpdatePending=useCallback((pending:boolean)=>{
+  if(updatePending.current===pending)return;
+  updatePending.current=pending;
+  if(pending)beginMutation();else endMutation();
+ },[beginMutation,endMutation]);
  const pluginPending=useRef(false);
  const reportPluginPending=useCallback((pending:boolean)=>{
   if(pluginPending.current===pending)return;
@@ -187,6 +194,7 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
   <h2 data-desktop-target="settings" tabIndex={-1}>模型、凭据与安装设置</h2>
   <p className="wb-page-intro">查看模型目录、宿主状态及凭据入口，管理当前 Host profile 的设置与插件包。</p>
   <div className="wb-settings-grid">
+   <DesktopUpdatesPanel key={currentTaskScope} scopeKey={currentTaskScope} onPendingChange={reportUpdatePending}/>
    <section className="wb-form" aria-labelledby="wb-tool-display">
     <h3 id="wb-tool-display">会话显示</h3>
     <label className="wb-checkbox"><input type="checkbox" checked={toolDisplay.enabled} disabled={!toolDisplay.available} onChange={event=>toolDisplay.setEnabled(event.currentTarget.checked)}/>自动展开工具步骤</label>
