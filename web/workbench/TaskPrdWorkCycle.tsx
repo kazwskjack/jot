@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
+import {taskUiMessage} from './task-ui-messages';
 import React,{useEffect,useState} from 'react';
 import TaskPrdWorkResources from './TaskPrdWorkResources';
 import TaskPrdWorkHandoff from './TaskPrdWorkHandoff';
@@ -17,6 +19,8 @@ function checked(value:Cycle,taskId:string,planId:string,acceptanceHash:string){
 export default function TaskPrdWorkCycle({taskId,plan,acceptance,locked,ready,save,handoffSave,prepareSave,grantSave,admitSave,onStateChange}:{
  taskId:string;plan:TaskPrdWorkPlan|null;acceptance:TaskPrdWorkPlanAcceptance|null;locked:boolean;ready:boolean;save:TaskSaveReceipt;handoffSave:TaskSaveReceipt;prepareSave:TaskSaveReceipt;grantSave:TaskSaveReceipt;admitSave:TaskSaveReceipt;onStateChange:()=>void;
 }){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const message=(value:string)=>taskUiMessage(value,language);
  const [confirmed,setConfirmed]=useState(false),[error,setError]=useState(''),[receipt,setReceipt]=useState<Cycle|null>(null);
  const identity=`${taskId}:${plan?.plan_id??''}:${acceptance?.sha256??''}`;
  const resource=useResource(async signal=>{
@@ -47,19 +51,19 @@ export default function TaskPrdWorkCycle({taskId,plan,acceptance,locked,ready,sa
   finally{onStateChange();}
  }
  if(!acceptance&&!save.pending&&!handoffSave.pending&&!prepareSave.pending&&!grantSave.pending&&!admitSave.pending&&!receipt)return null;
- return <section aria-label="PRD 原工作循环" style={{overflowWrap:'anywhere'}}>
-  <h5>原工作循环资源</h5>
-  <p className="wb-hint">循环保留原任务、规划批次和累计预算。当前提供资源创建及关闭，执行准入接线继续开发。</p>
-  {resource.loading&&<p role="status">正在读取原循环…</p>}
-  {resource.error&&<p role="alert" className="wb-error">{prdMessage(resource.error)}</p>}
-  <button type="button" disabled={locked||resource.loading} onClick={()=>{setConfirmed(false);resource.reload();}}>刷新原循环</button>
-  {cycle&&<p role="status">{cycle.cycle_id} · v{cycle.version} · {cycle.state==='open'?'开放':'已关闭'}</p>}
-  {current&&cycle?.state!=='closed'&&<label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked||(!cycle&&!ready)} onChange={event=>setConfirmed(event.target.checked)}/>{cycle?'确认关闭此原循环，保存原关闭回执。':'确认以这份提案确认记录创建原工作循环资源。'}</label>}
-  {(current&&cycle?.state!=='closed'||save.pending)&&<button type="button" disabled={save.busy||(!save.pending&&(locked||(!cycle&&!ready)||!confirmed||resource.loading||!!resource.error))} onClick={()=>void submit()}>{save.busy?'正在保存循环回执…':save.pending?'重试原循环回执':cycle?'关闭原循环':'创建原工作循环'}</button>}
-  {save.pending&&<p role="status">原请求及 key 已保留，请重试原循环回执。</p>}
-  {receipt&&<p role="status">原命令回执 {receipt.cycle_id} · v{receipt.version} · {receipt.state==='open'?'开放':'已关闭'}。</p>}
+ return <section lang={language} aria-label={message('PRD 原工作循环')} style={{overflowWrap:'anywhere'}}>
+  <h5>{message('原工作循环资源')}</h5>
+  <p className="wb-hint">{message('循环保留原任务、规划批次和累计预算。创建循环后仍需核对规划交接、快照、路径范围和原 Worker 准入。')}</p>
+  {resource.loading&&<p role="status">{message('正在读取原循环…')}</p>}
+  {resource.error&&<p role="alert" className="wb-error">{message(prdMessage(resource.error))}</p>}
+  <button type="button" disabled={locked||resource.loading} onClick={()=>{setConfirmed(false);resource.reload();}}>{message('刷新原循环')}</button>
+  {cycle&&<p role="status">{cycle.cycle_id} · v{cycle.version} · {message(cycle.state==='open'?'开放':'已关闭')}</p>}
+  {current&&cycle?.state!=='closed'&&<label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked||(!cycle&&!ready)} onChange={event=>setConfirmed(event.target.checked)}/>{message(cycle?'确认关闭此原循环，保存原关闭回执。':'确认以这份提案确认记录创建原工作循环资源。')}</label>}
+  {(current&&cycle?.state!=='closed'||save.pending)&&<button type="button" disabled={save.busy||(!save.pending&&(locked||(!cycle&&!ready)||!confirmed||resource.loading||!!resource.error))} onClick={()=>void submit()}>{message(save.busy?'正在保存循环回执…':save.pending?'重试原循环回执':cycle?'关闭原循环':'创建原工作循环')}</button>}
+  {save.pending&&<p role="status">{message('原请求及 key 已保留，请重试原循环回执。')}</p>}
+  {receipt&&<p role="status">{t('原命令回执 ','Original Command Receipt ')}{receipt.cycle_id} · v{receipt.version} · {message(receipt.state==='open'?'开放':'已关闭')}{t('。','.')}</p>}
   <TaskPrdWorkHandoff taskId={taskId} planId={plan?.plan_id??null} cycle={cycle??null} acceptanceHash={acceptance?.sha256??null} locked={locked} save={handoffSave} onStateChange={onStateChange}/>
   <TaskPrdWorkResources taskId={taskId} planId={plan?.plan_id??null} cycle={cycle??null} acceptanceHash={acceptance?.sha256??null} locked={locked} prepareSave={prepareSave} grantSave={grantSave} admitSave={admitSave} onStateChange={onStateChange}/>
-  {error&&<p role="alert" className="wb-error">{error}</p>}
+  {error&&<p role="alert" className="wb-error">{message(error)}</p>}
  </section>;
 }

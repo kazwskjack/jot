@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
+import {taskUiMessage} from './task-ui-messages';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {request} from '../jot/client';
 import {useResource} from './useResource';
@@ -17,6 +19,8 @@ function checkAcceptance(value:TaskPrdWorkPlanAcceptance,taskId:string,planId:st
 export default function TaskPrdWorkPlans({task,locked,ready,save,cycleSave,handoffSave,prepareSave,grantSave,admitSave,onStateChange}:{
  task:Task;locked:boolean;ready:boolean;save:TaskSaveReceipt;cycleSave:TaskSaveReceipt;handoffSave:TaskSaveReceipt;prepareSave:TaskSaveReceipt;grantSave:TaskSaveReceipt;admitSave:TaskSaveReceipt;onStateChange:()=>void;
 }){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const message=(value:string)=>taskUiMessage(value,language);
  const taskId=task.task_id,identity=`${taskId}:${task.version}:${task.status}:${ready}`;
  const currentIdentity=useRef(identity);currentIdentity.current=identity;
  const [open,setOpen]=useState(false),[before,setBefore]=useState(''),[previous,setPrevious]=useState<string[]>([]);
@@ -76,32 +80,32 @@ export default function TaskPrdWorkPlans({task,locked,ready,save,cycleSave,hando
   if(locked||busy)return;
   setBefore(cursor);setPrevious(history);setDetail(null);setLedgerOpen(false);setConfirmed(false);setReceipt(null);setError('');
  }
- return <details open={open} onToggle={event=>setOpen(event.currentTarget.open)}><summary>原 DSH 文件计划提案</summary>
-  <p className="wb-hint">提案关联本批固定 PRD、全文读取回执和当时的子任务账本。确认会保存核对记录，执行继续通过原工作准入及路径授权。</p>
-  <button type="button" disabled={locked||busy||plans.loading} onClick={()=>{move('',[]);plans.reload();}}>刷新提案</button>
-  {plans.loading&&<p role="status">正在读取文件计划提案…</p>}
-  {plans.error&&<p className="wb-error" role="alert">{prdMessage(plans.error)}</p>}
+ return <details lang={language} open={open} onToggle={event=>setOpen(event.currentTarget.open)}><summary>{message('原 DSH 文件计划提案')}</summary>
+  <p className="wb-hint">{message('提案关联本批固定 PRD、全文读取回执和当时的子任务账本。确认会保存核对记录，执行继续通过原工作准入及路径授权。')}</p>
+  <button type="button" disabled={locked||busy||plans.loading} onClick={()=>{move('',[]);plans.reload();}}>{message('刷新提案')}</button>
+  {plans.loading&&<p role="status">{message('正在读取文件计划提案…')}</p>}
+  {plans.error&&<p className="wb-error" role="alert">{message(prdMessage(plans.error))}</p>}
   {!plans.loading&&page&&<>
-   {page.items.length===0&&<p role="status">此任务尚无文件计划提案。</p>}
-   <ul>{page.items.map(plan=><li key={plan.plan_id} style={textStyle}>{plan.summary} · 原任务 v{plan.task_version} · {plan.path_count} 个路径 · {plan.subtask_count} 个子任务 <button type="button" disabled={locked||busy} onClick={()=>void readPlan(plan)}>核对提案</button></li>)}</ul>
-   <div className="wb-actions"><button type="button" disabled={locked||busy||previous.length===0} onClick={()=>move(previous[previous.length-1]!,previous.slice(0,-1))}>上一页</button><button type="button" disabled={locked||busy||page.next_before_id===null} onClick={()=>move(page.next_before_id!,[...previous,before])}>下一页</button></div>
+   {page.items.length===0&&<p role="status">{message('此任务尚无文件计划提案。')}</p>}
+   <ul>{page.items.map(plan=><li key={plan.plan_id} style={textStyle}>{plan.summary}{t(' · 原任务 v',' · Original Task v')}{plan.task_version} · {plan.path_count}{t(' 个路径 · ',' Paths · ')}{plan.subtask_count}{t(' 个子任务 ',' Subtasks ')}<button type="button" disabled={locked||busy} onClick={()=>void readPlan(plan)}>{message('核对提案')}</button></li>)}</ul>
+   <div className="wb-actions"><button type="button" disabled={locked||busy||previous.length===0} onClick={()=>move(previous[previous.length-1]!,previous.slice(0,-1))}>{message('上一页')}</button><button type="button" disabled={locked||busy||page.next_before_id===null} onClick={()=>move(page.next_before_id!,[...previous,before])}>{message('下一页')}</button></div>
   </>}
-  {busy&&<p role="status">正在读取提案来源…</p>}
+  {busy&&<p role="status">{message('正在读取提案来源…')}</p>}
   {detail&&<div style={textStyle}>
    <h5>{detail.summary}</h5><p>{detail.rationale}</p>
-   <dl><dt>原任务 / 角色版本</dt><dd>v{detail.task_version} / v{detail.role.version} · 权限修订 {detail.role.capability_epoch}</dd><dt>原执行批次 / 运行</dt><dd>{detail.occurrence_id} / {detail.run_id}</dd><dt>PRD 绑定 / 原文 SHA-256</dt><dd>{detail.source.binding_id} / {detail.source.content_sha256}</dd><dt>提案 SHA-256</dt><dd>{detail.sha256}</dd><dt>原账本 SHA-256</dt><dd>{detail.ledger_sha256}</dd></dl>
-   {detail.research_evidence&&<details><summary>本批研究资料读取回执 {detail.research_evidence.length} 项</summary><p>回执指向原执行记录，研究结论沿原计划审阅。</p><PrdTextPreview content={JSON.stringify(detail.research_evidence,null,2)} label="研究资料回执" style={textStyle}/></details>}
-   <PrdTextPreview content={changes} label="文件计划提案步骤" style={textStyle}/>
-   <details open={ledgerOpen} onToggle={event=>setLedgerOpen(event.currentTarget.open)}><summary>本次冻结的子任务账本</summary>{ledgerOpen&&<PrdTextPreview content={ledger} label="文件计划原账本" style={textStyle}/>}</details>
-   {!accepted&&(task.version!==detail.task_version||!['active','budget_exhausted'].includes(task.status))&&<p role="status">当前任务状态或版本与提案不匹配，请由原任务在有效执行批次重新提交计划。</p>}
-   {acceptance.loading&&<p role="status">正在核对原确认记录…</p>}
-   {acceptance.error&&<p className="wb-error" role="alert">{prdMessage(acceptance.error)} <button type="button" disabled={locked||busy} onClick={acceptance.reload}>重新读取确认记录</button></p>}
-   {accepted?<p role="status">已有提案确认记录 {accepted.acceptance_id} · SHA-256 {accepted.sha256}。可继续核对工作循环、规划交接、快照及准入记录。</p>:<label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked||busy||!canAccept} onChange={event=>setConfirmed(event.target.checked)}/>我已核对固定原文、文件路径、步骤和原账本，确认保存本提案的核对记录。</label>}
+   <dl><dt>{message('原任务 / 角色版本')}</dt><dd>v{detail.task_version} / v{detail.role.version}{t(' · 权限修订 ',' · Capability Epoch ')}{detail.role.capability_epoch}</dd><dt>{message('原执行批次 / 运行')}</dt><dd>{detail.occurrence_id} / {detail.run_id}</dd><dt>{message('PRD 绑定 / 原文 SHA-256')}</dt><dd>{detail.source.binding_id} / {detail.source.content_sha256}</dd><dt>{message('提案 SHA-256')}</dt><dd>{detail.sha256}</dd><dt>{message('原账本 SHA-256')}</dt><dd>{detail.ledger_sha256}</dd></dl>
+   {detail.research_evidence&&<details><summary>{t(`本批研究资料读取回执 ${detail.research_evidence.length} 项`,`${detail.research_evidence.length} Research Source Read Receipts for This Batch`)}</summary><p>{message('回执指向原执行记录，研究结论沿原计划审阅。')}</p><PrdTextPreview content={JSON.stringify(detail.research_evidence,null,2)} label={message('研究资料回执')} style={textStyle}/></details>}
+   <PrdTextPreview content={changes} label={message('文件计划提案步骤')} style={textStyle}/>
+   <details open={ledgerOpen} onToggle={event=>setLedgerOpen(event.currentTarget.open)}><summary>{message('本次冻结的子任务账本')}</summary>{ledgerOpen&&<PrdTextPreview content={ledger} label={message('文件计划原账本')} style={textStyle}/>}</details>
+   {!accepted&&(task.version!==detail.task_version||!['active','budget_exhausted'].includes(task.status))&&<p role="status">{message('当前任务状态或版本与提案不匹配，请由原任务在有效执行批次重新提交计划。')}</p>}
+   {acceptance.loading&&<p role="status">{message('正在核对原确认记录…')}</p>}
+   {acceptance.error&&<p className="wb-error" role="alert">{message(prdMessage(acceptance.error))} <button type="button" disabled={locked||busy} onClick={acceptance.reload}>{message('重新读取确认记录')}</button></p>}
+   {accepted?<p role="status">{t('已有提案确认记录 ','Existing Proposal Confirmation Record ')}{accepted.acceptance_id} · SHA-256 {accepted.sha256}{t('。可继续核对工作循环、规划交接、快照及准入记录。','. Continue Reviewing Work Cycle, Planning Handoff, Snapshot and Admission Records.')}</p>:<label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked||busy||!canAccept} onChange={event=>setConfirmed(event.target.checked)}/>{message('我已核对固定原文、文件路径、步骤和原账本，确认保存本提案的核对记录。')}</label>}
   </div>}
-  {(detail||save.pending)&&<button type="button" disabled={save.busy||(!save.pending&&(locked||busy||!canAccept||!confirmed))} onClick={()=>void accept()}>{save.busy?'正在保存确认记录…':save.pending?'重试原提案确认回执':'确认文件计划提案'}</button>}
-  {save.pending&&<p role="status">提案确认结果待核对，已保留原请求及 key。请重试原回执。</p>}
-  {receipt&&!detail&&<p role="status" style={textStyle}>原提案确认回执已恢复 {receipt.acceptance_id} · {receipt.sha256}。</p>}
+  {(detail||save.pending)&&<button type="button" disabled={save.busy||(!save.pending&&(locked||busy||!canAccept||!confirmed))} onClick={()=>void accept()}>{message(save.busy?'正在保存确认记录…':save.pending?'重试原提案确认回执':'确认文件计划提案')}</button>}
+  {save.pending&&<p role="status">{message('提案确认结果待核对，已保留原请求及 key。请重试原回执。')}</p>}
+  {receipt&&!detail&&<p role="status" style={textStyle}>{t('原提案确认回执已恢复 ','Original Proposal Confirmation Receipt Restored ')}{receipt.acceptance_id} · {receipt.sha256}{t('。','.')}</p>}
   <TaskPrdWorkCycle taskId={taskId} plan={detail} acceptance={accepted||null} locked={locked||busy} ready={ready} save={cycleSave} handoffSave={handoffSave} prepareSave={prepareSave} grantSave={grantSave} admitSave={admitSave} onStateChange={onStateChange}/>
-  {error&&<p className="wb-error" role="alert">{error}</p>}
+  {error&&<p className="wb-error" role="alert">{message(error)}</p>}
  </details>;
 }

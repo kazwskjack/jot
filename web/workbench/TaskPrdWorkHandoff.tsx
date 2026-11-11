@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
+import {taskUiMessage} from './task-ui-messages';
 import React,{useEffect,useState} from 'react';
 import {request} from '../jot/client';
 import {useResource} from './useResource';
@@ -8,6 +10,8 @@ import type {TaskPrdWorkCycle,TaskPrdWorkHandoffRequest,TaskPrdWorkHandoffReceip
 export default function TaskPrdWorkHandoff({taskId,planId,cycle,acceptanceHash,locked,save,onStateChange}:{
  taskId:string;planId:string|null;cycle:TaskPrdWorkCycle|null;acceptanceHash:string|null;locked:boolean;save:TaskSaveReceipt;onStateChange:()=>void;
 }){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const message=(value:string)=>taskUiMessage(value,language);
  const [confirmed,setConfirmed]=useState(false),[error,setError]=useState(''),[receipt,setReceipt]=useState<TaskPrdWorkHandoffReceipt|null>(null);
  const identity=`${taskId}:${planId??''}:${cycle?.cycle_id??''}`;
  const resource=useResource(async signal=>{
@@ -40,20 +44,20 @@ export default function TaskPrdWorkHandoff({taskId,planId,cycle,acceptanceHash,l
   finally{onStateChange();}
  }
  if(!cycle&&!save.pending&&!receipt)return null;
- return <section aria-label="原规划运行交接">
-  <h5>原规划运行交接</h5>
-  <p className="wb-hint">此操作取消原规划运行，保留原任务、规划账本和累计预算。后续工作仍须通过原生空闲、容量、费用和路径准入。</p>
-  <button type="button" disabled={locked||resource.loading} onClick={()=>{setConfirmed(false);resource.reload();}}>读取原交接记录</button>
-  {resource.loading&&<p role="status">正在读取原规划与取消命令…</p>}
-  {resource.error&&<p className="wb-error" role="alert">{prdMessage(resource.error)}</p>}
-  {run&&<p role="status" style={{overflowWrap:'anywhere'}}>原规划 {run.run_id} · {run.status} · v{run.version}</p>}
-  {state&&!state.available&&<p role="status">原生工作运行配置尚未就绪。</p>}
-  {state?.requested&&<p role="status">{state.settled?'原取消命令及当前执行、费用记录已确认。':'原取消命令或当前执行、费用记录待确认。'} {state.command_id}</p>}
-  {state?.reasons.length? <ul>{state.reasons.map(reason=><li key={reason}>{prdMessage(reason)}</li>)}</ul>:null}
-  {canRequest&&<label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked} onChange={event=>setConfirmed(event.target.checked)}/>确认以取消原规划运行的方式交接，并等待原生取消及费用回执。</label>}
-  {(canRequest||save.pending)&&<button type="button" disabled={save.busy||(!save.pending&&(locked||!confirmed||resource.loading||!!resource.error))} onClick={()=>void submit()}>{save.busy?'正在保存原取消请求…':save.pending?'重试原交接请求回执':'收束原规划运行'}</button>}
-  {save.pending&&<p role="status">原请求及 key 已保留，请重试原回执。</p>}
-  {receipt&&<p role="status" style={{overflowWrap:'anywhere'}}>已记录原取消请求 {receipt.command_id}，原生结果以交接记录为准。</p>}
-  {error&&<p className="wb-error" role="alert">{error}</p>}
+ return <section lang={language} aria-label={message('原规划运行交接')}>
+  <h5>{message('原规划运行交接')}</h5>
+  <p className="wb-hint">{message('此操作取消原规划运行，保留原任务、规划账本和累计预算。后续工作仍须通过原生空闲、容量、费用和路径准入。')}</p>
+  <button type="button" disabled={locked||resource.loading} onClick={()=>{setConfirmed(false);resource.reload();}}>{message('读取原交接记录')}</button>
+  {resource.loading&&<p role="status">{message('正在读取原规划与取消命令…')}</p>}
+  {resource.error&&<p className="wb-error" role="alert">{message(prdMessage(resource.error))}</p>}
+  {run&&<p role="status" style={{overflowWrap:'anywhere'}}>{t('原规划 ','Original Planning Run ')}{run.run_id} · {run.status} · v{run.version}</p>}
+  {state&&!state.available&&<p role="status">{message('原生工作运行配置尚未就绪。')}</p>}
+  {state?.requested&&<p role="status">{message(state.settled?'原取消命令及当前执行、费用记录已确认。':'原取消命令或当前执行、费用记录待确认。')} {state.command_id}</p>}
+  {state?.reasons.length? <ul>{state.reasons.map(reason=><li key={reason}>{message(prdMessage(reason))}</li>)}</ul>:null}
+  {canRequest&&<label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked} onChange={event=>setConfirmed(event.target.checked)}/>{message('确认以取消原规划运行的方式交接，并等待原生取消及费用回执。')}</label>}
+  {(canRequest||save.pending)&&<button type="button" disabled={save.busy||(!save.pending&&(locked||!confirmed||resource.loading||!!resource.error))} onClick={()=>void submit()}>{message(save.busy?'正在保存原取消请求…':save.pending?'重试原交接请求回执':'收束原规划运行')}</button>}
+  {save.pending&&<p role="status">{message('原请求及 key 已保留，请重试原回执。')}</p>}
+  {receipt&&<p role="status" style={{overflowWrap:'anywhere'}}>{t('已记录原取消请求 ','Original Cancellation Request Recorded ')}{receipt.command_id}{t('，原生结果以交接记录为准。','; Handoff Records Determine the Native Outcome.')}</p>}
+  {error&&<p className="wb-error" role="alert">{message(error)}</p>}
  </section>;
 }

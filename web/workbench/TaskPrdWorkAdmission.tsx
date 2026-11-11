@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
+import {taskUiMessage} from './task-ui-messages';
 import React,{useEffect,useState} from 'react';
 import {request} from '../jot/client';
 import {useResource} from './useResource';
@@ -13,6 +15,8 @@ function checked(value:TaskPrdWorkAdmissionReceipt,taskId:string,body:TaskPrdWor
 export default function TaskPrdWorkAdmission({taskId,planId,grant,ready,locked,save,onStateChange}:{
  taskId:string;planId:string|null;grant:TaskPrdWorkGrant|null;ready:boolean;locked:boolean;save:TaskSaveReceipt;onStateChange:()=>void;
 }){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const message=(value:string)=>taskUiMessage(value,language);
  const [confirmed,setConfirmed]=useState(false),[error,setError]=useState(''),[receipt,setReceipt]=useState<TaskPrdWorkAdmissionReceipt|null>(null);
  const identity=`${taskId}:${planId??''}:${grant?.grant_id??''}`;
  const resource=useResource(async signal=>{
@@ -39,20 +43,20 @@ export default function TaskPrdWorkAdmission({taskId,planId,grant,ready,locked,s
   finally{onStateChange();}
  }
  if(!grant&&!save.pending&&!receipt)return null;
- return <section aria-label="原 Worker 工作准入">
-  <h5>原 Worker 工作准入</h5>
-  <p className="wb-hint">确认后由现有 Worker 持续核对快照字节、原生空闲、容量、原任务次数及累计预算。条件满足后创建原任务工作批次，页面请求回执只记录已受理。</p>
-  <button type="button" disabled={locked||resource.loading||!grant} onClick={()=>resource.reload()}>读取原准入状态</button>
-  {resource.loading&&<p role="status">正在读取准入记录…</p>}
-  {resource.error&&<p role="alert">{prdMessage(resource.error)}</p>}
-  {state&&!state.available&&<p role="status">原生工作配置尚未就绪。</p>}
-  {state?.request&&<p role="status">已受理 grant {state.request.grant_id} 的准入请求。</p>}
-  {state?.reason&&<p role="status">{prdMessage(state.reason)}</p>}
-  {state?.admission&&<p role="status">原工作批次 {state.admission.occurrence_id} · 运行 {state.admission.run_id}。执行结果沿原任务记录更新。</p>}
-  {ready&&state?.available&&!state.request&&<label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked} onChange={event=>setConfirmed(event.target.checked)}/>确认由原 Worker 在上述条件满足后启动此 grant 对应的原任务工作批次。</label>}
-  {(ready&&state?.available&&!state.request||save.pending)&&<button type="button" disabled={save.busy||(!save.pending&&(locked||!confirmed||resource.loading||!!resource.error))} onClick={()=>void submit()}>{save.busy?'正在保存准入请求…':save.pending?'重试原准入回执':'请求原 Worker 准入'}</button>}
-  {save.pending&&<p role="status">请求及 key 已保留，请重试原回执。</p>}
-  {receipt&&<p role="status">已保存准入请求 {receipt.grant_id}。</p>}
-  {error&&<p role="alert">{error}</p>}
+ return <section lang={language} aria-label={message('原 Worker 工作准入')}>
+  <h5>{message('原 Worker 工作准入')}</h5>
+  <p className="wb-hint">{message('确认后由现有 Worker 持续核对快照字节、原生空闲、容量、原任务次数及累计预算。条件满足后创建原任务工作批次，页面请求回执只记录已受理。')}</p>
+  <button type="button" disabled={locked||resource.loading||!grant} onClick={()=>resource.reload()}>{message('读取原准入状态')}</button>
+  {resource.loading&&<p role="status">{message('正在读取准入记录…')}</p>}
+  {resource.error&&<p role="alert">{message(prdMessage(resource.error))}</p>}
+  {state&&!state.available&&<p role="status">{message('原生工作配置尚未就绪。')}</p>}
+  {state?.request&&<p role="status">{t('已受理 grant ','Admission Request Accepted for Grant ')}{state.request.grant_id}{t(' 的准入请求。','.')}</p>}
+  {state?.reason&&<p role="status">{message(prdMessage(state.reason))}</p>}
+  {state?.admission&&<p role="status">{t('原工作批次 ','Original Work Occurrence ')}{state.admission.occurrence_id}{t(' · 运行 ',' · Run ')}{state.admission.run_id}{t('。执行结果沿原任务记录更新。','. Execution Results Update Through Original Task Records.')}</p>}
+  {ready&&state?.available&&!state.request&&<label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked} onChange={event=>setConfirmed(event.target.checked)}/>{message('确认由原 Worker 在上述条件满足后启动此 grant 对应的原任务工作批次。')}</label>}
+  {(ready&&state?.available&&!state.request||save.pending)&&<button type="button" disabled={save.busy||(!save.pending&&(locked||!confirmed||resource.loading||!!resource.error))} onClick={()=>void submit()}>{message(save.busy?'正在保存准入请求…':save.pending?'重试原准入回执':'请求原 Worker 准入')}</button>}
+  {save.pending&&<p role="status">{message('请求及 key 已保留，请重试原回执。')}</p>}
+  {receipt&&<p role="status">{t('已保存准入请求 ','Admission Request Saved ')}{receipt.grant_id}{t('。','.')}</p>}
+  {error&&<p role="alert">{message(error)}</p>}
  </section>;
 }

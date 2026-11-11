@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
+import {taskUiMessage} from './task-ui-messages';
 import TaskPrdWorkAdmission from './TaskPrdWorkAdmission';
 import React,{useEffect,useState} from 'react';
 import {request} from '../jot/client';
@@ -24,6 +26,8 @@ function checkedGrant(value:TaskPrdWorkGrant,taskId:string,planId:string,cycleId
 export default function TaskPrdWorkResources({taskId,planId,cycle,acceptanceHash,locked,prepareSave,grantSave,admitSave,onStateChange}:{
  taskId:string;planId:string|null;cycle:TaskPrdWorkCycle|null;acceptanceHash:string|null;locked:boolean;prepareSave:TaskSaveReceipt;grantSave:TaskSaveReceipt;admitSave:TaskSaveReceipt;onStateChange:()=>void;
 }){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const message=(value:string)=>taskUiMessage(value,language);
  const [copyConfirmed,setCopyConfirmed]=useState(false),[grantConfirmed,setGrantConfirmed]=useState(false),[error,setError]=useState('');
  const [preparedReceipt,setPreparedReceipt]=useState<TaskPrdWorkPreparation|null>(null),[grantReceipt,setGrantReceipt]=useState<TaskPrdWorkGrant|null>(null);
  const identity=`${taskId}:${planId??''}:${cycle?.cycle_id??''}`;
@@ -68,29 +72,29 @@ export default function TaskPrdWorkResources({taskId,planId,cycle,acceptanceHash
   finally{onStateChange();}
  }
  if(!cycle&&!prepareSave.pending&&!grantSave.pending&&!admitSave.pending&&!preparedReceipt&&!grantReceipt)return null;
- return <section aria-label="原工作快照与路径范围" style={{overflowWrap:'anywhere'}}>
-  <h5>原工作快照与路径范围</h5>
-  <p className="wb-hint">先核对规划交接与费用记录，再准备原逻辑文件快照并确认路径范围。实际执行时仍会核对快照字节、原生空闲、容量和累计预算。</p>
-  <button type="button" disabled={locked||resource.loading} onClick={()=>{setCopyConfirmed(false);setGrantConfirmed(false);resource.reload();}}>读取原快照与 grant</button>
-  {resource.loading&&<p role="status">正在读取原资源记录…</p>}
-  {resource.error&&<p className="wb-error" role="alert">{prdMessage(resource.error)}</p>}
-  {state&&!state.available&&<p role="status">原生工作快照配置尚未就绪。</p>}
-  {state?.preparation_uncertain&&<p role="status">原准备结果待核对。重试将沿原 journal 恢复，无法确认的状态继续保留。</p>}
-  {state?.reasons.length? <ul>{state.reasons.map(reason=><li key={reason}>{prdMessage(reason)}</li>)}</ul>:null}
-  {editable&&!review&&<label className="wb-checkbox"><input type="checkbox" checked={copyConfirmed} disabled={locked||!!state?.reasons.length} onChange={event=>setCopyConfirmed(event.target.checked)}/>确认读取原项目逻辑文件，并准备隔离工作快照。</label>}
-  {(editable&&!review||prepareSave.pending)&&<button type="button" disabled={prepareSave.busy||(!prepareSave.pending&&(locked||!copyConfirmed||!!state?.reasons.length))} onClick={()=>void prepare()}>{prepareSave.busy?'正在准备原快照…':prepareSave.pending?'重试原快照回执':'准备原工作快照'}</button>}
+ return <section lang={language} aria-label={message('原工作快照与路径范围')} style={{overflowWrap:'anywhere'}}>
+  <h5>{message('原工作快照与路径范围')}</h5>
+  <p className="wb-hint">{message('先核对规划交接与费用记录，再准备原逻辑文件快照并确认路径范围。实际执行时仍会核对快照字节、原生空闲、容量和累计预算。')}</p>
+  <button type="button" disabled={locked||resource.loading} onClick={()=>{setCopyConfirmed(false);setGrantConfirmed(false);resource.reload();}}>{message('读取原快照与 grant')}</button>
+  {resource.loading&&<p role="status">{message('正在读取原资源记录…')}</p>}
+  {resource.error&&<p className="wb-error" role="alert">{message(prdMessage(resource.error))}</p>}
+  {state&&!state.available&&<p role="status">{message('原生工作快照配置尚未就绪。')}</p>}
+  {state?.preparation_uncertain&&<p role="status">{message('原准备结果待核对。重试将沿原 journal 恢复，无法确认的状态继续保留。')}</p>}
+  {state?.reasons.length? <ul>{state.reasons.map(reason=><li key={reason}>{message(prdMessage(reason))}</li>)}</ul>:null}
+  {editable&&!review&&<label className="wb-checkbox"><input type="checkbox" checked={copyConfirmed} disabled={locked||!!state?.reasons.length} onChange={event=>setCopyConfirmed(event.target.checked)}/>{message('确认读取原项目逻辑文件，并准备隔离工作快照。')}</label>}
+  {(editable&&!review||prepareSave.pending)&&<button type="button" disabled={prepareSave.busy||(!prepareSave.pending&&(locked||!copyConfirmed||!!state?.reasons.length))} onClick={()=>void prepare()}>{message(prepareSave.busy?'正在准备原快照…':prepareSave.pending?'重试原快照回执':'准备原工作快照')}</button>}
   {review&&<>
-   <p role="status">快照 {review.snapshot_id} · {review.file_count} 个文件 · {review.total_bytes} 字节</p>
-   <dl><dt>来源 / manifest SHA-256</dt><dd>{review.source_sha256} / {review.manifest_sha256}</dd><dt>核对 SHA-256</dt><dd>{review.review_sha256}</dd><dt>原角色版本 / 权限修订</dt><dd>{review.role_version} / {review.role_epoch}</dd></dl>
+   <p role="status">{t('快照 ','Snapshot ')}{review.snapshot_id} · {review.file_count}{t(' 个文件 · ',' Files · ')}{review.total_bytes}{t(' 字节',' Bytes')}</p>
+   <dl><dt>{message('来源 / manifest SHA-256')}</dt><dd>{review.source_sha256} / {review.manifest_sha256}</dd><dt>{message('核对 SHA-256')}</dt><dd>{review.review_sha256}</dd><dt>{message('原角色版本 / 权限修订')}</dt><dd>{review.role_version} / {review.role_epoch}</dd></dl>
    <ul>{review.paths.map(path=><li key={path}>{path}</li>)}</ul>
-   {!grant&&editable&&<label className="wb-checkbox"><input type="checkbox" checked={grantConfirmed} disabled={locked} onChange={event=>setGrantConfirmed(event.target.checked)}/>已核对原快照、校验哈希及以上全部路径，确认保存原 grant。</label>}
+   {!grant&&editable&&<label className="wb-checkbox"><input type="checkbox" checked={grantConfirmed} disabled={locked} onChange={event=>setGrantConfirmed(event.target.checked)}/>{message('已核对原快照、校验哈希及以上全部路径，确认保存原 grant。')}</label>}
   </>}
-  {(editable&&!!review&&!grant||grantSave.pending)&&<button type="button" disabled={grantSave.busy||(!grantSave.pending&&(locked||!grantConfirmed))} onClick={()=>void authorize()}>{grantSave.busy?'正在保存原 grant…':grantSave.pending?'重试原 grant 回执':'确认原路径范围'}</button>}
-  {grant&&<p role="status">原 grant {grant.grant_id} · SHA-256 {grant.grant_sha256}。</p>}
-  {(prepareSave.pending||grantSave.pending)&&<p role="status">原请求及 key 已保留，请重试对应原回执。</p>}
-  {preparedReceipt&&<p role="status">原准备回执 {preparedReceipt.snapshot_id} · {preparedReceipt.review_sha256}</p>}
-  {grantReceipt&&<p role="status">原 grant 回执 {grantReceipt.grant_id} · {grantReceipt.grant_sha256}</p>}
+  {(editable&&!!review&&!grant||grantSave.pending)&&<button type="button" disabled={grantSave.busy||(!grantSave.pending&&(locked||!grantConfirmed))} onClick={()=>void authorize()}>{message(grantSave.busy?'正在保存原 grant…':grantSave.pending?'重试原 grant 回执':'确认原路径范围')}</button>}
+  {grant&&<p role="status">{t('原 grant ','Original Grant ')}{grant.grant_id} · SHA-256 {grant.grant_sha256}{t('。','.')}</p>}
+  {(prepareSave.pending||grantSave.pending)&&<p role="status">{message('原请求及 key 已保留，请重试对应原回执。')}</p>}
+  {preparedReceipt&&<p role="status">{t('原准备回执 ','Original Preparation Receipt ')}{preparedReceipt.snapshot_id} · {preparedReceipt.review_sha256}</p>}
+  {grantReceipt&&<p role="status">{t('原 grant 回执 ','Original Grant Receipt ')}{grantReceipt.grant_id} · {grantReceipt.grant_sha256}</p>}
   <TaskPrdWorkAdmission taskId={taskId} planId={planId} grant={grant??null} ready={cycle?.state==='open'} locked={locked} save={admitSave} onStateChange={onStateChange}/>
-  {error&&<p className="wb-error" role="alert">{error}</p>}
+  {error&&<p className="wb-error" role="alert">{message(error)}</p>}
  </section>;
 }
