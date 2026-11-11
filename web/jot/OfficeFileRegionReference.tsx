@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import React,{useContext,useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
 import {FileTextReferenceContext,nativeReferenceIdentity,type FileReferenceIdentity,fileRegionCapture,type FileRegionDraft,type OfficeRegionFocus,type OfficeRegionView} from './FileTextReferences';
@@ -27,6 +29,7 @@ function originalFocus(focus:OfficeRegionFocus|undefined,source:FileReferenceIde
 }
 
 export default function OfficeFileRegionReference({source,owner,session,focus,kind}:{source:FileReferenceIdentity;owner:string;session:OfficeRegionSession;focus?:OfficeRegionFocus;kind:'docx'|'pptx'|'xlsx'}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const label=kind==='docx'?'Word':kind==='pptx'?'幻灯片':'工作表',positionLabel=kind==='docx'?'Word分段':kind==='pptx'?'幻灯片':'工作表视口';
  const context=useContext(FileTextReferenceContext),latest=useRef(context);latest.current=context;
  const identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,nativeReferenceIdentity(source.native_source),focus?.key]);
@@ -99,12 +102,13 @@ export default function OfficeFileRegionReference({source,owner,session,focus,ki
    job.current=undefined;startCapture.current=()=>{};window.removeEventListener('message',message);
   };
  },[identity,session,kind]);
- return <section aria-label={`${label}区域截图引用`}>
-  {!context?.regionRenderers?.includes(kind)&&<p role="status">当前服务尚未声明{label}截图的固定图片输入能力。</p>}
-  {focus&&<p role="status">{confirmed===true?`已核对原${positionLabel}尺寸并标记原截图区域。`:confirmed===false?`原截图区域尚未与当前${positionLabel}尺寸核对，请对照原PNG引用。`:`正在核对原${positionLabel}尺寸…`}</p>}
-  {notice&&<p role="status">{notice}</p>}
-  {selection&&<p>{positionLabel} {'section' in selection.view?selection.view.section:'slideNumber' in selection.view?selection.view.slideNumber:selection.view.sheetName} 区域 · 宽 {(selection.rect.width*100).toFixed(1)}% · 高 {(selection.rect.height*100).toFixed(1)}%</p>}
-  <button type="button" disabled={disabled||!ready||!selection||phase!=='idle'} onClick={()=>startCapture.current()}>生成截图并引用到当前对话</button>
-  {(phase==='capture'||phase==='png')&&<button type="button" onClick={()=>session.close(`${label}截图已取消，请重新读取视觉内容。`)}>取消截图并关闭查看器</button>}
+ const displayLabel=kind==='docx'?'Word':kind==='pptx'?'Slide':'Sheet',displayPosition=kind==='docx'?'Word section':kind==='pptx'?'slide':'sheet viewport';
+ return <section lang={language} aria-label={t(`${label}区域截图引用`,`${displayLabel} Region Screenshot Reference`)}>
+  {!context?.regionRenderers?.includes(kind)&&<p role="status">{t(`当前服务尚未声明${label}截图的固定图片输入能力。`,`The current service has not declared pinned-image input support for ${displayLabel} screenshots.`)}</p>}
+  {focus&&<p role="status">{confirmed===true?t(`已核对原${positionLabel}尺寸并标记原截图区域。`,`The original ${displayPosition} dimensions were verified and the original screenshot region was marked.`):confirmed===false?t(`原截图区域尚未与当前${positionLabel}尺寸核对，请对照原PNG引用。`,`The original screenshot region has not been verified against the current ${displayPosition} dimensions. Compare with the original PNG reference.`):t(`正在核对原${positionLabel}尺寸…`,`Verifying original ${displayPosition} dimensions…`)}</p>}
+  {notice&&<p role="status">{conversationUiError(notice,language)}</p>}
+  {selection&&<p>{t(positionLabel,displayPosition)} {'section' in selection.view?selection.view.section:'slideNumber' in selection.view?selection.view.slideNumber:selection.view.sheetName} {t('区域','Region')} · {t('宽','Width')} {(selection.rect.width*100).toFixed(1)}% · {t('高','Height')} {(selection.rect.height*100).toFixed(1)}%</p>}
+  <button type="button" disabled={disabled||!ready||!selection||phase!=='idle'} onClick={()=>startCapture.current()}>{t('生成截图并引用到当前对话','Generate Screenshot and Reference in This Chat')}</button>
+  {(phase==='capture'||phase==='png')&&<button type="button" onClick={()=>session.close(`${label}截图已取消，请重新读取视觉内容。`)}>{t('取消截图并关闭查看器','Cancel Screenshot and Close Viewer')}</button>}
  </section>;
 }

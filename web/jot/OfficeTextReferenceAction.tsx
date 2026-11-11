@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 // Selection lifecycle adapted from PdfFileTextReferenceAction.tsx and its retained PilotDeck source.
 // Adapted portions retain GNU AGPL v3 terms.
 // Complete license retained at packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt
@@ -43,6 +45,7 @@ function selectionReferences(root:HTMLElement,range:Range,view:OfficeTextView,so
 
 type Action={identity:string;range:Range;references:FileTextReference[];top:number;left:number};
 export default function OfficeTextReferenceAction({root,source,view}:{root:RefObject<HTMLElement|null>;source:FileReferenceIdentity;view:OfficeTextView}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const context=useContext(FileTextReferenceContext),current=useRef(context);current.current=context;
  const owner=taskDraftScope(),button=useRef<HTMLButtonElement>(null);
  const identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,source.native_source,view.kind]);
@@ -79,5 +82,5 @@ export default function OfficeTextReferenceAction({root,source,view}:{root:RefOb
   const added=target.onAddMany?target.onAddMany(references):references.length===1&&target.onAdd(references[0]);
   if(added){window.getSelection()?.removeAllRanges();setAction(undefined);}else setNotice('文字引用尚未保存，请检查草稿状态或缩小选区。');
  };
- return <>{notice&&<p role="alert">{notice}</p>}{action&&!disabled&&createPortal(<button ref={button} type="button" className="jot-assistant-quote-action" style={{top:action.top,left:action.left}} onPointerDown={event=>event.preventDefault()} onMouseDown={event=>event.preventDefault()} onClick={commit}>引用Office文字到当前对话</button>,window.document.body)}</>;
+ return <>{notice&&<p lang={language} role="alert">{conversationUiError(notice,language)}</p>}{action&&!disabled&&createPortal(<button lang={language} aria-label={t("引用Office文字到当前对话","Quote Office Text in This Chat")} ref={button} type="button" className="jot-assistant-quote-action" style={{top:action.top,left:action.left}} onPointerDown={event=>event.preventDefault()} onMouseDown={event=>event.preventDefault()} onClick={commit}>{t("引用Office文字到当前对话","Quote Office Text")}</button>,window.document.body)}</>;
 }

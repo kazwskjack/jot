@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import React,{useContext,useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
 import {FileTextReferenceContext,nativeReferenceIdentity,type FileReferenceIdentity,type FileCellReference,type OfficeCellFocus} from './FileTextReferences';
@@ -34,6 +36,7 @@ function originalFocus(focus:OfficeCellFocus|undefined,source:FileReferenceIdent
 }
 
 export default function XlsxCellReferences({source,owner,session,focus}:{source:FileReferenceIdentity;owner:string;session:OfficeRegionSession;focus?:OfficeCellFocus}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const context=useContext(FileTextReferenceContext),latest=useRef(context);latest.current=context;
  const identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,nativeReferenceIdentity(source.native_source),focus?.key]);
  const [proposal,setProposal]=useState<Proposal>(),selected=useRef<Proposal|undefined>(undefined),pending=useRef<Proposal|undefined>(undefined);
@@ -81,11 +84,11 @@ export default function XlsxCellReferences({source,owner,session,focus}:{source:
   };
   return()=>{active=false;window.clearTimeout(timer.current);pending.current=undefined;selected.current=undefined;commit.current=()=>{};window.removeEventListener('message',receive);};
  },[session,identity,owner]);
- return <section aria-label="原生单元格引用确认">
-  {!context?.cellViews?.includes(2)&&<p role="status">当前服务尚未声明原生单元格视图引用能力。</p>}
-  {focus&&<p role="status">{confirmed===true?'已核对原生选区快照，可在查看器中逐项定位原选区。':confirmed===false?'原生选区显示值、原值或公式尚未与保存快照核对，请对照原引用。':'正在核对原生选区快照…'}</p>}
-  {notice&&<p role="status">{notice}</p>}
-  {proposal&&<><p>{proposal.selection.sheetName} · {proposal.selection.ranges.join('、')} · 原生视图 2</p><details><summary>待引用的显示值、原值及公式</summary><pre>{JSON.stringify(proposal.value.reference,null,2)}</pre></details>
-   <button type="button" disabled={disabled||!ready||committing} onClick={()=>commit.current()}>核对并引用到当前对话</button></>}
+ return <section lang={language} aria-label={t("原生单元格引用确认","Native Cell Reference Confirmation")}>
+  {!context?.cellViews?.includes(2)&&<p role="status">{t('当前服务尚未声明原生单元格视图引用能力。','The current service has not declared native cell-view reference support.')}</p>}
+  {focus&&<p role="status">{confirmed===true?t('已核对原生选区快照，可在查看器中逐项定位原选区。','The native selection snapshot was verified. Locate original selections individually in the viewer.'):confirmed===false?t('原生选区显示值、原值或公式尚未与保存快照核对，请对照原引用。','Native selection display values, original values or formulas have not been verified against the saved snapshot. Compare with the original reference.'):t('正在核对原生选区快照…','Verifying native selection snapshot…')}</p>}
+  {notice&&<p role="status">{conversationUiError(notice,language)}</p>}
+  {proposal&&<><p>{proposal.selection.sheetName} · {proposal.selection.ranges.join('、')} · {t('原生视图 2','Native View 2')}</p><details><summary>{t('待引用的显示值、原值及公式','Display Values, Original Values and Formulas to Reference')}</summary><pre>{JSON.stringify(proposal.value.reference,null,2)}</pre></details>
+   <button type="button" disabled={disabled||!ready||committing} onClick={()=>commit.current()}>{t('核对并引用到当前对话','Verify and Reference in This Chat')}</button></>}
  </section>;
 }
