@@ -1,3 +1,5 @@
+import ToolResultTaskList from './ToolResultTaskList';
+import {toolResultTasks} from './tool-result-tasks';
 import React,{useCallback,useEffect,useId,useMemo,useRef,useState} from 'react';
 import {ApiError,taskDraftScope} from './client';
 import {readMcpResultContent,mcpInlinePayload,type McpResultSource,type McpResultContent as Content} from './mcp-result-content-client';
@@ -30,6 +32,8 @@ function BlockView({block,index,owner,documentId}:{block:unknown;index:number;ow
   return()=>{closed=true;if(url)URL.revokeObjectURL(url);if(image)URL.revokeObjectURL(image);if(audio)URL.revokeObjectURL(audio);};
  },[block,index,owner,revision]);
  const value=index>=0?object(block):undefined,resource=object(value?.resource),text=typeof value?.text==='string'?value.text:typeof resource?.text==='string'?resource.text:undefined;
+ const tasks=useMemo(()=>toolResultTasks(index<0?block:text??block),[block,index,text]);
+ const [taskMode,setTaskMode]=useState(index<0);
  const extensions:Record<string,string>={'image/png':'png','image/jpeg':'jpg','image/webp':'webp','audio/mpeg':'mp3','audio/wav':'wav','audio/ogg':'ogg','audio/flac':'flac','audio/x-wav':'wav','audio/aac':'aac'};
  return <section aria-label="已选原结果项">
   {state?.url&&<><p>{state.mime} · {state.size} 字节 · SHA-256 <code>{state.sha}</code></p>
@@ -39,7 +43,9 @@ function BlockView({block,index,owner,documentId}:{block:unknown;index:number;ow
    {state.image?<figure><img src={state.image} alt={`工具结果第${index+1}项`} style={{maxWidth:'100%',height:'auto'}} onError={()=>{URL.revokeObjectURL(state.image!);setState(current=>current?{...current,image:undefined}:current);}}/></figure>:<p>此文件可下载查看。</p>}
   </>}
   {state?.error&&<p role="alert">{state.error}<button type="button" onClick={()=>setRevision(value=>value+1)}>重新核对文件</button></p>}
-  {text!==undefined&&<PagedText text={text} identity={documentId+':text'}/>}
+  {tasks&&<button type="button" data-chat-search-ignore aria-pressed={taskMode} onClick={()=>setTaskMode(value=>!value)}>{taskMode?text!==undefined?'返回原始文字':'返回原始数据':'按任务清单查看'}</button>}
+  {tasks&&taskMode?<ToolResultTaskList value={tasks} documentId={documentId}/>:text!==undefined?<PagedText text={text} identity={documentId+':text'}/>:tasks&&<PagedText text={serialized(block)} identity={documentId+':original'}/>}
+
   <details><summary>此结果项原数据</summary><PagedText text={serialized(block)} identity={documentId+':data'}/></details>
  </section>;
 }
