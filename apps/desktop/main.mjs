@@ -1,3 +1,4 @@
+import {createDesktopHelp} from './desktop-help.mjs';
 import {createLinuxCaptionMenu} from './linux-caption-menu.mjs';
 import {createDesktopWindowChrome,windowChromeOptions} from './window-chrome.mjs';
 import {createDesktopCaptionMenu} from './caption-menu.mjs';
@@ -234,7 +235,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
    webPreferences:desktopWebPreferences(paths.preloadPath)
   });
   mainWindow=window;
-  let commandMenu=null,captionMenu=null,windowChrome=null,linuxCaptionMenu=null;
+  let commandMenu=null,captionMenu=null,windowChrome=null,linuxCaptionMenu=null,desktopHelp=null;
   const resetCommandMenu=()=>{captionMenu?.close();commandMenu?.reset();};
   const commandNavigationStarted=(_event,_url,inPlace,mainFrame)=>{if(mainFrame===true&&inPlace!==true)resetCommandMenu();};
   const syncNotificationPermission=()=>{
@@ -265,7 +266,8 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   window.webContents.on('did-finish-load',didFinishLoadHandler);
   window.webContents.on('render-process-gone',renderProcessGoneHandler);
   window.on('close',event=>{if(!shuttingDown&&tray&&!tray.isDestroyed()){event.preventDefault();window.hide();}});
-  commandMenu=createDesktopCommandMenu({Menu,getWindow:()=>mainWindow,appOrigin,restoreWindow,openNotificationSettings,requestQuit:()=>app.quit()});
+  desktopHelp=createDesktopHelp({app,owner:window,getWindow:()=>mainWindow,appOrigin,dialog,clipboard:electron.clipboard,shell:electron.shell,getReleaseId:()=>supervisorBootstrap?.scope?.releaseId??null,onError:report});
+  commandMenu=createDesktopCommandMenu({Menu,getWindow:()=>mainWindow,appOrigin,restoreWindow,openNotificationSettings,requestQuit:()=>app.quit(),help:action=>desktopHelp.run(action)});
   if(process.platform==='win32'||process.platform==='linux')window.setMenuBarVisibility(false);
   if(process.platform==='win32'||process.platform==='linux')captionMenu=createDesktopCaptionMenu({owner:window,getWindow:()=>mainWindow,appOrigin,Menu,getTemplate:()=>commandMenu.template(true),getCursor:typeof electron.screen?.getCursorScreenPoint==='function'?()=>electron.screen.getCursorScreenPoint():null});
   if(['win32','linux','darwin'].includes(process.platform))windowChrome=createDesktopWindowChrome({owner:window,getWindow:()=>mainWindow,appOrigin,getMenus:()=>commandMenu.template().map(item=>item.id).filter(id=>typeof id==='string')});
@@ -283,7 +285,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
     if(reset)captionMenu?.close();commandMenu.setState(value);
     if(reset)linuxCaptionMenu?.invalidate();else linuxCaptionMenu?.refresh();
    },
-   linuxCaptionMenu,
+   linuxCaptionMenu,readDesktopAbout:()=>desktopHelp.read(),
    readWindowChrome:windowChrome?()=>windowChrome.read():null,setWindowTheme:windowChrome?theme=>windowChrome.setTheme(theme):null,
    showCaptionMenu:captionMenu?value=>captionMenu.show(value):null,closeCaptionMenu:captionMenu?()=>captionMenu.close():null,
    selectFile:async()=>{
@@ -300,7 +302,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   const destroyWindow=()=>{
    if(recoveryTimer)clearTimeout(recoveryTimer);if(stableTimer)clearTimeout(stableTimer);
    window.off('focus',syncNotificationPermission);
-   linuxCaptionMenu?.dispose();windowChrome?.dispose();captionMenu?.dispose();commandMenu?.reset();window.webContents.off('did-start-navigation',commandNavigationStarted);
+   desktopHelp?.dispose();linuxCaptionMenu?.dispose();windowChrome?.dispose();captionMenu?.dispose();commandMenu?.reset();window.webContents.off('did-start-navigation',commandNavigationStarted);
    window.webContents.off('did-finish-load',didFinishLoadHandler);window.webContents.off('render-process-gone',renderProcessGoneHandler);
    window.webContents.off('will-navigate',denyNavigation);window.webContents.off('will-redirect',denyNavigation);
    window.webContents.session.off('will-download',downloadHandler);

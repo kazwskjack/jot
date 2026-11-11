@@ -4,7 +4,7 @@ import {assertTrustedDesktopSender,parseDesktopCommand,parseDesktopNotificationR
 const operationIdPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const updatePhases=new Set(['available','downloading','downloaded','verified','staged','awaiting-activation','activating','active','cancelled','failed','unknown']);
 
-export function registerDesktopIpcHandlers({ipcMain,appOrigin,getWindow,stateStore,notificationRuntime,readPermission,selectFile,updateLifecycle=null,setMenuState=null,showCaptionMenu=null,closeCaptionMenu=null,readWindowChrome=null,setWindowTheme=null,linuxCaptionMenu=null}={}){
+export function registerDesktopIpcHandlers({ipcMain,appOrigin,getWindow,stateStore,notificationRuntime,readPermission,selectFile,updateLifecycle=null,setMenuState=null,showCaptionMenu=null,closeCaptionMenu=null,readWindowChrome=null,setWindowTheme=null,linuxCaptionMenu=null,readDesktopAbout=null}={}){
  if(!ipcMain||typeof ipcMain.handle!=='function'||typeof ipcMain.removeHandler!=='function'||typeof getWindow!=='function'||
   !stateStore||typeof stateStore.read!=='function'||typeof stateStore.write!=='function'||!notificationRuntime||
   typeof readPermission!=='function'||typeof selectFile!=='function')throw new Error('desktop_ipc_configuration_invalid');
@@ -15,6 +15,7 @@ export function registerDesktopIpcHandlers({ipcMain,appOrigin,getWindow,stateSto
   assertTrustedDesktopSender({senderUrl:frame?.url,appOrigin,mainFrame:!!frame&&frame===main});
  };
  const routes=new Map([
+  ['desktop.about.read',async()=>{if(typeof readDesktopAbout!=='function')throw Error('desktop_about_unavailable');return readDesktopAbout();}],
   ['menu.caption.items',async(_event,payload)=>{if(!linuxCaptionMenu)throw Error('desktop_caption_unavailable');return linuxCaptionMenu.read(payload);}],
   ['menu.caption.activate',async(_event,payload)=>{if(!linuxCaptionMenu)throw Error('desktop_caption_unavailable');return linuxCaptionMenu.activate(payload);}],
   ['menu.caption.dismiss',async(_event,payload)=>{if(!linuxCaptionMenu)throw Error('desktop_caption_unavailable');return linuxCaptionMenu.dismiss(payload);}],

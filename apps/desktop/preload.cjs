@@ -76,6 +76,7 @@ ipcRenderer.on('desktop:window-chrome',(_event,value)=>{const state=windowChrome
 const invoke=(channel,payload)=>ipcRenderer.invoke(channel,payload);
 const bridge=Object.freeze({
  platform:process.platform,
+ getDesktopAbout:()=>invoke('desktop.about.read'),
  getWindowChrome:()=>invoke('window.chrome.read'),
  setWindowTheme:theme=>invoke('window.chrome.theme',{theme}),
  showCaptionMenu:value=>invoke('menu.caption.show',value),
