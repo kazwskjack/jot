@@ -1,0 +1,22 @@
+// Types adapt OpenBMB PilotDeck 783499ff lightAppearance; AGPL-3.0.
+export type ThemeMode='system'|'light'|'dark';
+export type LightPalette={accent:string;background:string};
+export type LightPreset='default'|'blue'|'mint'|'apricot'|'lavender'|'rose'|'custom';
+export type LightAppearance={version:2;preset:LightPreset;custom:LightPalette;background:{type:'solid'|'image';imageId:string|null;fit:'cover'|'contain';blur:number;brightness:number;saturation:number;positionX:number;positionY:number};transparency:number};
+export const LIGHT_PRESETS:Record<Exclude<LightPreset,'custom'>,LightPalette>;
+export const LIGHT_APPEARANCE_KEY:string;
+export const MIN_TRANSPARENCY:number,MAX_TRANSPARENCY:number,DEFAULT_TRANSPARENCY:number,MAX_BACKGROUND_BYTES:number,LIGHT_SURFACE:string;
+export function isHexColor(value:unknown):value is string;
+export function isImageId(value:unknown):value is string;
+export function normalizeLightAppearance(value?:unknown):LightAppearance;
+export function panelOpacities(value:LightAppearance):{sidebar:number;content:number};
+export function selectedPalette(value:LightAppearance):LightPalette;
+export function hasBackgroundImage(value:LightAppearance):boolean;
+export function withoutMissingImage(value:LightAppearance,missing:boolean):LightAppearance;
+export function isCustomizedLightAppearance(value:LightAppearance):boolean;
+export function mixColor(a:string,b:string,amount:number):string;
+export function luminance(color:string):number;
+export function contrast(a:string,b:string):number;
+export function hexToHsl(color:string):string;
+export function deriveLightColors(value:LightAppearance):LightPalette&{surface:string;sidebar:string;ink:string;sidebarInk:string;sidebarAccent:string;muted:string;strong:string;soft:string;border:string;sidebarOpacity:number;contentOpacity:number};
+export function deriveLightBackgrounds(value:LightAppearance,colors?:ReturnType<typeof deriveLightColors>):{backdrop:string;sidebar:string;content:string};

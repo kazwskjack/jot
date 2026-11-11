@@ -1,4 +1,6 @@
 // Adapts PilotDeck 783499ff ThemeContext theme-mode semantics; AGPL-3.0.
+import {useLightAppearance} from './useLightAppearance';
+import LightAppearanceControls from './LightAppearanceControls';
 import React,{useCallback,useEffect,useLayoutEffect,useState} from 'react';
 
 export type ThemeMode='system'|'light'|'dark';
@@ -23,6 +25,7 @@ function systemQuery(){try{return window.matchMedia?.('(prefers-color-scheme: da
 export function useThemePreference(){
  const [mode,setMode]=useState<ThemeMode>(readMode),[systemDark,setSystemDark]=useState(()=>systemQuery()?.matches??false),[saveFailed,setSaveFailed]=useState(false);
  const theme=mode==='system'?(systemDark?'dark':'light'):mode;
+ const light=useLightAppearance(theme);
  const changeMode=useCallback((next:ThemeMode)=>{
   if(!validMode(next))return;setMode(next);
   try{localStorage.setItem(key,JSON.stringify({version:1,mode:next}));setSaveFailed(false);}catch{setSaveFailed(true);}
@@ -44,17 +47,16 @@ export function useThemePreference(){
  },[]);
  useLayoutEffect(()=>{
   const root=document.documentElement;root.dataset.themeMode=mode;root.dataset.theme=theme;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content',theme==='dark'?'#101217':'#faf9f6');
   // Persist the initial migration before updating the older resolved-value key.
   try{if(localStorage.getItem(key)===null)localStorage.setItem(key,JSON.stringify({version:1,mode}));}catch{setSaveFailed(true);}
   // Older Jot pages still consume a resolved dark/light value.
   try{localStorage.setItem(legacyKey,theme);}catch{}
  },[mode,theme]);
- return {mode,theme,changeMode,saveFailed};
+ return {mode,theme,changeMode,saveFailed,light};
 }
 
 export function ThemeSelector({preference,zh=false}:{preference:ThemePreference;zh?:boolean}){
  return <div className="jot-theme-control"><select className="jot-theme-select" aria-label={zh?'外观主题':'Appearance theme'} value={preference.mode} onChange={event=>{if(validMode(event.target.value))preference.changeMode(event.target.value);}}>
   <option value="system">{zh?'跟随系统':'System'}</option><option value="light">{zh?'浅色':'Light'}</option><option value="dark">{zh?'深色':'Dark'}</option>
- </select>{preference.saveFailed&&<span role="status">{zh?'主题暂未保存，本页仍有效。':'Theme could not be saved; it remains active on this page.'}</span>}</div>;
+ </select><details className="jot-appearance-popover" onKeyDown={event=>{if(event.key==='Escape'&&!event.defaultPrevented&&!event.nativeEvent.isComposing&&event.currentTarget.open){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>{zh?'配色':'Palette'}</summary><LightAppearanceControls light={preference.light} dark={preference.theme==='dark'} onLight={()=>preference.changeMode('light')} zh={zh}/></details>{preference.saveFailed&&<span role="status">{zh?'主题暂未保存，本页仍有效。':'Theme could not be saved; it remains active on this page.'}</span>}</div>;
 }

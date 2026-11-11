@@ -294,7 +294,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
     if(reset)linuxCaptionMenu?.invalidate();else linuxCaptionMenu?.refresh();
    },
    linuxCaptionMenu,readDesktopAbout:()=>desktopHelp.read(),
-   readWindowChrome:windowChrome?()=>windowChrome.read():null,setWindowTheme:windowChrome?theme=>windowChrome.setTheme(theme):null,
+   readWindowChrome:windowChrome?()=>windowChrome.read():null,setWindowTheme:windowChrome?theme=>windowChrome.setTheme(theme):null,setWindowAppearance:windowChrome?value=>windowChrome.setAppearance(value):null,
    showCaptionMenu:captionMenu?value=>captionMenu.show(value):null,closeCaptionMenu:captionMenu?()=>captionMenu.close():null,
    selectFile:async()=>{
     const parent=mainWindow;

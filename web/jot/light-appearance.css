@@ -1,0 +1,20 @@
+/* PilotDeck 783499ff light-only surfaces adapted to Jot; AGPL-3.0. */
+html[data-theme=light][data-jot-light-appearance]{--bg:var(--jot-light-surface);--panel:var(--jot-light-surface);--ink:var(--jot-light-ink);--muted:var(--jot-light-muted);--line:var(--jot-light-border);--accent:var(--jot-light-accent);background:var(--jot-light-canvas)}
+html[data-theme=light][data-jot-light-appearance] body{background:transparent;color:var(--jot-light-ink)}
+html[data-theme=light][data-jot-light-appearance] :is(.app>main,.workbench-application,#root>section){background:var(--jot-light-surface)}
+html[data-theme=light][data-jot-light-appearance] :is(.app>aside,.workbench-application>[data-desktop-toolbar],.workbench-application [data-desktop-sidebar]){--ink:var(--jot-light-sidebar-ink);--muted:var(--jot-light-sidebar-ink);--accent:var(--jot-light-sidebar-accent);background:var(--jot-light-sidebar);color:var(--jot-light-sidebar-ink)}
+.jot-appearance-popover{position:relative;font-size:14px;color:var(--ink)}
+.jot-appearance-popover>summary{cursor:pointer;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.jot-appearance-popover>summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.jot-appearance-panel{position:absolute;top:calc(100% + 8px);right:0;z-index:200;width:min(440px,calc(100vw - 48px));max-height:min(650px,75dvh);overflow:auto;overscroll-behavior:contain;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 30px #0003;padding:16px;font-size:14px;line-height:1.5;text-align:start;-webkit-app-region:no-drag;user-select:text}
+.jot-appearance-panel h3{margin:0 0 8px;font-size:16px}
+.jot-appearance-panel fieldset{min-width:0;padding:12px;border:1px solid var(--line);border-radius:8px;margin:12px 0}
+.jot-appearance-panel button{font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;color:var(--ink);background:var(--panel);width:auto}
+.jot-appearance-panel button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:1px}
+.jot-appearance-panel button:focus-visible,.jot-appearance-panel input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.jot-appearance-presets{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.jot-appearance-swatch{display:inline-block;width:16px;height:16px;border:3px solid;border-radius:4px;margin-right:6px;vertical-align:middle}
+.jot-appearance-color{display:grid;grid-template-columns:minmax(0,1fr) 38px 88px;align-items:center;gap:8px;margin:10px 0}
+.jot-appearance-color input{font:inherit;min-width:0;width:100%;height:34px;padding:4px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px}
+.jot-appearance-color input[aria-invalid=true]{border-color:#c0392b}
+.jot-appearance-note{font-size:12px;color:var(--muted)}

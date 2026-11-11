@@ -1,6 +1,9 @@
 // Adapts PilotDeck 783499ff windowChrome/preloadChrome; AGPL-3.0.
+import {deriveLightColors,isCustomizedLightAppearance,normalizeLightAppearance} from '../../packages/desktop/src/light-appearance.mjs';
 import {isDesktopAppUrl} from './desktop-security.mjs';
-export function windowChromePalette(theme){
+export function windowChromePalette(theme,lightAppearance){
+ const value=normalizeLightAppearance(lightAppearance);
+ if(theme==='light'&&isCustomizedLightAppearance(value)){const c=deriveLightColors(value);return Object.freeze({background:c.background,caption:c.sidebar,symbol:c.sidebarInk});}
  return Object.freeze(theme==='light'?{background:'#faf9f6',caption:'#f0eee9',symbol:'#242731'}:{background:'#101217',caption:'#171a21',symbol:'#eef0f5'});
 }
 export function windowChromeOptions(platform=process.platform){
@@ -10,14 +13,14 @@ export function windowChromeOptions(platform=process.platform){
  return {};
 }
 export function createDesktopWindowChrome({owner,getWindow,appOrigin,getMenus,platform=process.platform}){
- let theme='dark',disposed=false,revision=0,lastSignature='';
+ let theme='dark',lightAppearance=null,disposed=false,revision=0,lastSignature='';
  const valid=()=>!disposed&&getWindow()===owner&&!owner.isDestroyed()&&!owner.webContents.isDestroyed?.();
  const read=()=>{
   if(!valid())throw Error('desktop_window_unavailable');
-  const fullscreen=owner.isFullScreen(),menus=getMenus(),signature=JSON.stringify([theme,fullscreen,menus]);
+  const fullscreen=owner.isFullScreen(),menus=getMenus(),signature=JSON.stringify([theme,lightAppearance,fullscreen,menus]);
   if(signature!==lastSignature){lastSignature=signature;revision+=1;}
-  return Object.freeze({protocol:1,revision,platform,theme,fullscreen,caption_height:platform==='darwin'?48:32,
-   palette:windowChromePalette(theme),menus:Object.freeze(menus)});
+  return Object.freeze({protocol:lightAppearance?2:1,revision,platform,theme,fullscreen,caption_height:platform==='darwin'?48:32,
+   palette:windowChromePalette(theme,lightAppearance),menus:Object.freeze(menus)});
  };
  const publish=()=>{
   if(!valid())return;
@@ -29,9 +32,14 @@ export function createDesktopWindowChrome({owner,getWindow,appOrigin,getMenus,pl
  const setTheme=value=>{
   if(value!=='dark'&&value!=='light')throw Error('desktop_window_theme_invalid');
   if(!valid())throw Error('desktop_window_unavailable');
-  theme=value;publish();return read();
+  theme=value;lightAppearance=null;publish();return read();
+ };
+ const setAppearance=value=>{
+  if(!valid())throw Error('desktop_window_unavailable');
+  if(value?.theme!=='light'&&value?.theme!=='dark')throw Error('desktop_window_theme_invalid');
+  theme=value.theme;lightAppearance=normalizeLightAppearance(value.appearance);publish();return read();
  };
  const dispose=()=>{if(disposed)return;disposed=true;owner.off('enter-full-screen',publish);owner.off('leave-full-screen',publish);owner.off('closed',dispose);};
  owner.on('enter-full-screen',publish);owner.on('leave-full-screen',publish);owner.on('closed',dispose);
- return Object.freeze({read,setTheme,publish,dispose});
+ return Object.freeze({read,setTheme,setAppearance,publish,dispose});
 }
