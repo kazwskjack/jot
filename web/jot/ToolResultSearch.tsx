@@ -116,7 +116,7 @@ export default function ToolResultSearch({conversationId,runId,asOfSeq:latestSeq
    {current?.error&&<p role="alert">{conversationUiError(current.error,language)} <button type="button" onClick={()=>setRevision(value=>value+1)}>{t('重新搜索本批','Search This Batch Again')}</button></p>}
    {hit&&<button type="button" onClick={()=>setSelected(undefined)}>{t('关闭命中正文','Close Matching Body')}</button>}
   </div>
-  {hit&&<ConversationDisplayBoundary key={JSON.stringify([identity,hit])} label={t('命中工具正文','Matching Tool Body')}><div lang="zh-CN"><ActivityToolResult conversationId={conversationId}
+  {hit&&<ConversationDisplayBoundary key={JSON.stringify([identity,hit])} label={t('命中工具正文','Matching Tool Body')}><div lang={language}><ActivityToolResult conversationId={conversationId}
    target={{...(hit.native_source?{nativeSource:true,asOfSeq}:{}),runId:hit.run_id,activityId:hit.activity_id,toolName:hit.tool_name,offset:hit.offset_chars,resultSha:hit.result_sha256,textSha:hit.text_sha256,
     match:{offset:hit.match_offset_chars,text:hit.match_text}}}/></div></ConversationDisplayBoundary>}
  </section>;

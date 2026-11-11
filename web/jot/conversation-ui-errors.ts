@@ -1,6 +1,18 @@
 // Fixed owned conversation UI failures; unknown/raw content stays unchanged.
 import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
 const english:Record<string,string>={
+ "内嵌文件尚未通过编码或内容核对，可对照原结果JSON。": "The embedded file has not passed encoding or content verification. Compare with the original result JSON.",
+ "原结果内容读取超时，可重新读取。": "Reading original result content timed out. You can read it again.",
+ "原工具结果来源已变化，请重新打开步骤。": "The original tool result source has changed. Reopen the step.",
+ "原工具结果内容暂不可确认，请稍后重试。": "The original tool result content cannot currently be verified. Try again later.",
+ "工具结果来源或分页尚未确认": "The tool result source or page is unconfirmed.",
+ "原文件列表来源尚未确认": "The original file list source is unconfirmed.",
+ "原结果命中位置尚未确认": "The original result match position is unconfirmed.",
+ "当前服务尚未确认原始MCP结果JSON视图，可返回文本视图。": "The current service has not confirmed support for original MCP result JSON. Return to text view.",
+ "此步骤暂无可确认的大结果来源。": "This step has no verifiable large-result source available.",
+ "此步骤暂无已保存且可确认的结果正文。": "This step has no saved, verifiable result body available.",
+ "正文来源已变化，请关闭后重新打开。": "The body source has changed. Close and reopen it.",
+ "工具结果读取失败": "Unable to read the tool result.",
  "记录已更新，请刷新搜索后重新打开。": "The record has changed. Refresh search and open it again.",
  "原交互记录的身份或版本尚未确认": "The original interaction record identity or version is unconfirmed.",
  "问题历史来源尚未确认": "The question-history source is unconfirmed.",

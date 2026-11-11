@@ -173,7 +173,7 @@ export default function ActivityTimeline({conversationId,activities,runs,reveal,
   }} {...(run?{run}:{})} onSelectRun={selectRun} onOpenArtifact={(activity,target)=>{setToolResult(undefined);setArtifact({conversationId,runId:activity.run_id,activityId:activity.activity_id,target});}} onOpenToolResult={(activity,nativeSource)=>{setArtifact(undefined);setToolResult({conversationId,runId:activity.run_id,activityId:activity.activity_id,toolName:activity.detail.tool_name!,...(nativeSource?{nativeSource:true}:{})});}} availableRuns={availableRuns} {...(onOpenMember?{onOpenMember}:{})} {...(reveal?{reveal}:{})}/></ConversationDisplayBoundary>)}
   {toolResult&&toolResult.conversationId===conversationId&&toolResult.runId===selected&&<section aria-label={t('已选步骤工具结果','Selected Step Tool Result')}>
    <button type="button" data-chat-search-ignore onClick={()=>setToolResult(undefined)}>{t('关闭工具结果正文','Close Tool Result Body')}</button>
-   <ConversationDisplayBoundary key={JSON.stringify(toolResult)} label={t('步骤工具结果','Step Tool Result')}><div lang="zh-CN"><ActivityToolResult conversationId={conversationId} target={toolResult}/></div></ConversationDisplayBoundary>
+   <ConversationDisplayBoundary key={JSON.stringify(toolResult)} label={t('步骤工具结果','Step Tool Result')}><div lang={language}><ActivityToolResult conversationId={conversationId} target={toolResult}/></div></ConversationDisplayBoundary>
   </section>}
   {artifact&&artifact.conversationId===conversationId&&artifact.runId===selected&&<section aria-label={t('已选步骤文件','Selected Step File')}>
    <button type="button" data-chat-search-ignore onClick={()=>setArtifact(undefined)}>{t('关闭步骤文件','Close Step File')}</button>
