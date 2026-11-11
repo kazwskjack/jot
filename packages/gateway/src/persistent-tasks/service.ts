@@ -1,3 +1,4 @@
+import {DesktopTaskNotificationSource} from './desktop-notifications.ts';
 import type {WorkbenchService} from '../workbench/service.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import {types as utilTypes} from 'node:util';
@@ -87,6 +88,7 @@ export class PersistentTaskService {
   private readonly taskBudgets:TaskBudgetService;
   private readonly executionEvidence:TaskExecutionEvidence;
   private readonly notificationSignals:TaskNotificationSignals;
+  private readonly desktopNotifications:DesktopTaskNotificationSource;
   private readonly monitorFailures:TaskMonitorFailures;
   private readonly replyPolicies:TaskReplyPolicies;
   private notificationCacheCursor:string|undefined;
@@ -143,6 +145,7 @@ export class PersistentTaskService {
     installTaskRunLimits(db);
     installDiscoveryTaskBindings(db);
     this.notificationSignals=new TaskNotificationSignals(db,()=>this.now());
+    this.desktopNotifications=new DesktopTaskNotificationSource(db,()=>this.now());
     this.monitorFailures=new TaskMonitorFailures(db,()=>this.now());
     this.replyPolicies=new TaskReplyPolicies(db,{now:()=>new Date(this.now())});
   }
@@ -509,6 +512,7 @@ export class PersistentTaskService {
       this.dialogue.bindRun(id,runId,causation);
       this.db.prepare(`UPDATE wb_persistent_tasks SET runs_used=runs_used+1,status=CASE WHEN run_limit_mode='finite' AND runs_used+1>=max_runs THEN 'budget_exhausted' ELSE status END,projection_pending=1,updated_at=? WHERE task_id=?`).run(now,id);
       this.notificationSignals.capture(owner,id,occurrenceId);
+      this.desktopNotifications.capture(owner,id,occurrenceId);
       return this.occurrence(this.db.prepare('SELECT * FROM wb_task_occurrences WHERE occurrence_id=?').get(occurrenceId) as Row);
     });
   }
@@ -611,7 +615,8 @@ export class PersistentTaskService {
               if (current.baseline_hash !== null && current.baseline_hash !== fingerprint) {
                 if(!prepared)return false;
                 const occurrence=this.enqueue(current.owner_id,current.task_id,`page:${current.schedule_revision}:${current.baseline_revision+1}:${fingerprint}`,current.next_due_at,[{kind:'page_snapshot',reference:page.url,hash:fingerprint}],'',undefined,undefined,prepared);
-                this.notificationSignals.recordPageChange(occurrence.occurrence_id,String(current.baseline_hash),fingerprint,page.url);admitted=true;
+                this.notificationSignals.recordPageChange(occurrence.occurrence_id,String(current.baseline_hash),fingerprint,page.url);
+                this.desktopNotifications.recordPageChange(occurrence.occurrence_id,String(current.baseline_hash),fingerprint,page.url);admitted=true;
               }
               this.db.prepare('UPDATE wb_persistent_tasks SET baseline_hash=?,baseline_revision=baseline_revision+1 WHERE task_id=?').run(fingerprint,current.task_id);
             } else {
@@ -658,9 +663,10 @@ export class PersistentTaskService {
   }
   maintainNotifications(){
     const signals=this.notificationSignals.maintain();
+    const desktop=this.desktopNotifications.maintain();
     const caches=pruneNotificationCaches(this.db,{now:this.now(),limit:100,...(this.notificationCacheCursor?{afterDeliveryId:this.notificationCacheCursor}:{})});
     this.notificationCacheCursor=caches.next_after_delivery_id??undefined;
-    return {...signals,caches};
+    return {...signals,caches,desktop};
   }
   private tickFailure(snapshot: Row,error: unknown) {
     const code=error instanceof Error ? error.message : 'task_tick_failed';

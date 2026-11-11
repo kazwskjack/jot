@@ -25,3 +25,15 @@ M20.04 尚未完成。工作台顶部已接入当前设备的通知设置及原�
 权限请求是用户点击后调用原浏览器 Notification.requestPermission，再读取主进程的原权限结果；没有自动弹窗、测试通知或 API 探测。设备开关保存为开启后才可申请。显示的 granted/denied/default 是当前应用 origin 的浏览器权限，不能证明 Windows 通知设置、macOS 系统授权、Focus Assist/系统免打扰等允许展示，界面保留这一差异。未增加 OS 设置跳转或假装已经确认全部系统权限。
 
 本次不发送任务通知，也不根据通知偏好推断任务完成。完整原任务事件来源与撤销接线继续开发，未运行产品或测试。
+
+## 原任务事件来源账本
+
+Gateway 在原任务 admission 事务内为新 occurrence 保存单独的桌面通知 scope，绑定原 owner/task/generation/task_version/agent/capability_epoch/settings_version/events。它不依赖外部渠道绑定，也不生成渠道 effect。默认事件复用原 TaskNotifications 的 completed；任务事件选择为空则不登记。没有持久 SQL 角色证明时不从内存角色补造授权，不倒推旧 occurrence 的历史 scope。
+
+原通知维护入口每次最多从尚未记录的真实来源中保存 50 个桌面事件，按来源时间与原身份稳定排序；已有记录不占用下次配额。scope、页面变化证明和事件均有不可改写触发器。记录事件不等于发送通知，桌面设备开关和系统权限仍在原主进程判断。
+
+完成来源必须同时有原 wb_task_finalizations 及其原 assistant message，且属于同一 owner/conversation/current occurrence/run；普通 succeeded 状态不算完成。失败来源要求原运行 failed 且不是 OUTCOME_UNKNOWN。待确认来源核对原运行版本、checkpoint、interaction 的 conversation/run、pending 状态和过期时间。页面变化在原监控 admission 事务内核对旧 baseline、新快照 hash、URL 对应证据与 page_change 触发器，再记录最小 hash 证明，不复制页面正文或终端输出。
+
+扫描只接受当前原任务版本/代际、角色 epoch、活动角色和原通知设置版本；暂停、归档、变更角色或通知设置后，不把旧 scope 当作新发送授权。历史不可改写事件本身不能证明当前仍允许发送；后续 feed、发送前核对及撤销必须复用同一来源与 scope 条件。
+
+此增量尚未公开任务事件 feed，也未连接 renderer 的 showTaskNotification。旧 occurrence、同一 occurrence 多个待确认/失败事件的原生去重身份、跨账户/文档撤销、完整 OS 权限和 M24 范围仍待接续；不得用四字段旧去重键吞掉后续真实事件，或回写历史 seen 伪造已通知。仅审阅和修改源码，未执行 SQL、迁移、任务维护或产品。
