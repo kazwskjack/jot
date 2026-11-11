@@ -1,0 +1,85 @@
+import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
+
+const english:Record<string,string>={
+  "已有原命令待处理，请先确认原回执。": "An original command is pending. Confirm its original receipt first.",
+  "本地回执存储不可用，请保留原命令。": "Local receipt storage is unavailable. Keep the original command.",
+  "连接版本已变化，请重新读取后审阅新配置。": "The connection version changed. Read it again before reviewing the new configuration.",
+  "连接仍有操作在处理，请先读取当前状态。": "A connection operation is still processing. Read the current status first.",
+  "目录重载仍在处理，请读取当前状态。": "Catalog reload is still processing. Read the current status.",
+  "请先启用连接，再显式重载。": "Enable the connection first, then explicitly reload it.",
+  "该角色已有同名连接，请修改服务名称。": "This role already has a connection with that name. Change the server name.",
+  "该角色已达到连接数量上限。": "This role has reached its connection limit.",
+  "工具目录超过当前限制，请调整服务器目录。": "The tool catalog exceeds the current limit. Adjust the server catalog.",
+  "Host 重载入口暂不可用，请保留配置并检查宿主。": "The Host reload entry is unavailable. Keep the configuration and check the Host.",
+  "连接回执无效，结果仍未知；原请求已保留。": "The connection receipt is invalid. The result remains unknown and the original request is retained.",
+  "用户、Agent 或能力代次已变化；原请求结果不会应用到当前页面。": "The user, Agent or capability epoch changed. The original request result will not apply to this page.",
+  "原请求属于不同能力代次，结果仍未知。请读取连接状态并保留原回执。": "The original request belongs to a different capability epoch. Its result remains unknown. Read the connection status and keep its original receipt.",
+  "原回执缺少能力代次，结果仍未知。请读取连接状态并保留原回执。": "The original receipt lacks a capability epoch. Its result remains unknown. Read the connection status and keep its original receipt.",
+  "无法确认当前 Agent 的能力代次，请重新读取角色。": "The current Agent capability epoch is unconfirmed. Read the role again.",
+  "操作未完成": "Operation Incomplete",
+  "读取失败": "Read Failed",
+  "审核新增 MCP 连接": "Review New MCP Connection",
+  "审核 MCP 配置变更": "Review MCP Configuration Change",
+  "审核停用 MCP 连接": "Review Disabling MCP Connection",
+  "审核启用 MCP 连接": "Review Enabling MCP Connection",
+  "审核 MCP 工具目录重载": "Review MCP Tool Catalog Reload",
+  "审核移除 MCP 连接": "Review Removing MCP Connection",
+  "审核工具授权": "Review Tool Approval",
+  "新连接保存为停用状态，工具目录由你显式重载。": "New connections are saved as disabled. You explicitly reload the tool catalog.",
+  "确认后提交这份完整新配置，再显式请求工具目录重载。": "Confirm to submit this complete new configuration, then explicitly request a tool catalog reload.",
+  "停用会撤销该连接的运行授权，并保留配置与工具目录。": "Disabling revokes runtime authorization for this connection while retaining its configuration and tool catalog.",
+  "启用后请手动重载，再逐项批准工具。": "After enabling, manually reload and then approve tools individually.",
+  "将按当前配置请求 Host 重载，发现的工具进入待审核目录。": "The Host will be asked to reload using the current configuration. Discovered tools enter the catalog awaiting review.",
+  "移除后会撤销该连接的工具授权。": "Removing the connection revokes its tool authorizations.",
+  "连接配置已保存，尚未加载工具目录。": "Connection configuration saved; the tool catalog has not been loaded.",
+  "连接已停用。": "The connection is disabled.",
+  "连接已断开，需要显式重载。": "The connection is disconnected. An explicit reload is required.",
+  "正在连接并读取工具目录。": "Connecting and reading the tool catalog.",
+  "活动工具目录已就绪；工具仍需逐项批准。": "The active tool catalog is ready. Tools still require individual approval.",
+  "正在重载工具目录，尚未发布新代次。": "Reloading the tool catalog; a new generation has not been published yet.",
+  "工具授权已撤销，等待 Host 清理。": "Tool authorization revoked; awaiting Host cleanup.",
+  "连接已移除。": "The connection was removed.",
+  "连接未就绪，尚无可用的新目录。": "The connection is not ready. No new usable catalog is available.",
+  "MCP 输入格式无效": "Invalid MCP Input Format",
+  "秘密引用必须是 JSON 对象": "Secret References Must Be a JSON Object",
+  "只接受 secret:// 秘密引用，不接受秘密值": "Only secret:// References Are Accepted, Not Secret Values",
+  "启动参数不是有效 JSON": "Launch Arguments Are Not Valid JSON",
+  "环境秘密引用不是有效 JSON": "Environment Secret References Are Not Valid JSON",
+  "HTTP 秘密引用不是有效 JSON": "HTTP Secret References Are Not Valid JSON",
+  "HTTP 服务地址无效": "Invalid HTTP Server Address",
+  "服务地址必须使用安全 URL，秘密需填写为引用": "The Server Address Must Use a Safe URL; Supply Secrets as References",
+  "服务名称格式无效": "Invalid Server Name Format",
+  "启动命令无效": "Invalid Launch Command",
+  "启动参数必须是字符串数组": "Launch Arguments Must Be an Array of Strings",
+  "启动配置包含疑似秘密值，请改用 secret:// 引用": "The Launch Configuration Appears to Contain Secret Values. Use secret:// References Instead.",
+  "工作目录过长": "Working Directory Too Long",
+  "请选择支持的 MCP 传输方式": "Choose a Supported MCP Transport",
+  "MCP 命令配置无效": "Invalid MCP Command Configuration",
+  "MCP 命令参数无效": "Invalid MCP Command Arguments",
+  "MCP 工作目录无效": "Invalid MCP Working Directory",
+  "MCP 配置包含疑似秘密值": "MCP Configuration Appears to Contain Secret Values",
+  "MCP 地址无效": "Invalid MCP Address",
+  "MCP 传输方式无效": "Invalid MCP Transport",
+  "MCP 幂等回执无效": "Invalid MCP Idempotency Receipt",
+  "MCP 命令路径无效": "Invalid MCP Command Path",
+  "MCP 连接版本无效": "Invalid MCP Connection Version",
+  "MCP 启用状态无效": "Invalid MCP Enabled State",
+  "MCP 工具授权无效": "Invalid MCP Tool Approval",
+  "MCP 命令类型无效": "Invalid MCP Command Type",
+  "MCP 用户范围不可用": "MCP User Scope Unavailable",
+  "MCP 命令回执过大": "MCP Command Receipt Too Large",
+  "MCP 命令回执格式无效": "Invalid MCP Command Receipt Format",
+  "MCP 命令回执版本无效": "Invalid MCP Command Receipt Version",
+  "MCP 命令回执代次无效": "Invalid MCP Command Receipt Epoch"
+};
+
+// Exact owned source messages only; raw tool metadata, schemas and unknown errors stay original.
+export function mcpUiMessage(value:string,language:ApplicationLanguage){
+ if(language!=='en')return value;
+ if(Object.hasOwn(english,value))return english[value]!;
+ const grant=/^只授权以下 (0|[1-9][0-9]*) 个工具；新发现或未列出的工具不会获批。$/.exec(value);
+ if(grant&&Number.isSafeInteger(Number(grant[1]))&&Number(grant[1])<=100)return `Authorize only these ${grant[1]} tools; newly discovered or unlisted tools will not be approved.`;
+ const retained=/^上次重载失败；活动目录代次 (0|[1-9][0-9]*) 仍保留。$/.exec(value);
+ if(retained&&Number.isSafeInteger(Number(retained[1])))return `The last reload failed; active catalog generation ${retained[1]} is retained.`;
+ return value;
+}
