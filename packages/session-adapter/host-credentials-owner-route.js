@@ -23,39 +23,63 @@ function page(config, scriptNonce) {
 <label>引用 <select id="reference"></select></label><p id="state" role="status"></p>
 <label>新凭据 <input id="secret" type="password" autocomplete="new-password" maxlength="16384"></label>
 <button id="rotate" type="button">轮换此引用</button><button id="revoke" type="button">撤销存储值</button>
-<p><a href="${HOST_CREDENTIALS_PATH}">重新读取状态</a></p></main>
+<button id="read" type="button">刷新引用配置状态</button><p id="read-state" role="status"></p>
+<p id="operation-result" role="status"></p><p id="write-state" role="status"></p>
+<p><a href="${HOST_CREDENTIALS_PATH}">重新加载页面并核对新的写入许可</a></p></main>
 <script id="page-data" type="application/json">${escapeJson(config)}</script><script nonce="${scriptNonce}">
 (() => {
   const config = JSON.parse(document.getElementById('page-data').textContent);
   const select = document.getElementById('reference'), secret = document.getElementById('secret');
   const status = document.getElementById('state'), rotate = document.getElementById('rotate'), revoke = document.getElementById('revoke');
+  const read = document.getElementById('read'), readState = document.getElementById('read-state');
+  const resultState = document.getElementById('operation-result'), writeState = document.getElementById('write-state');
+  let busy=false,reading=false;
   for (const row of config.references) {
     const option = document.createElement('option'); option.value = row.handle; option.textContent = row.handle;
     select.append(option);
   }
   function show() {
     const row = config.references.find(row => row.handle === select.value);
-    status.textContent = !row ? '状态待确认' : row.configured ? '已配置' : '未配置';
-    rotate.disabled = revoke.disabled = !row || !row.writable;
+    status.textContent = '最近读取的引用配置：' + (!row ? '状态待确认' : row.configured ? '已配置' : '未配置') + (row ? row.writable ? ' · 可修改存储值' : ' · 只读' : '');
+    rotate.disabled = revoke.disabled = busy || reading || !config.nonce || !row || !row.writable;
+    secret.disabled = rotate.disabled;select.disabled = busy || reading;read.disabled = busy || reading;
+    if(!config.nonce||!row?.writable)secret.value='';
+    writeState.textContent = config.nonce ? '' : '本页写入许可已使用。刷新配置状态不会重发原操作或重新授予写入许可。';
   }
   select.addEventListener('change', () => { secret.value = ''; show(); }); show();
+  async function refresh() {
+    if(busy||reading)return;reading=true;readState.textContent='正在读取引用配置状态…';show();
+    try {
+      const response=await fetch('${HOST_CREDENTIALS_PATH}?status=1',{credentials:'same-origin',cache:'no-store',headers:{'x-jot-credentials-scope':config.scope_sha256}});
+      const value=await response.json();
+      if(!response.ok||!value||Object.keys(value).sort().join(',')!=='execution_authorized,protocol,references,scope_sha256'
+        ||value.protocol!==1||value.execution_authorized!==false||value.scope_sha256!==config.scope_sha256
+        ||!Array.isArray(value.references)||value.references.length!==config.references.length
+        ||value.references.some((row,index)=>!row||Object.keys(row).sort().join(',')!=='configured,handle,writable'
+          ||row.handle!==config.references[index].handle||typeof row.configured!=='boolean'||typeof row.writable!=='boolean'))throw new Error('status_unconfirmed');
+      config.references=value.references;readState.textContent='引用配置状态已更新。原操作结果保持不变；已配置不表示提供方登录已验证。';
+    } catch { readState.textContent='本次状态读取未确认，仍显示上次读取值。若身份或 profile 已变化，请重新加载页面。'; }
+    finally { reading=false;show(); }
+  }
   async function change(operation) {
-    if (!config.nonce || (operation === 'rotate' && !secret.value)) return;
+    const selected=config.references.find(row=>row.handle===select.value);
+    if (busy || reading || !selected?.writable || !config.nonce || (operation === 'rotate' && !secret.value)) return;
     const body = {nonce:config.nonce, handle:select.value, operation, ...(operation === 'rotate' ? {value:secret.value} : {})};
-    config.nonce = ''; secret.value = ''; rotate.disabled = revoke.disabled = select.disabled = true;
-    status.textContent = '正在处理，请保留此页面…';
+    config.nonce = ''; secret.value = '';busy=true;show();
+    resultState.textContent = body.handle + '：正在处理，请保留此页面…';
     try {
       const response = await fetch('${HOST_CREDENTIALS_PATH}', {method:'POST', credentials:'same-origin',
         headers:{'content-type':'application/json'}, body:JSON.stringify(body)});
       delete body.value;
       const result = await response.json();
-      status.textContent = result.status === 'rotated' ? '引用已轮换，旧 MCP 连接已关闭。' :
+      resultState.textContent = body.handle + '：' + (result.status === 'rotated' ? '引用已轮换，旧 MCP 连接已关闭。' :
         result.status === 'revoked' ? '引用已撤销，旧 MCP 连接已关闭。' :
         result.reason_code === 'credential_fallback_still_configured' ? '存储值已移除，环境变量或其他原生来源仍配置了此引用。' :
-        result.status === 'unknown' ? '操作结果待确认。请重新读取状态，保留原操作结果。' : '操作未完成，请重新读取状态。';
-    } catch { status.textContent = '连接中断，操作结果待确认。请重新读取状态。'; }
-    finally { delete body.value; secret.value = ''; }
+        result.status === 'unknown' ? '操作结果待确认。请重新读取状态，保留原操作结果。' : '操作未完成，请重新读取状态。');
+    } catch { resultState.textContent = body.handle + '：连接中断，操作结果待确认。请重新读取状态。'; }
+    finally { delete body.value; secret.value = '';busy=false;show(); }
   }
+  read.addEventListener('click', refresh);
   rotate.addEventListener('click', () => change('rotate'));
   revoke.addEventListener('click', () => change('revoke'));
 })();</script></html>`;
@@ -80,7 +104,8 @@ export function createHostCredentialsOwnerRoute({connection, typertGateway, dshO
   }
   return {path:HOST_CREDENTIALS_PATH, methods:['GET','POST'], requestBody:'buffered', async fetch(request) {
     const url = new URL(request.url), origin = request.headers.get('origin'), site = request.headers.get('sec-fetch-site');
-    if (url.origin !== dshOrigin || url.pathname !== HOST_CREDENTIALS_PATH || url.search || request.headers.has('x-user-id')
+    const statusRead=request.method==='GET'&&url.search==='?status=1';
+    if (url.origin !== dshOrigin || url.pathname !== HOST_CREDENTIALS_PATH || (url.search && !statusRead) || request.headers.has('x-user-id')
       || site === 'cross-site' || origin !== null && origin !== dshOrigin
       || request.method === 'POST' && (origin !== dshOrigin || site !== 'same-origin')) return held(403,'host_credentials_owner_required');
     const admissionHeaders = Object.fromEntries(request.headers.entries());
@@ -94,6 +119,16 @@ export function createHostCredentialsOwnerRoute({connection, typertGateway, dshO
     const instant = now();
     if (!Number.isSafeInteger(instant) || instant < 0) return held(503,'host_credentials_unavailable');
     for (const [key, value] of nonces) if (value.expires <= instant) nonces.delete(key);
+    if(statusRead){
+      // The hash binds this read to the original page; owner admission still authorizes it.
+      const scope=digest(identity);
+      if(request.headers.get('x-jot-credentials-scope')!==scope)return held(409,'host_credentials_scope_changed');
+      try{
+        const rows=await describe(peer);
+        if(identityKey()!==identity)return held(409,'host_credentials_scope_changed');
+        return Response.json({protocol:1,scope_sha256:scope,references:rows,execution_authorized:false},{headers});
+      }catch{return held(503,'host_credentials_unavailable');}
+    }
     if (request.method === 'GET') {
       if (nonces.size >= 32) return held(503,'host_credentials_capacity');
       let rows;
@@ -102,7 +137,7 @@ export function createHostCredentialsOwnerRoute({connection, typertGateway, dshO
       if (nonces.size >= 32) return held(503,'host_credentials_capacity');
       const nonce = randomBytes(32).toString('base64url'), scriptNonce = randomBytes(32).toString('base64url');
       nonces.set(digest(nonce), {identity, expires:instant+300000});
-      return new Response(page({nonce, references:rows}, scriptNonce), {headers:{...headers, 'content-type':'text/html; charset=utf-8',
+      return new Response(page({nonce, scope_sha256:digest(identity), references:rows}, scriptNonce), {headers:{...headers, 'content-type':'text/html; charset=utf-8',
         'content-security-policy':`default-src 'none'; script-src 'nonce-${scriptNonce}'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`}});
     }
     if (request.method !== 'POST') return held(405,'method_not_allowed');
