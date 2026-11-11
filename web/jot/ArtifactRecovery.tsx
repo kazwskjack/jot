@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {request,taskDraftScope} from './client';
 import {artifactCommandDisposition} from './artifact-command-recovery.mjs';
@@ -17,6 +19,7 @@ export default function ArtifactRecovery(props:Props){
 }
 
 function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store,recoveryLoading,recoveryError,onReloadRecovery}:Props&{owner:string;store:DurableFileRecoveryStore|null;recoveryLoading:boolean;recoveryError:string;onReloadRecovery:()=>void}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const identity=JSON.stringify([owner,artifactId,version??null,sha256??null,partIndex??null]);
  const alive=useRef(true),previousState=useRef(''),pollAttempt=useRef(0);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -157,37 +160,37 @@ function Recovery({artifactId,version,sha256,partIndex,onRestored,owner,store,re
   await submit(`/artifacts/${encodeURIComponent(artifactId)}/archive`,{expected_version:backup?.version,expected_sha256:backup?.head_sha256});
  };
  const refresh=()=>{pollAttempt.current=0;resource.reload();};
- const statuses={pending:'待归档',retry:'归档重试中',verified:'归档已验证',failed:'归档失败'};
- const phases={unmanaged:'外部进程',starting:'正在启动',idle:'空闲',restoring:'正在恢复',archiving:'正在归档',cleaning:'正在清理已验证备份的本地缓存',failed:'处理失败',stopped:'已停止'};
- const local={present:'所选文件在本地',deleted:'所选文件缺失',restoring:'恢复请求已登记'};
- return <section aria-label="文件归档与恢复" data-chat-search-ignore>
-  {recoveryLoading&&<p role="status">正在读取文件操作持久回执…</p>}
-  {recoveryError&&<p role="alert">{recoveryError}</p>}
-  <button type="button" disabled={busy||recoveryLoading} onClick={onReloadRecovery}>重读待确认归档或恢复请求</button>
-  {notice&&<p role="status">{notice}</p>}
+ const statuses={pending:t("待归档","Awaiting Archive"),retry:t("归档重试中","Archive Retry Pending"),verified:t("归档已验证","Archive Verified"),failed:t("归档失败","Archive Failed")};
+ const phases={unmanaged:t("外部进程","External Process"),starting:t("正在启动","Starting"),idle:t("空闲","Idle"),restoring:t("正在恢复","Restoring"),archiving:t("正在归档","Archiving"),cleaning:t("正在清理已验证备份的本地缓存","Cleaning Local Cache with Verified Backups"),failed:t("处理失败","Processing Failed"),stopped:t("已停止","Stopped")};
+ const local={present:t("所选文件在本地","Selected Files Are Local"),deleted:t("所选文件缺失","Selected Files Are Missing"),restoring:t("恢复请求已登记","Restore Request Recorded")};
+ return <section lang={language} aria-label={t('文件归档与恢复','File Archive and Recovery')} data-chat-search-ignore>
+  {recoveryLoading&&<p role="status">{t("正在读取文件操作持久回执…","Reading durable file-operation receipts…")}</p>}
+  {recoveryError&&<p role="alert">{conversationUiError(recoveryError,language)}</p>}
+  <button type="button" disabled={busy||recoveryLoading} onClick={onReloadRecovery}>{t("重读待确认归档或恢复请求","Read Pending Archive or Restore Requests Again")}</button>
+  {notice&&<p role="status">{conversationUiError(notice,language)}</p>}
   {backup&&<p>{statuses[backup.backup_status]} · {local[backup.local_state]}</p>}
-  {backup?.executor?.mode==='managed'&&<p role="status">托管归档进程 · {phases[backup.executor.state]}{backup.executor.last_completed_at?` · 上次处理 ${backup.executor.last_completed_at}`:''}</p>}
-  {backup?.executor?.mode==='managed'&&backup.executor.state==='failed'&&<p role="status">{backup.executor.restart_required?'归档进程回收尚未确认，自动重启已停止。需处理残留进程后重启网关。':'归档进程遇到错误，可刷新状态查看后续处理。'}</p>}
-  {backup?.restore_protocol===3&&<p>版本 {backup.requested_version}{backup.part_index===undefined?'':` · 第 ${backup.part_index} 卷`} · {backup.selected_file_count} 个文件 · 缺失 {backup.missing_file_count} 个</p>}
-  {backup?.all_versions_archived===false&&<p role="status">归档清单尚未覆盖全部文件版本。</p>}
-  {Number(backup?.unarchived_file_count)>0&&<p role="status">所选版本有 {backup?.unarchived_file_count} 个文件尚无可验证归档。</p>}
-  {backup?.local_state==='deleted'&&!backup.restorable&&<p role="status">所选文件缺少完整可验证备份，当前无法恢复。</p>}
-  {backup?.last_error&&<p role="status">上次归档或恢复未完成，可刷新状态后重试。</p>}
-  {resource.loading&&<p role="status">正在读取归档状态…</p>}
-  {resource.error&&<p role="alert">归档状态读取失败，可重新读取。</p>}
-  <button type="button" disabled={busy||resource.loading} onClick={refresh}>刷新归档状态</button>
-  {canRestore&&<button type="button" disabled={busy||resource.loading||!!resource.error||receipt.pending} onClick={()=>void restore()}>{backup?.local_state==='present'?'从归档重新恢复此版本':'恢复所选文件'}</button>}
-  {canArchive&&<button type="button" disabled={busy||resource.loading||!!resource.error||receipt.pending||archiveAfterAttempt!==null} onClick={()=>void archive()}>{backup?.last_error||backup?.backup_status==='retry'||backup?.backup_status==='failed'?'重试归档全部版本':'归档全部版本'}</button>}
-  {backup?.archive_protocol===1&&!backup.archive_ready&&<p role="status">归档全部版本需要本地文件齐全，且当前没有恢复操作。</p>}
-  {archiveAfterAttempt!==null&&<p role="status">全部版本归档请求已登记，等待归档进程完成并验证文件。</p>}
+  {backup?.executor?.mode==='managed'&&<p role="status">{t('托管归档进程','Managed Archive Process')} · {phases[backup.executor.state]}{backup.executor.last_completed_at?t(` · 上次处理 ${backup.executor.last_completed_at}`,` · Last Processed ${backup.executor.last_completed_at}`):''}</p>}
+  {backup?.executor?.mode==='managed'&&backup.executor.state==='failed'&&<p role="status">{backup.executor.restart_required?t("归档进程回收尚未确认，自动重启已停止。需处理残留进程后重启网关。","Archive process cleanup is unconfirmed and automatic restart has stopped. Handle remaining processes before restarting the gateway."):t("归档进程遇到错误，可刷新状态查看后续处理。","The archive process encountered an error. Refresh its status to check subsequent handling.")}</p>}
+  {backup?.restore_protocol===3&&<p>{t('版本','Version')} {backup.requested_version}{backup.part_index===undefined?'':t(` · 第 ${backup.part_index} 卷`,` · Part ${backup.part_index}`)} · {t(`${backup.selected_file_count} 个文件 · 缺失 ${backup.missing_file_count} 个`,`${backup.selected_file_count} files · ${backup.missing_file_count} missing`)}</p>}
+  {backup?.all_versions_archived===false&&<p role="status">{t("归档清单尚未覆盖全部文件版本。","The archive inventory does not yet cover all file versions.")}</p>}
+  {Number(backup?.unarchived_file_count)>0&&<p role="status">{t(`所选版本有 ${backup?.unarchived_file_count} 个文件尚无可验证归档。`,`${backup?.unarchived_file_count} files in the selected version have no verifiable archive.`)}</p>}
+  {backup?.local_state==='deleted'&&!backup.restorable&&<p role="status">{t("所选文件缺少完整可验证备份，当前无法恢复。","The selected files lack complete verifiable backups and cannot currently be restored.")}</p>}
+  {backup?.last_error&&<p role="status">{t("上次归档或恢复未完成，可刷新状态后重试。","The last archive or restore did not complete. Refresh its status before retrying.")}</p>}
+  {resource.loading&&<p role="status">{t("正在读取归档状态…","Reading archive status…")}</p>}
+  {resource.error&&<p role="alert">{t("归档状态读取失败，可重新读取。","Reading archive status failed. Read it again.")}</p>}
+  <button type="button" disabled={busy||resource.loading} onClick={refresh}>{t("刷新归档状态","Refresh Archive Status")}</button>
+  {canRestore&&<button type="button" disabled={busy||resource.loading||!!resource.error||receipt.pending} onClick={()=>void restore()}>{backup?.local_state==='present'?t("从归档重新恢复此版本","Restore This Version Again from Archive"):t("恢复所选文件","Restore Selected Files")}</button>}
+  {canArchive&&<button type="button" disabled={busy||resource.loading||!!resource.error||receipt.pending||archiveAfterAttempt!==null} onClick={()=>void archive()}>{backup?.last_error||backup?.backup_status==='retry'||backup?.backup_status==='failed'?t("重试归档全部版本","Retry Archiving All Versions"):t("归档全部版本","Archive All Versions")}</button>}
+  {backup?.archive_protocol===1&&!backup.archive_ready&&<p role="status">{t("归档全部版本需要本地文件齐全，且当前没有恢复操作。","Archiving all versions requires all local files to be present and no restoration in progress.")}</p>}
+  {archiveAfterAttempt!==null&&<p role="status">{t("全部版本归档请求已登记，等待归档进程完成并验证文件。","The request to archive all versions was recorded. Wait for the archive process to complete and verify the files.")}</p>}
   {receipt.pending&&<div role="status">
-   <p>{store?.closing?'结束原请求的意图已保留，请继续确认原回执。':'原归档或恢复请求的回执尚未确认，请先确认原请求。'}</p>
-   <button type="button" disabled={busy} onClick={()=>void restore()}>{store?.closing?'重试结束确认':'重试原请求'}</button>
-   <button type="button" disabled={busy} onClick={()=>void submit(`/artifacts/${encodeURIComponent(artifactId)}/restore`,{},'inspect')}>读取原请求回执</button>
-   <button type="button" disabled={busy} onClick={()=>void submit(`/artifacts/${encodeURIComponent(artifactId)}/restore`,{},'close')}>结束未提交的原请求</button>
+   <p>{store?.closing?t("结束原请求的意图已保留，请继续确认原回执。","The intent to close the original request was retained. Continue verifying its original receipt."):t("原归档或恢复请求的回执尚未确认，请先确认原请求。","The original archive or restore receipt is unconfirmed. Verify the original request first.")}</p>
+   <button type="button" disabled={busy} onClick={()=>void restore()}>{store?.closing?t("重试结束确认","Retry Close Confirmation"):t("重试原请求","Retry Original Request")}</button>
+   <button type="button" disabled={busy} onClick={()=>void submit(`/artifacts/${encodeURIComponent(artifactId)}/restore`,{},'inspect')}>{t("读取原请求回执","Read Original Request Receipt")}</button>
+   <button type="button" disabled={busy} onClick={()=>void submit(`/artifacts/${encodeURIComponent(artifactId)}/restore`,{},'close')}>{t("结束未提交的原请求","Close the Unsubmitted Original Request")}</button>
   </div>}
-  {backup?.local_state==='restoring'&&<p role="status">{backup.executor?.mode==='managed'?'已登记到托管归档进程，完成后会重新读取文件。':'恢复由单独配置的外部归档进程处理，完成后会重新读取文件。'}</p>}
-  {backup?.restore_protocol===2&&!legacyCurrent&&<p role="status">此服务器提供当前版本恢复，所选历史版本需通过新版恢复入口处理。</p>}
-  {error&&<p role="alert">{error}</p>}
+  {backup?.local_state==='restoring'&&<p role="status">{backup.executor?.mode==='managed'?t("已登记到托管归档进程，完成后会重新读取文件。","The request is registered with the managed archive process. Files will be read again after completion."):t("恢复由单独配置的外部归档进程处理，完成后会重新读取文件。","Restoration is handled by the separately configured external archive process. Files will be read again after completion.")}</p>}
+  {backup?.restore_protocol===2&&!legacyCurrent&&<p role="status">{t("此服务器提供当前版本恢复，所选历史版本需通过新版恢复入口处理。","This server restores the current version. The selected historical version requires the newer recovery interface.")}</p>}
+  {error&&<p role="alert">{conversationUiError(error,language)}</p>}
  </section>;
 }

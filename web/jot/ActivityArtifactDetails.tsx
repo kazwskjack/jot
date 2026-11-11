@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {base,request,taskDraftScope} from './client';
 import ArtifactVersionHistory from './ArtifactVersionHistory';
@@ -12,6 +14,7 @@ const version=(value:unknown)=>Number.isSafeInteger(value)&&Number(value)>0;
 type Content={file:Artifact;before?:Artifact;text?:string;image?:string;truncated?:boolean;notice?:string};
 
 export default function ActivityArtifactDetails({conversationId,target,onOpen}:{conversationId:string;target:ActivityArtifactTarget;onOpen:(target:ActivityArtifactTarget)=>void}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,target]);
  const region=useRef<HTMLDivElement>(null);
  useEffect(()=>{region.current?.focus();region.current?.scrollIntoView({block:'nearest'});},[identity]);
@@ -69,25 +72,25 @@ export default function ActivityArtifactDetails({conversationId,target,onOpen}:{
  },[identity,revision]);
  const current=state?.identity===identity?state:undefined,content=current?.content;
  const download=(file:Artifact)=>`${base}/v1/artifacts/${encodeURIComponent(file.artifact_id)}${file.part_index===undefined?'':`/parts/${file.part_index}`}/download?version=${file.version}`;
- return <div ref={region} lang="zh-CN" tabIndex={-1} className="jot-activity-content" aria-label="步骤文件内容">
+ return <div ref={region} lang={language} tabIndex={-1} className="jot-activity-content" aria-label={t('步骤文件内容','Step File Content')}>
   <ArtifactVersionHistory key={JSON.stringify([owner,conversationId,target.artifactId])} conversationId={conversationId} artifactId={target.artifactId} onOpen={onOpen}/>
   <ArtifactRecovery key={JSON.stringify([owner,target.artifactId])} artifactId={target.artifactId} version={target.kind==='file'?target.version:target.toVersion} sha256={target.kind==='file'?target.sha256:target.afterSha256} partIndex={target.kind==='file'?target.partIndex:undefined} onRestored={reload}/>
-  {(!current||!content&&!current.error)&&<p role="status">正在读取步骤文件…</p>}
+  {(!current||!content&&!current.error)&&<p role="status">{t('正在读取步骤文件…','Reading step file…')}</p>}
   {content&&<section data-chat-search-content={JSON.stringify(['artifact',identity,content.file.version,content.before?.version??null])}>
    <h4>{content.file.relative_path||content.file.file_name}</h4>
-   <p>{content.before?`版本 ${content.before.version} → ${content.file.version}`:`版本 ${content.file.version}`}
-    {content.file.part_index!==undefined?` · 第 ${content.file.part_index} 卷`:''}
-    {target.kind==='file'&&target.version===undefined?' · 当前可读文件版本':''}</p>
-   {!content.file.part_count&&(!content.file.local_state||content.file.local_state==='present')&&<a href={download(content.file)} download rel="noreferrer">下载版本 {content.file.version}</a>}
-   {content.before&&!content.before.part_count&&(!content.before.local_state||content.before.local_state==='present')&&<a href={download(content.before)} download rel="noreferrer">下载版本 {content.before.version}</a>}
-   {content.file.part_index!==undefined&&<button type="button" data-chat-search-ignore onClick={()=>onOpen({kind:'file',artifactId:content.file.artifact_id,label:'查看全部分卷',version:1})}>返回各卷目录</button>}
+   <p>{content.before?t(`版本 ${content.before.version} → ${content.file.version}`,`Version ${content.before.version} → ${content.file.version}`):t(`版本 ${content.file.version}`,`Version ${content.file.version}`)}
+    {content.file.part_index!==undefined?t(` · 第 ${content.file.part_index} 卷`,` · Part ${content.file.part_index}`):''}
+    {target.kind==='file'&&target.version===undefined?t(' · 当前可读文件版本',' · Current Readable File Version'):''}</p>
+   {!content.file.part_count&&(!content.file.local_state||content.file.local_state==='present')&&<a href={download(content.file)} download rel="noreferrer">{t('下载版本','Download Version')} {content.file.version}</a>}
+   {content.before&&!content.before.part_count&&(!content.before.local_state||content.before.local_state==='present')&&<a href={download(content.before)} download rel="noreferrer">{t('下载版本','Download Version')} {content.before.version}</a>}
+   {content.file.part_index!==undefined&&<button type="button" data-chat-search-ignore onClick={()=>onOpen({kind:'file',artifactId:content.file.artifact_id,label:'查看全部分卷',version:1})}>{t('返回各卷目录','Return to Part Catalog')}</button>}
    {content.file.part_count&&<ArtifactParts key={JSON.stringify([owner,content.file.artifact_id,content.file.version,content.file.sha256])} file={content.file} onOpen={onOpen}/>}
    {content.text!==undefined&&<pre>{content.text}</pre>}
    {content.image&&<img src={content.image} alt={content.file.file_name}/>}
-   {content.truncated&&<p role="status">已显示前200000个字符，可下载对应版本查看全文。</p>}
-   {content.notice&&<p role="status" data-chat-search-ignore>{content.notice}</p>}
-   {!content.notice&&content.text===undefined&&!content.image&&<p role="status" data-chat-search-ignore>此格式可下载查看。</p>}
+   {content.truncated&&<p role="status">{t('已显示前200000个字符，可下载对应版本查看全文。','The first 200000 characters are shown. Download the corresponding version to read the full text.')}</p>}
+   {content.notice&&<p role="status" data-chat-search-ignore>{target.kind==='file'&&content.file.part_count?t(content.notice,`This artifact contains ${content.file.part_count} parts. Select an individual part to view.`):conversationUiError(content.notice,language)}</p>}
+   {!content.notice&&content.text===undefined&&!content.image&&<p role="status" data-chat-search-ignore>{t('此格式可下载查看。','Download this format to view it.')}</p>}
   </section>}
-  {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试读取</button></p>}
+  {current?.error&&<p role="alert">{conversationUiError(current.error,language)} <button type="button" onClick={()=>setRevision(value=>value+1)}>{t('重试读取','Retry Reading')}</button></p>}
  </div>;
 }
