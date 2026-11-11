@@ -133,11 +133,13 @@ function installWindowChrome(){
   const host=document.createElement('div');host.id='jot-window-caption';
   const shadow=host.attachShadow({mode:'closed'}),style=document.createElement('style');
   style.textContent=`:host{position:fixed;top:0;left:0;height:var(--jot-caption-height);width:100%;z-index:10000;display:block;background:var(--jot-caption-bg);color:var(--jot-caption-fg);-webkit-app-region:drag;user-select:none;font:13px system-ui}
+   :host([data-platform=darwin][data-toolbar]){width:100px;background:transparent}:host([data-platform=darwin][data-toolbar]) nav{display:none}
    :host([hidden]){display:none}:host([data-platform=win32]),:host([data-platform=linux]){left:env(titlebar-area-x,0px);width:env(titlebar-area-width,calc(100% - 150px))}
    nav{display:flex;align-items:center;height:100%;padding:0 8px;gap:2px;white-space:nowrap}button{-webkit-app-region:no-drag;padding:0 10px;height:calc(100% - 8px);max-height:32px;border:0;border-radius:5px;color:inherit;background:transparent;font:inherit;cursor:default}
    button:hover,button[aria-expanded=true]{background:color-mix(in srgb,currentColor 10%,transparent)}button:focus-visible{outline:2px solid #818cf8;outline-offset:-2px}button[hidden]{display:none}span{padding-left:96px}p{position:absolute;top:100%;margin:0;padding:8px;background:var(--jot-caption-bg);color:var(--jot-caption-fg);-webkit-app-region:no-drag}`;
   const sheet=document.createElement('style');sheet.textContent=`html[data-jot-desktop-platform]{--jot-caption-height:${platform==='darwin'?48:32}px;scroll-padding-top:var(--jot-caption-height)}
    html[data-jot-desktop-platform=win32],html[data-jot-desktop-platform=linux]{--jot-caption-height:env(titlebar-area-height,32px)}
+   html[data-jot-desktop-platform=darwin][data-jot-desktop-toolbar] body{margin-top:0!important}
    html[data-jot-desktop-fullscreen]{--jot-caption-height:0px}html[data-jot-desktop-platform] body{margin-top:var(--jot-caption-height)!important;background:var(--jot-window-bg);color:var(--jot-caption-fg)}`;
   host.dataset.platform=platform;root.dataset.jotDesktopPlatform=platform;
   const nav=document.createElement('nav'),notice=document.createElement('p');notice.hidden=true;notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');
@@ -146,6 +148,8 @@ function installWindowChrome(){
   if(platform==='darwin'){const label=document.createElement('span');label.textContent='Jot';nav.replaceChildren(label);}else nav.setAttribute('role','menubar');
   shadow.append(style,nav,notice);document.head.append(sheet);document.body.append(host);
   const paint=()=>{
+   host.toggleAttribute('data-toolbar',platform==='darwin'&&root.hasAttribute('data-jot-desktop-toolbar'));
+   host.toggleAttribute('data-integrated',platform==='darwin'&&root.hasAttribute('data-jot-desktop-integrated'));
    const palette=chromePalette(desiredTheme);root.style.setProperty('--jot-window-bg',palette.background);root.style.setProperty('--jot-caption-bg',palette.caption);root.style.setProperty('--jot-caption-fg',palette.symbol);
    const zh=!root.lang||root.lang.toLowerCase().startsWith('zh');nav.setAttribute('aria-label',zh?'应用菜单':'Application menu');
    buttons.forEach((button,index)=>{button.textContent=definitions[index][zh?1:2];button.title=`${button.textContent} (Alt+${definitions[index][3].toUpperCase()})`;});
@@ -253,7 +257,7 @@ function installWindowChrome(){
    if(sentTheme===desiredTheme)return;const requested=desiredTheme;sentTheme=requested;
    void invoke('window.chrome.theme',{theme:requested}).then(applyState).catch(()=>{if(sentTheme===requested)sentTheme=null;});
   };
-  const observer=new MutationObserver(syncTheme);observer.observe(root,{attributes:true,attributeFilter:['data-theme','lang']});
+  const observer=new MutationObserver(syncTheme);observer.observe(root,{attributes:true,attributeFilter:['data-theme','lang','data-jot-desktop-toolbar','data-jot-desktop-integrated']});
   window.addEventListener('keydown',keydown);paint();
   void invoke('window.chrome.read').then(value=>{applyState(value);syncTheme();}).catch(syncTheme);
   const dispose=()=>{
