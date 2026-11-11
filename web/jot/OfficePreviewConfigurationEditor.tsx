@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import React,{useEffect,useRef,useState} from 'react';
 import type {OfficePreviewConfiguration,OfficePreviewConfigurationUpdate} from '../../packages/gateway/contracts/types';
 import {ApiError,request,taskDraftScope} from './client';
@@ -11,6 +13,7 @@ function configuration(value:OfficePreviewConfiguration){
  return value;
 }
 export default function OfficePreviewConfigurationEditor({owner,onSaved}:{owner:string;onSaved:()=>void}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const [value,setValue]=useState<OfficePreviewConfiguration>();
  const [draft,setDraft]=useState<{service:OfficePreviewConfiguration['service'];binaryPath:string}>({service:'builtin',binaryPath:''});
  const [revision,setRevision]=useState(0),[reading,setReading]=useState(true),[saving,setSaving]=useState(false),[error,setError]=useState('');
@@ -41,19 +44,19 @@ export default function OfficePreviewConfigurationEditor({owner,onSaved}:{owner:
   }finally{if(active.current===controller){active.current=null;setSaving(false);}}
  };
  const disabled=reading||saving||!!attempt||!value?.writable;
- return <section aria-label="Office预览配置">
-  <button type="button" disabled={reading||saving||!!attempt} onClick={()=>{setError('');setRevision(current=>current+1);}}>重新读取Office配置</button>
-  {reading&&<p role="status">正在读取Office配置…</p>}
-  {error&&<p role="alert">{error}</p>}
+ return <section lang={language} aria-label={t('Office预览配置','Office Preview Configuration')}>
+  <button type="button" disabled={reading||saving||!!attempt} onClick={()=>{setError('');setRevision(current=>current+1);}}>{t('重新读取Office配置','Read Office Configuration Again')}</button>
+  {reading&&<p role="status">{t('正在读取Office配置…','Reading Office configuration…')}</p>}
+  {error&&<p role="alert">{conversationUiError(error,language)}</p>}
   {value&&<>
-   <p>配置版本 {value.version}</p>
-   {!value.writable&&<p role="status">当前身份具有Office配置读取权限，保存权限由服务端配置所有者绑定。</p>}
-   <label>默认预览服务 <select disabled={disabled} value={draft.service} onChange={event=>setDraft(current=>({...current,service:event.target.value as OfficePreviewConfiguration['service']}))}>
-    <option value="builtin">内置查看器</option><option value="libreoffice">LibreOffice转换PDF</option>
+   <p>{t('配置版本','Configuration Version')} {value.version}</p>
+   {!value.writable&&<p role="status">{t('当前身份具有Office配置读取权限，保存权限由服务端配置所有者绑定。','The current identity can read Office configuration. Save permission is bound to the server-configured owner.')}</p>}
+   <label>{t('默认预览服务','Default Preview Service')} <select disabled={disabled} value={draft.service} onChange={event=>setDraft(current=>({...current,service:event.target.value as OfficePreviewConfiguration['service']}))}>
+    <option value="builtin">{t('内置查看器','Built-in Viewer')}</option><option value="libreoffice">{t('LibreOffice转换PDF','LibreOffice PDF Conversion')}</option>
    </select></label>
-   <label>LibreOffice程序路径 <input disabled={disabled} maxLength={4096} value={draft.binaryPath} placeholder="留空自动发现可用的LibreOffice程序" onChange={event=>setDraft(current=>({...current,binaryPath:event.target.value}))}/></label>
-   <button type="button" disabled={disabled} onClick={()=>{setDraft({service:value.service,binaryPath:value.binaryPath});setError('');}}>取消编辑</button>
-   <button type="button" disabled={reading||saving||!value.writable} onClick={()=>void save()}>{saving?'正在保存Office配置…':attempt?'重试原保存请求':'保存Office配置'}</button>
+   <label>{t('LibreOffice程序路径','LibreOffice Program Path')} <input disabled={disabled} maxLength={4096} value={draft.binaryPath} placeholder={t('留空自动发现可用的LibreOffice程序','Leave blank to discover an available LibreOffice program')} onChange={event=>setDraft(current=>({...current,binaryPath:event.target.value}))}/></label>
+   <button type="button" disabled={disabled} onClick={()=>{setDraft({service:value.service,binaryPath:value.binaryPath});setError('');}}>{t('取消编辑','Cancel Editing')}</button>
+   <button type="button" disabled={reading||saving||!value.writable} onClick={()=>void save()}>{saving?t('正在保存Office配置…','Saving Office configuration…'):attempt?t('重试原保存请求','Retry Original Save Request'):t('保存Office配置','Save Office Configuration')}</button>
   </>}
   <OfficePreviewCandidateScan owner={owner} {...(!disabled?{onSelect:(binaryPath:string)=>setDraft(current=>({...current,binaryPath}))}:{})}/>
  </section>;

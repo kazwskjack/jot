@@ -1,8 +1,11 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import React,{useEffect,useRef,useState} from 'react';
 import type {OfficePreviewCandidatePage} from '../../packages/gateway/contracts/types';
 import {ApiError,request,taskDraftScope} from './client';
 
 export default function OfficePreviewCandidateScan({owner,onSelect}:{owner:string;onSelect?:(path:string)=>void}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{owner:string;loading:boolean;value?:OfficePreviewCandidatePage;page?:number;error?:string}>();
  useEffect(()=>()=>{active.current?.abort();active.current=null;},[owner]);
@@ -30,17 +33,17 @@ export default function OfficePreviewCandidateScan({owner,onSelect}:{owner:strin
    if(!controller.signal.aborted&&taskDraftScope()===owner)setState({owner,loading:false,...previous,error:error instanceof ApiError&&error.status===409?'原扫描游标已失效，请重新开始扫描。':error instanceof ApiError&&error.status===429?'候选扫描正在处理另一页，请稍后继续。':error instanceof Error?error.message:'Office候选扫描失败。'});
   }finally{if(active.current===controller)active.current=null;}
  };
- return <section aria-label="LibreOffice候选路径">
-  <button type="button" disabled={current?.loading} onClick={()=>void scan()}>扫描LibreOffice候选路径</button>
-  {current?.loading&&<p role="status">正在逐条扫描候选路径，每条最多2秒，每页最多32条…</p>}
-  {current?.error&&<p role="alert">{current.error}</p>}
+ return <section lang={language} aria-label={t('LibreOffice候选路径','LibreOffice Candidate Paths')}>
+  <button type="button" disabled={current?.loading} onClick={()=>void scan()}>{t('扫描LibreOffice候选路径','Scan LibreOffice Candidate Paths')}</button>
+  {current?.loading&&<p role="status">{t('正在逐条扫描候选路径，每条最多2秒，每页最多32条…','Scanning candidate paths one at a time, up to 2 seconds each and 32 per page…')}</p>}
+  {current?.error&&<p role="alert">{conversationUiError(current.error,language)}</p>}
   {current?.value&&<>
-   <p>候选扫描第{current.page??1}页</p>
-   <p>版本扫描时间 <time dateTime={current.value.checkedAt}>{current.value.checkedAt}</time></p>
-   <ul>{current.value.candidates.map(item=><li key={item.binaryPath}><code>{item.binaryPath}</code> · {item.available?item.version:item.reason==='probe_failed'?'版本探测失败':'版本信息未确认'} {item.available&&onSelect&&<button type="button" onClick={()=>{if(taskDraftScope()===owner)onSelect(item.binaryPath);}}>选择此路径</button>}</li>)}</ul>
-   {current.value.truncated&&<p role="status">部分路径或目录暂不可读取，已显示当前页可读取的扫描结果。</p>}
-   {current.value.next_cursor&&<button type="button" disabled={current.loading} onClick={()=>void scan(true)}>继续扫描后续目录项目</button>}
-   {!current.value.next_cursor&&<p role="status">本次候选目录扫描已到末尾。</p>}
+   <p>{t(`候选扫描第${current.page??1}页`,`Candidate Scan Page ${current.page??1}`)}</p>
+   <p>{t('版本扫描时间','Version Scan Time')} <time dateTime={current.value.checkedAt}>{current.value.checkedAt}</time></p>
+   <ul>{current.value.candidates.map(item=><li key={item.binaryPath}><code>{item.binaryPath}</code> · {item.available?item.version:item.reason==='probe_failed'?t('版本探测失败','Version probe failed'):t('版本信息未确认','Version information unconfirmed')} {item.available&&onSelect&&<button type="button" onClick={()=>{if(taskDraftScope()===owner)onSelect(item.binaryPath);}}>{t('选择此路径','Select This Path')}</button>}</li>)}</ul>
+   {current.value.truncated&&<p role="status">{t('部分路径或目录暂不可读取，已显示当前页可读取的扫描结果。','Some paths or directories are unreadable. The readable scan results for this page are shown.')}</p>}
+   {current.value.next_cursor&&<button type="button" disabled={current.loading} onClick={()=>void scan(true)}>{t('继续扫描后续目录项目','Continue Scanning Directory Entries')}</button>}
+   {!current.value.next_cursor&&<p role="status">{t('本次候选目录扫描已到末尾。','This candidate directory scan has reached the end.')}</p>}
   </>}
  </section>;
 }

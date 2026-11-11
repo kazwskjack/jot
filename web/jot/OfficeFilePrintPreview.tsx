@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import type {OfficePrintFocus} from './pdf-file-view-state';
 import React,{lazy,Suspense,useEffect,useRef,useState} from 'react';
 import {ApiError,abortableDelay,taskDraftScope} from './client';
@@ -5,6 +7,7 @@ import {readOfficePrintPreviewBytes,type ListedFilePreviewSource,type OfficePrin
 const PdfViewer=lazy(()=>import('./ActivityToolFilePdf'));
 
 export default function OfficeFilePrintPreview(source:ListedFilePreviewSource&{focus?:OfficePrintFocus}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),[revision,setRevision]=useState(0);
  const [readOriginal,setReadOriginal]=useState(true);
  const identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,source.focus?.key,source.focus?.view.sha256,source.focus?.view.size,source.focus?.view.pageCount,readOriginal,revision]);
@@ -35,13 +38,13 @@ export default function OfficeFilePrintPreview(source:ListedFilePreviewSource&{f
  },[identity,owner]);
  const current=state?.identity===identity?state:undefined;
  const retry=()=>{if(taskDraftScope()===owner)setRevision(value=>value+1);};
- return <section aria-label="固定Office来源的转换PDF">
-  <button type="button" onClick={retry} disabled={!current?.preview&&!current?.error}>{source.focus&&readOriginal?'重新读取原转换版本':'重新转换固定版本'}</button>
-  {(!current||!current.preview&&!current.error)&&<p role="status">{source.focus&&readOriginal?'正在读取并核对原转换PDF副本…':'正在核对固定来源并转换PDF…'} <button type="button" onClick={()=>cancel.current()}>取消转换读取</button></p>}
-  {current?.error&&<p role="alert">{current.error} <button type="button" onClick={retry}>重试转换</button></p>}
-  {current?.error&&source.focus&&readOriginal&&<button type="button" onClick={()=>{if(taskDraftScope()===owner){setReadOriginal(false);setRevision(value=>value+1);}}}>重新转换并对照原快照</button>}
-  {current?.preview&&source.focus&&<p role="status">{current.confirmed?'已核对原转换PDF摘要，可定位原引用页。':'本次转换PDF摘要与原引用不同，请对照保留的原引用快照。'}</p>}
-  {current?.preview&&<Suspense fallback={<p role="status">正在载入转换PDF查看器…</p>}>
+ return <section lang={language} aria-label={t('固定Office来源的转换PDF','Converted PDF from the Pinned Office Source')}>
+  <button type="button" onClick={retry} disabled={!current?.preview&&!current?.error}>{source.focus&&readOriginal?t('重新读取原转换版本','Read Original Converted Version Again'):t('重新转换固定版本','Convert Pinned Version Again')}</button>
+  {(!current||!current.preview&&!current.error)&&<p role="status">{source.focus&&readOriginal?t('正在读取并核对原转换PDF副本…','Reading and verifying the original converted PDF copy…'):t('正在核对固定来源并转换PDF…','Verifying the pinned source and converting to PDF…')} <button type="button" onClick={()=>cancel.current()}>{t('取消转换读取','Cancel Conversion Read')}</button></p>}
+  {current?.error&&<p role="alert">{conversationUiError(current.error,language)} <button type="button" onClick={retry}>{t('重试转换','Retry Conversion')}</button></p>}
+  {current?.error&&source.focus&&readOriginal&&<button type="button" onClick={()=>{if(taskDraftScope()===owner){setReadOriginal(false);setRevision(value=>value+1);}}}>{t('重新转换并对照原快照','Convert Again and Compare with the Original Snapshot')}</button>}
+  {current?.preview&&source.focus&&<p role="status">{current.confirmed?t('已核对原转换PDF摘要，可定位原引用页。','The original converted PDF digest was verified. Original reference pages can be located.'):t('本次转换PDF摘要与原引用不同，请对照保留的原引用快照。','This converted PDF digest differs from the original reference. Compare with the retained original reference snapshot.')}</p>}
+  {current?.preview&&<Suspense fallback={<p role="status">{t('正在载入转换PDF查看器…','Loading converted PDF viewer…')}</p>}>
    <PdfViewer key={identity+current.preview.sha256} {...source} officePrint={{...current.preview,onRetry:retry,...(current.confirmed?{focus:source.focus}:{})}}/>
   </Suspense>}
  </section>;

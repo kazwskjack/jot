@@ -401,10 +401,10 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
    <button type="button" aria-pressed={print} disabled={loading} onClick={()=>setPrintSource({identity,enabled:true})}>{t('LibreOffice转换PDF','LibreOffice Converted PDF')}</button>
   </nav>
   {displayError&&<p role="alert">{conversationUiError(displayError,language)}</p>}
-  <div lang="zh-CN"><OfficePreviewServiceStatus key={identity} owner={owner} onRendererChange={()=>{setPrintSource(undefined);refresh();}} onStatus={value=>setConfiguredService({identity,service:value.service})}/></div>
+  <div lang={language}><OfficePreviewServiceStatus key={identity} owner={owner} onRendererChange={()=>{setPrintSource(undefined);refresh();}} onStatus={value=>setConfiguredService({identity,service:value.service})}/></div>
   <ActivityToolFileBytes {...props}/>
   {!native&&!print&&<p role="status">{t('此文件可通过LibreOffice转换PDF查看，请选择转换入口。','This file can be viewed as a LibreOffice-converted PDF. Select the conversion view.')}</p>}
-  {print&&<div lang="zh-CN"><OfficeFilePrintPreview key={identity+':print:'+revision} {...props} focus={props.printFocus}/></div>}
+  {print&&<div lang={language}><OfficeFilePrintPreview key={identity+':print:'+revision} {...props} focus={props.printFocus}/></div>}
   {loading&&<p role="status">{t('正在核对原版本并解析Office内容…','Verifying the original version and parsing Office content…')} <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'Office读取已取消'});}}>{t('取消读取','Cancel Reading')}</button></p>}
   {!print&&current?.page&&<>
    <p>{t('原文件结构化内容','Original File Structured Content')} · {current.page.engine.name} {current.page.engine.version}</p>

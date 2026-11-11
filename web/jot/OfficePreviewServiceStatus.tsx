@@ -1,9 +1,12 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import OfficePreviewConfigurationEditor from './OfficePreviewConfigurationEditor';
 import React,{useEffect,useRef,useState} from 'react';
 import type {OfficePreviewStatus} from '../../packages/gateway/contracts/types';
 import {request,taskDraftScope} from './client';
 
 export default function OfficePreviewServiceStatus({owner,onRendererChange,onStatus}:{owner:string;onRendererChange:()=>void;onStatus:(value:OfficePreviewStatus)=>void}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const [revision,setRevision]=useState(0);
  const [state,setState]=useState<{loading:boolean;value?:OfficePreviewStatus;error?:string}>({loading:true});
  const signature=useRef<string|undefined>(undefined),changed=useRef(onRendererChange);changed.current=onRendererChange;
@@ -30,16 +33,16 @@ export default function OfficePreviewServiceStatus({owner,onRendererChange,onSta
   });
   return()=>{live=false;controller.abort();};
  },[owner,revision]);
- return <details className="jot-office-service-status">
-  <summary>Office预览服务状态</summary>
-  <button type="button" disabled={state.loading} onClick={()=>{if(taskDraftScope()===owner)setRevision(value=>value+1);}}>刷新服务状态</button>
-  {state.loading&&<p role="status">正在读取预览服务状态…</p>}
-  {state.error&&<p role="alert">{state.error}</p>}
+ return <details lang={language} className="jot-office-service-status">
+  <summary>{t('Office预览服务状态','Office Preview Service Status')}</summary>
+  <button type="button" disabled={state.loading} onClick={()=>{if(taskDraftScope()===owner)setRevision(value=>value+1);}}>{t('刷新服务状态','Refresh Service Status')}</button>
+  {state.loading&&<p role="status">{t('正在读取预览服务状态…','Reading preview service status…')}</p>}
+  {state.error&&<p role="alert">{conversationUiError(state.error,language)}</p>}
   {state.value&&<>
-   <p>默认预览服务为{state.value.service==='builtin'?'内置查看器':'LibreOffice转换PDF'}。</p>
-   <p role="status">{state.value.libreOffice.available?state.value.libreOffice.version:'当前文档引擎的LibreOffice版本尚未确认。'}</p>
-   <p>{state.value.libreOffice.available?'预览引擎路径':'最后探测路径'} <code>{state.value.libreOffice.binaryPath}</code></p>
-   <p>检查时间 <time dateTime={state.value.checkedAt}>{state.value.checkedAt}</time></p>
+   <p>{state.value.service==='builtin'?t('默认预览服务为内置查看器。','The default preview service is the built-in viewer.'):t('默认预览服务为LibreOffice转换PDF。','The default preview service is LibreOffice PDF conversion.')}</p>
+   <p role="status">{state.value.libreOffice.available?state.value.libreOffice.version:t('当前文档引擎的LibreOffice版本尚未确认。','The current document engine’s LibreOffice version is unconfirmed.')}</p>
+   <p>{state.value.libreOffice.available?t('预览引擎路径','Preview Engine Path'):t('最后探测路径','Last Probed Path')} <code>{state.value.libreOffice.binaryPath}</code></p>
+   <p>{t('检查时间','Checked At')} <time dateTime={state.value.checkedAt}>{state.value.checkedAt}</time></p>
   </>}
   <OfficePreviewConfigurationEditor key={owner} owner={owner} onSaved={()=>setRevision(value=>value+1)}/>
  </details>;
