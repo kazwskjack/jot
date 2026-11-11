@@ -37,7 +37,7 @@ export default function DesktopAboutPanel({scopeKey}:{scopeKey:string}){
    {info.launcher_release_id&&<p className="wb-settings-note">启动器发行标识：<code>{info.launcher_release_id}</code></p>}
    <p className="wb-settings-note">Electron {info.versions.electron??'未知'} · Chromium {info.versions.chrome??'未知'} · Node {info.versions.node??'未知'}</p>
    <p className="wb-settings-note">{info.license}</p>
-   <details><summary>完整版本信息（可选择复制）</summary><pre>{info.version_information}</pre></details>
+   <details><summary>完整版本信息（可选择复制）</summary><pre tabIndex={0} style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:240,overflow:'auto'}}>{info.version_information}</pre></details>
   </>}
   <button type="button" disabled={loading} onClick={()=>void refresh()}>刷新版本信息</button>
  </section>;
