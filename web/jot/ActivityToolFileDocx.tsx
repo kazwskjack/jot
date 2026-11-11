@@ -1,7 +1,8 @@
+import {pdfViewIdentity} from './pdf-file-view-state';
 import OfficeFileViewState from './OfficeFileViewState';
 import React,{useContext,useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
-import {readFileVisualSourceBytes,readOfficeViewerUrl,type FileVisualSource} from './activity-file-preview-client';
+import {fileViewingReferenceSource,readFileVisualSourceBytes,readOfficeViewerUrl,type FileViewingSource} from './activity-file-preview-client';
 import {FileTextReferenceContext,nativeReferenceIdentity,type FileReferenceIdentity,type FileTextReference,type OfficeTextFocus,type OfficeRegionFocus} from './FileTextReferences';
 import OfficeFileRegionReference,{type OfficeRegionSession} from './OfficeFileRegionReference';
 import {createTextContentReference} from './vendor/pilotdeck-content-reference';
@@ -39,7 +40,8 @@ function originalVisualFocus(focus:OfficeTextFocus|undefined,source:FileReferenc
  return {selectedText:value.reference.selectedText,occurrenceIndex:locator.occurrenceIndex!,prefix:locator.quote.prefix??'',suffix:locator.quote.suffix??''};
 }
 
-function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{source:FileVisualSource;owner:string;identity:string;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
+function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{source:FileViewingSource;owner:string;identity:string;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
+ const referenceSource=fileViewingReferenceSource(source);
  const context=useContext(FileTextReferenceContext),currentContext=useRef(context);currentContext.current=context;
  const frame=useRef<HTMLIFrameElement>(null),loaded=useRef<HTMLIFrameElement|null>(null);
  const notify=useRef<(frame:HTMLIFrameElement)=>void>(()=>{});
@@ -50,7 +52,7 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
  const [committing,setCommitting]=useState(false),[notice,setNotice]=useState(''),[focused,setFocused]=useState<boolean>();
  const [viewerUrl,setViewerUrl]=useState<string>();
  const regionSession=useRef<OfficeRegionSession|undefined>(undefined);
- const disabled=!!source.native_source&&!context?.nativeSources?.includes(1)||!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId;
+ const disabled=!referenceSource||!!source.native_source&&!context?.nativeSources?.includes(1)||!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId;
  useEffect(()=>{if(disabled){selected.current=undefined;pending.current=undefined;window.clearTimeout(pendingTimer.current);setCommitting(false);setProposal(undefined);}},[disabled]);
  useEffect(()=>{
   const controller=new AbortController();let active=true;
@@ -67,11 +69,11 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
  },[identity,owner]);
  useEffect(()=>{
   if(!viewerUrl)return;
-  const controller=new AbortController(),target=frame.current,token=crypto.randomUUID(),focus=originalVisualFocus(officeTextFocus,source,owner);
+  const controller=new AbortController(),target=frame.current,token=crypto.randomUUID(),focus=referenceSource?originalVisualFocus(officeTextFocus,referenceSource,owner):undefined;
   const viewerOrigin=new URL(viewerUrl).origin;
   let instance:string|undefined,bytes:ArrayBuffer|undefined,sent=false,closed=false,ready=false,booted=false;
   const live=()=>!closed&&!controller.signal.aborted&&taskDraftScope()===owner;
-  const canAdd=()=>{const value=currentContext.current;return live()&&!!value&&(!source.native_source||!!value.nativeSources?.includes(1))&&!value.disabled&&value.owner===owner&&value.conversationId===source.conversationId;};
+  const canAdd=()=>{const value=currentContext.current;return live()&&!!referenceSource&&!!value&&(!source.native_source||!!value.nativeSources?.includes(1))&&!value.disabled&&value.owner===owner&&value.conversationId===source.conversationId;};
   const resetPending=()=>{pending.current=undefined;window.clearTimeout(pendingTimer.current);setCommitting(false);};
   const dispose=()=>{closed=true;controller.abort();bytes=undefined;selected.current=undefined;pending.current=undefined;window.clearTimeout(timeout);window.clearTimeout(pendingTimer.current);window.removeEventListener('message',message);window.document.removeEventListener('securitypolicyviolation',policyViolation);};
   const fail=(text:string)=>{if(!live())return;dispose();setProposal(undefined);setCommitting(false);if(officeTextFocus)setFocused(false);setState({phase:'error',message:text});};
@@ -106,10 +108,10 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
     setFocused(value.confirmed);
    }else if(ready&&value.type==='jot-docx-selection'){
     resetPending();selected.current=undefined;setProposal(undefined);setNotice('');
-    if(!canAdd()||value.selection===null)return;
+    if(!referenceSource||!canAdd()||value.selection===null)return;
     const selection=readSelection(value.selection);if(!selection)return;
     try{
-     const next={selection,reference:createVisualReference(selection,source,owner)};selected.current=next;setProposal(next);
+     const next={selection,reference:createVisualReference(selection,referenceSource,owner)};selected.current=next;setProposal(next);
     }catch{setNotice('视觉文字选区尚未通过原文件引用校验。');}
    }else if(ready&&value.type==='jot-docx-commit-ready'){
     const original=pending.current,selection=readSelection(value.selection);
@@ -148,18 +150,19 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
   <p role={state.phase==='error'?'alert':'status'}>{state.message}
    {state.phase==='loading'&&<button type="button" onClick={()=>cancel.current()}>取消读取</button>}
   </p>
-  {officeTextFocus?.value.text_view===2&&<p role="status">{focused===true?'已核对并定位原视觉文字引用。':focused===false?'原视觉文字尚未与固定版本核对，请对照原引用快照。':'正在核对原视觉文字引用…'}</p>}
+  {referenceSource&&officeTextFocus?.value.text_view===2&&<p role="status">{focused===true?'已核对并定位原视觉文字引用。':focused===false?'原视觉文字尚未与固定版本核对，请对照原引用快照。':'正在核对原视觉文字引用…'}</p>}
   {notice&&<p role="status">{notice}</p>}
+  {state.phase==='ready'&&source.native_source&&!referenceSource&&<p>此打开内容没有引用凭据，可阅读和下载；文字、单元格与选区引用暂不可用。</p>}
   {state.phase!=='error'&&viewerUrl&&<iframe ref={frame} title="原固定版本Word视觉查看器" src={viewerUrl} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer"
    onLoad={event=>{loaded.current=event.currentTarget;notify.current(event.currentTarget);}}/>}
-  {state.phase==='ready'&&regionSession.current&&<OfficeFileViewState kind="docx" source={source} owner={owner} session={regionSession.current} focused={!!officeTextFocus||!!officeRegionFocus}/>}
-  {state.phase==='ready'&&regionSession.current&&<OfficeFileRegionReference kind="docx" source={source} owner={owner} session={regionSession.current} focus={officeRegionFocus}/>}
+  {state.phase==='ready'&&regionSession.current&&<OfficeFileViewState kind="docx" source={source} owner={owner} session={regionSession.current} focused={!!referenceSource&&(!!officeTextFocus||!!officeRegionFocus)}/>}
+  {state.phase==='ready'&&referenceSource&&regionSession.current&&<OfficeFileRegionReference kind="docx" source={referenceSource} owner={owner} session={regionSession.current} focus={officeRegionFocus}/>}
   {proposal&&<section className="jot-docx-selection" aria-label="待确认的Word视觉文字引用"><blockquote>{proposal.reference.reference.selectedText}</blockquote><button type="button" disabled={disabled||committing} onPointerDown={event=>event.preventDefault()} onMouseDown={event=>event.preventDefault()} onClick={()=>commit.current()}>引用Word文字到当前对话</button></section>}
  </section>;
 }
 
-export default function ActivityToolFileDocx(source:FileVisualSource&{officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
+export default function ActivityToolFileDocx(source:FileViewingSource&{officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
  const owner=taskDraftScope(),[revision,setRevision]=useState(0);
- const identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,nativeReferenceIdentity(source.native_source),source.officeTextFocus?.key,source.officeRegionFocus?.key,revision]);
+ const identity=JSON.stringify([pdfViewIdentity(source,owner),source.native_source?.proof??null,source.officeTextFocus?.key,source.officeRegionFocus?.key,revision]);
  return <><button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取Word视觉内容</button><DocxAttempt key={identity} source={source} owner={owner} identity={identity} officeTextFocus={source.officeTextFocus} officeRegionFocus={source.officeRegionFocus}/></>;
 }

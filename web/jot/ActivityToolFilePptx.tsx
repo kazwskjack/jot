@@ -1,11 +1,13 @@
+import {pdfViewIdentity} from './pdf-file-view-state';
 import OfficeFileViewState from './OfficeFileViewState';
 import React,{useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
-import {readOfficeViewerUrl,readFileVisualSourceBytes,type FileVisualSource} from './activity-file-preview-client';
-import {nativeReferenceIdentity,type OfficeRegionFocus} from './FileTextReferences';
+import {fileViewingReferenceSource,readOfficeViewerUrl,readFileVisualSourceBytes,type FileViewingSource} from './activity-file-preview-client';
+import {type OfficeRegionFocus} from './FileTextReferences';
 import OfficeFileRegionReference,{type OfficeRegionSession} from './OfficeFileRegionReference';
 
-function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:FileVisualSource;owner:string;identity:string;officeRegionFocus?:OfficeRegionFocus}){
+function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:FileViewingSource;owner:string;identity:string;officeRegionFocus?:OfficeRegionFocus}){
+ const referenceSource=fileViewingReferenceSource(source);
  const frame=useRef<HTMLIFrameElement>(null),probe=useRef<(element:HTMLIFrameElement)=>void>(()=>{}),cancel=useRef<()=>void>(()=>{});
  const regionSession=useRef<OfficeRegionSession|undefined>(undefined);
  const [url,setUrl]=useState<string>(),[state,setState]=useState<{phase:'loading'|'ready'|'error';message:string;working?:boolean}>({phase:'loading',message:'正在核对原幻灯片并读取视觉内容…'});
@@ -55,12 +57,13 @@ function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:FileVisua
  },[identity,owner]);
  return <section className="jot-pptx-preview" aria-label="原幻灯片视觉内容">
   <p role={state.phase==='error'?'alert':'status'}>{state.working?'正在绘制或搜索幻灯片…':state.message} {(state.phase==='loading'||state.working)&&<button type="button" onClick={()=>cancel.current()}>取消并关闭视觉查看器</button>}</p>
+  {state.phase==='ready'&&source.native_source&&!referenceSource&&<p>此打开内容没有引用凭据，可阅读和下载；文字、单元格与选区引用暂不可用。</p>}
   {state.phase!=='error'&&url&&<iframe ref={frame} src={url} title="原固定版本幻灯片视觉查看器" sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={event=>probe.current(event.currentTarget)}/>}
-  {state.phase==='ready'&&regionSession.current&&<OfficeFileViewState kind="pptx" source={source} owner={owner} session={regionSession.current} focused={!!officeRegionFocus}/>}
-  {state.phase==='ready'&&regionSession.current&&<OfficeFileRegionReference kind="pptx" source={source} owner={owner} session={regionSession.current} focus={officeRegionFocus}/>}
+  {state.phase==='ready'&&regionSession.current&&<OfficeFileViewState kind="pptx" source={source} owner={owner} session={regionSession.current} focused={!!referenceSource&&!!officeRegionFocus}/>}
+  {state.phase==='ready'&&referenceSource&&regionSession.current&&<OfficeFileRegionReference kind="pptx" source={referenceSource} owner={owner} session={regionSession.current} focus={officeRegionFocus}/>}
  </section>;
 }
-export default function ActivityToolFilePptx(source:FileVisualSource&{officeRegionFocus?:OfficeRegionFocus}){
- const owner=taskDraftScope(),[revision,setRevision]=useState(0),identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,nativeReferenceIdentity(source.native_source),source.officeRegionFocus?.key,revision]);
+export default function ActivityToolFilePptx(source:FileViewingSource&{officeRegionFocus?:OfficeRegionFocus}){
+ const owner=taskDraftScope(),[revision,setRevision]=useState(0),identity=JSON.stringify([pdfViewIdentity(source,owner),source.native_source?.proof??null,source.officeRegionFocus?.key,revision]);
  return <><button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取幻灯片视觉内容</button><PptxAttempt key={identity} source={source} owner={owner} identity={identity} officeRegionFocus={source.officeRegionFocus}/></>;
 }

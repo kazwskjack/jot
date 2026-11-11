@@ -1,6 +1,6 @@
 import {taskDraftScope} from './client';
 import {pdfViewIdentity} from './pdf-file-view-state';
-import type {FileReferenceIdentity} from './FileTextReferences';
+import type {FileViewingIdentity} from './activity-file-preview-client';
 import {cellRangeCoordinates,validateOfficeRegionView} from '../../packages/gateway/src/messages/content-reference.js';
 
 export type OfficeViewKind='docx'|'pptx'|'xlsx';
@@ -42,7 +42,7 @@ export function validOfficeView(value:unknown,kind:StoredViewKind):value is Offi
 type Entry={key:string;view:OfficeViewState};
 const limit=32,memory=new Map<string,OfficeViewState>();
 const storageKey=(owner:string)=>'jot.office-view.v1.'+encodeURIComponent(owner);
-export const officeViewIdentity=(source:FileReferenceIdentity,owner:string,kind:StoredViewKind)=>kind+':'+pdfViewIdentity(source,owner);
+export const officeViewIdentity=(source:FileViewingIdentity,owner:string,kind:StoredViewKind)=>kind+':'+pdfViewIdentity(source,owner);
 function entries(owner:string):Entry[]{
  const raw=globalThis.sessionStorage.getItem(storageKey(owner));if(!raw||raw.length>524288)return [];
  const data=JSON.parse(raw);if(data?.protocol!==1||!Array.isArray(data.entries)||data.entries.length>limit)return [];

@@ -1,12 +1,12 @@
 import {useEffect} from 'react';
-import type {FileReferenceIdentity} from './FileTextReferences';
+import type {FileViewingIdentity} from './activity-file-preview-client';
 import type {OfficeRegionSession} from './OfficeFileRegionReference';
 import {taskDraftScope} from './client';
 import {officeViewIdentity,readOfficeView,writeOfficeView,type OfficeViewKind} from './office-file-view-state';
 
 // shortcut: frame scroll reports coalesce at160ms; add a close acknowledgment when exact final scroll is required.
 /** View messages retain the original isolated window, token and exact source authority. */
-export default function OfficeFileViewState({source,owner,session,kind,focused}:{source:FileReferenceIdentity;owner:string;session:OfficeRegionSession;kind:OfficeViewKind;focused:boolean}){
+export default function OfficeFileViewState({source,owner,session,kind,focused}:{source:FileViewingIdentity;owner:string;session:OfficeRegionSession;kind:OfficeViewKind;focused:boolean}){
  const key=officeViewIdentity(source,owner,kind);
  useEffect(()=>{
   const receive=(event:MessageEvent)=>{

@@ -7,7 +7,7 @@ import {taskDraftScope} from './client';
 import {listedFileImageType} from './ActivityToolFileImage';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
-import {nativeMemberViewingSource,nativeMemberReferenceSource,readNativeMemberPreviewBytes,type NativeMemberPreviewSource,type NativeMemberOpenedBytes} from './activity-file-preview-client';
+import {nativeMemberViewingSource,readNativeMemberPreviewBytes,type NativeMemberPreviewSource,type NativeMemberOpenedBytes} from './activity-file-preview-client';
 
 const NativeSearchOfficePrint=lazy(()=>import('./NativeSearchOfficePrint'));
 const NativeSearchOfficeDocument=lazy(()=>import('./NativeSearchOfficeDocument'));
@@ -87,7 +87,7 @@ export default function NativeSearchFile({source,expected,printPin,focus,officeF
      <span>{Math.min(byteOffset+1,opened.size)}–{byteOffset+(bytes?.length??0)} / {opened.size} 字节</span>
      <button type="button" disabled={byteOffset+256>=opened.size} onClick={()=>setByteOffset(byteOffset+256)}>下一页字节</button>
     </nav>
-   </>:office?.native?<ConversationDisplayBoundary key={opened.openSha} label="原生Office预览"><Suspense fallback={<p role="status">正在载入Office查看器…</p>}><NativeSearchFileOffice key={JSON.stringify([opened.openSha,office.kind])} kind={office.kind} bytes={opened.bytes} source={nativeMemberReferenceSource(source,opened)} officeFocus={officeFocus} officeTextFocus={officeTextFocus} officeRegionFocus={officeRegionFocus}/></Suspense></ConversationDisplayBoundary>
+   </>:office?.native?<ConversationDisplayBoundary key={opened.openSha} label="原生Office预览"><Suspense fallback={<p role="status">正在载入Office查看器…</p>}><NativeSearchFileOffice key={JSON.stringify([opened.openSha,office.kind])} kind={office.kind} bytes={opened.bytes} source={nativeMemberViewingSource(source,opened)} officeFocus={officeFocus} officeTextFocus={officeTextFocus} officeRegionFocus={officeRegionFocus}/></Suspense></ConversationDisplayBoundary>
     :opened.imageUrl?<img src={opened.imageUrl} alt={source.member.path} style={{maxWidth:'100%',height:'auto'}} onError={()=>{setRaw(true);setState({identity,opened,error:'浏览器无法显示此图片格式，当前显示原始字节。'});}}/>
     :pdf?<ConversationDisplayBoundary key={opened.openSha} label="原生PDF预览"><Suspense fallback={<p role="status">正在载入PDF查看器…</p>}><NativeSearchFilePdf key={opened.openSha} bytes={opened.bytes} source={nativeMemberViewingSource(source,opened)} focus={focus}/></Suspense></ConversationDisplayBoundary>
     :text!==undefined?<>
