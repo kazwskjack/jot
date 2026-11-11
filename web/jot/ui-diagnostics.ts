@@ -1,7 +1,7 @@
 // Privacy-bounded UI diagnostics adapted from PilotDeck 783499ff ui/src/lib/uiDiagnostics.ts.
 // Adapted portions retain AGPL-3.0; see packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt.
 const slot='jot.ui-diagnostics.v1',limit=20;
-const events=['react-boundary','window-error','unhandled-rejection','local-retry'] as const;
+const events=['react-boundary','window-error','unhandled-rejection','local-retry','manual-reload'] as const;
 const kinds=['Error','EvalError','RangeError','ReferenceError','SyntaxError','TypeError','URIError','AggregateError','Unknown'] as const;
 export type UiDiagnostic={at:string;event:typeof events[number];kind:typeof kinds[number];line:number;column:number};
 const position=(value:unknown)=>typeof value==='number'&&Number.isSafeInteger(value)&&value>=0&&value<=2147483647?value:0;

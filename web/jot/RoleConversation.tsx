@@ -1,5 +1,5 @@
 import {validateTextReference} from './composer-draft-recovery.mjs';
-import {FileTextReferenceContext,FileTextReferences,nativeReferenceIdentity,fileReferenceMessage,fileReferenceSnapshots,isFileRegion,resolveRegionArtifact,type FileReference,type FileSourceReference,type FileRegionDraft,type FileSelectionReference} from './FileTextReferences';
+import {FileTextReferenceContext,FileTextReferences,fileRegionCapture,nativeReferenceIdentity,fileReferenceMessage,fileReferenceSnapshots,isFileRegion,resolveRegionArtifact,type FileReference,type FileSourceReference,type FileRegionDraft,type FileSelectionReference} from './FileTextReferences';
 import FileReferenceSource from './FileReferenceSource';
 import MessageFileReferences from './MessageFileReferences';
 import type {TaskSourceSelection} from '../workbench/types';
@@ -47,7 +47,7 @@ import {appendVoiceText} from './voice-draft-controller.mjs';
 import {goalPrompt,latestGoalRun} from './goal-controller.mjs';
 import type {Artifact,Run,Capabilities,Preview,Conversation,ModelSelection,Message,Activity} from './types';
 const active=(run:Run)=>['queued','starting','running','waiting_user','waiting_approval','cancelling'].includes(run.status);
-type ConversationProps={ordinary?:boolean;id:string;onClose:()=>void;onTaskSource?:(source:TaskSourceSelection)=>void;onForkConversation?:(conversationId:string,receipt:unknown)=>void};
+type ConversationProps={ordinary?:boolean;id:string;onClose:()=>void;onReload?:(conversationId:string)=>boolean;onTaskSource?:(source:TaskSourceSelection)=>void;onForkConversation?:(conversationId:string,receipt:unknown)=>void};
 export default function RoleConversation(props:ConversationProps){
  return <ConversationContent key={`${taskDraftScope()}:${props.id}:${Boolean(props.ordinary)}`} {...props}/>;
 }
@@ -147,7 +147,7 @@ function ConversationMessageBody({message,onOpenReference}:{message:Message;onOp
  </div>;
 }
 type ComposerDraft={text:string;replyQuotes:AssistantReplyQuote[];textReferences:FileSelectionReference[];goalMode:boolean};
-function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinary=false}:ConversationProps){
+function ConversationContent({id,onClose,onReload,onTaskSource,onForkConversation,ordinary=false}:ConversationProps){
  const [,render]=useState(0),[draft,setDraft]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[expanded,setExpanded]=useState<Record<string,boolean>>({}),[maxBytes,setMaxBytes]=useState<number>(),[preview,setPreview]=useState<{name:string;text?:string;url?:string;unsupported?:boolean;truncated?:boolean;loading?:boolean}>(),[forkStates,setForkStates]=useState<Record<string,{state:string;retryable:boolean;error:string}>>({});
  const [voice,setVoice]=useState<Capabilities['voice']>(),[voiceBusy,setVoiceBusy]=useState(false),draftRef=useRef(draft),conversationRegion=useRef<HTMLElement>(null),previewRequest=useRef<AbortController|undefined>(undefined);
  const [replyQuotes,setReplyQuotes]=useState<AssistantReplyQuote[]>([]);
@@ -198,6 +198,8 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  const [messageRecoveryRevision,setMessageRecoveryRevision]=useState(0),[messageRecoveryError,setMessageRecoveryError]=useState('');
  const [goalMode,setGoalMode]=useState(false),[goalPending,setGoalPending]=useState(false);
  const [terminalInputPending,setTerminalInputPending]=useState(false);
+ const reloadGate=useRef<{owner:string;draft:string;uploads:string;unsafe:boolean}>();
+ const reloadPermit=useRef<{owner:string;draft:string;uploads:string}>(),reloadInFlight=useRef(false);
  const [recoveryRunId,setRecoveryRunId]=useState('');
  useEffect(()=>{setGoalMode(false);},[id,ordinary]);
  const composerDraft:ComposerDraft={text:draft,replyQuotes,textReferences:fileReferences.filter((value):value is FileSelectionReference=>!isFileRegion(value)),goalMode};
@@ -257,7 +259,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  useEffect(()=>{folderInput.current?.setAttribute('webkitdirectory','');},[]);
  useEffect(()=>()=>{if(preview?.url)URL.revokeObjectURL(preview.url);},[preview]);
  useEffect(()=>()=>previewRequest.current?.abort(),[]);
- useEffect(()=>{const warn=(event:BeforeUnloadEvent)=>{if(draft.trim()||draftBackup||controller.draftDirty||controller.draftSavePromise||quoteCount||uploads.entries.length||controller.pendingMessage||goalPending||terminalInputPending||voiceBusy||modeWriter.pending||cancelWriter.pending){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[uploads,controller,draft,draftBackup,goalPending,terminalInputPending,voiceBusy,modeWriter.pending,cancelWriter.pending,quoteCount]);
+ useEffect(()=>{const warn=(event:BeforeUnloadEvent)=>{const permit=reloadPermit.current,gate=reloadGate.current;reloadPermit.current=undefined;if(permit&&gate&&!gate.unsafe&&gate.owner===taskDraftScope()&&permit.owner===gate.owner&&permit.draft===gate.draft&&permit.uploads===gate.uploads&&!controller.draftDirty&&!controller.draftSavePromise&&!uploads.blocked&&!uploads.recoveryBusy&&!uploads.unresolved)return;if(draft.trim()||draftBackup||controller.draftDirty||controller.draftSavePromise||quoteCount||uploads.entries.length||controller.pendingMessage||goalPending||terminalInputPending||voiceBusy||modeWriter.pending||cancelWriter.pending){event.preventDefault();event.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[uploads,controller,draft,draftBackup,goalPending,terminalInputPending,voiceBusy,modeWriter.pending,cancelWriter.pending,quoteCount]);
  const state=controller.state,run=state?(Object.values(state.runs) as Run[]).find(active):undefined;
  const activityValues=useMemo(()=>{
   const merged=new Map(historicalActivities.map(activity=>[activity.activity_id,activity]));
@@ -322,6 +324,30 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
 
  const quoteLocked=!state||busy||goalPending||voiceBusy||modelMutation.pending||modeWriter.pending||cancelWriter.pending||messageLocked||chatUnavailable;
  const regionDisabled=quoteLocked||uploads.blocked||uploads.unresolved||!maxBytes;
+ const uploadReloadStamp=()=>JSON.stringify(uploads.entries.map((entry:any)=>[entry.id,entry.status,entry.sha,entry.batchId,entry.generated?.delivery,entry.artifact]));
+ const reloadUnsafe=!state||controller.recoveryBlocked||controller.sending||!!draftBackup||goalPending||terminalInputPending||voiceBusy
+  ||modelMutation.pending||modeWriter.pending||cancelWriter.pending||controller.pendingMessage||forkWriter.pending
+  ||uploads.blocked||uploads.recoveryBusy||uploads.unresolved||!!fileRegionCapture.owner
+  ||uploads.entries.some((entry:any)=>!['ready','recovered','cancelled'].includes(entry.status))
+  ||Object.values(state?.runs??{}).some(value=>active(value as Run))||Object.values(state?.interactions??{}).some((value:any)=>value.status==='pending');
+ reloadGate.current={owner:fileOwner,draft:draftSnapshot,uploads:uploadReloadStamp(),unsafe:!!reloadUnsafe};
+ const reloadInterface=()=>{
+  if(!onReload||busy||reloadUnsafe||reloadInFlight.current)return;
+  const expected=reloadGate.current!;reloadInFlight.current=true;
+  void action(async()=>{
+   try{
+    await uploads.persist();await controller.saveDraft(JSON.parse(expected.draft));
+    const current=reloadGate.current;
+    if(!current||current.unsafe||taskDraftScope()!==expected.owner||current.owner!==expected.owner||current.draft!==expected.draft
+      ||uploadReloadStamp()!==expected.uploads||controller.recoveryBlocked||controller.pendingMessage||controller.draftDirty||controller.draftSavePromise
+      ||uploads.blocked||uploads.recoveryBusy||uploads.unresolved||fileRegionCapture.owner||controller.sending||modeWriter.pending||cancelWriter.pending||forkWriter.pending
+      ||uploads.entries.some((entry:any)=>!['ready','recovered','cancelled'].includes(entry.status))
+      ||Object.values(controller.state?.runs??{}).some(value=>active(value as Run))||Object.values(controller.state?.interactions??{}).some((value:any)=>value.status==='pending'))throw Error('会话内容或操作状态已变化，已保留页面，请核对后重试。');
+    reloadPermit.current={owner:expected.owner,draft:expected.draft,uploads:expected.uploads};
+    try{if(!onReload(id))reloadPermit.current=undefined;}catch(reason){reloadPermit.current=undefined;throw reason;}
+   }finally{reloadInFlight.current=false;}
+  });
+ };
  const imageArtifact=(entryId:string)=>{const entry=uploads.entries.find((entry:any)=>entry.id===entryId);return entry?.status==='ready'?entry.artifact:undefined;};
  const imageFile=(entryId:string)=>{const file=uploads.entries.find((entry:any)=>entry.id===entryId)?.file;return file instanceof File?file:undefined;};
  const regionsReady=fileReferences.every(value=>!isFileRegion(value)||!!resolveRegionArtifact(value,imageArtifact));
@@ -448,6 +474,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
  });
  const download=(file:Artifact)=>void action(async()=>{const response=await fetch(`${base}/v1/artifacts/${encodeURIComponent(file.artifact_id)}/download?version=${file.version}`,{credentials:'same-origin'});if(!response.ok)throw new Error('文件暂不可下载');const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download=file.file_name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
  return <FileTextReferenceContext.Provider value={{owner:fileOwner,conversationId:id,disabled:quoteLocked,regionDisabled,printViews:modeCaps?.reference_snapshots?.office_print_views,nativeSources:modeCaps?.reference_snapshots?.native_file_sources,regionRenderers:modeCaps?.reference_snapshots?.region_renderers,cellViews:modeCaps?.reference_snapshots?.xlsx_cell_views,onAdd:addFileReference,onAddMany:addFileReferences,onAddRegion:addRegionReference}}><section ref={conversationRegion} data-chat-search-scope tabIndex={-1} className="workbench-conversation jot-goal-stop-focus-target" aria-label={ordinary?"Ordinary conversation":"Role conversation"}><button disabled={busy||goalPending||terminalInputPending||controller.pendingMessage||!!draftBackup||controller.draftDirty||!!controller.draftSavePromise||draftSnapshot!==JSON.stringify(controller.draft)||quoteCount>0||uploads.entries.length>0||modelMutation.pending||modeWriter.pending||cancelWriter.pending} onClick={onClose}>返回工作台</button><h2>{ordinary?'我的对话':'角色对话'}</h2>{ordinary&&conversation&&<button type="button" className="jot-conversation-mode" style={{fontStyle:'italic',fontWeight:700,background:'transparent',border:0,color:'inherit'}} aria-label={`切换到 ${chatMode?'work':'chat'}`} disabled={!canToggle} onClick={()=>void saveMode()}>{chatMode?'chat':'work'}</button>}<p role="status">{controller.connection==='connected'?'已连接':controller.connection==='reconnecting'?'正在重新连接':'正在连接'}{run?` · ${run.status}`:''}</p>{controller.error&&<p role="alert">{controller.error}</p>}
+ {onReload&&<div data-chat-search-ignore><button type="button" disabled={busy||!!reloadUnsafe} onClick={reloadInterface}>保存并重载界面</button>{reloadUnsafe&&<small>请先处理当前运行、交互或未确认操作，再重载界面。</small>}</div>}
  <ConversationDisplayBoundary label="会话搜索"><ConversationHistorySearch root={conversationRegion} conversationId={id} messages={displayedMessages} activities={activityValues} runs={state?.runs??{}} onRevealActivity={revealActivity} onLoadActivityHistory={loadActivityHistory} {...(state?.snapshotSeq?{activityHistorySeq:state.snapshotSeq}:{})} {...(state?.seq?{resultSearchSeq:state.seq}:{})} renderedRevision={renderedMessages} revealedMessageId={historySelection} ready={Boolean(state)} onReveal={revealHistoryMessage} {...(state?.historyComplete!==undefined?{historyComplete:state.historyComplete}:{})} {...(state?.nextHistoryCursor?{historyCursor:state.nextHistoryCursor}:{})} onHistoryLoaded={retainHistory}/></ConversationDisplayBoundary>
  {diagnosticRun&&<ConversationDisplayBoundary label="会话终端"><ConversationTerminals key={`terminals:${id}`} conversationId={id} runId={run?.run_id??diagnosticRun.run_id} onInputPendingChange={setTerminalInputPending}/></ConversationDisplayBoundary>}
  {!ordinary&&run&&['starting','running'].includes(run.status)&&<NativeMemberControls key={`native-member-controls:${run.run_id}`} run={run}/>}

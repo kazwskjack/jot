@@ -22,5 +22,5 @@ export function writeWorkbenchRoute(owner:string,route:WorkbenchRoute,views:read
  if(!validOwner(owner))return false;
  const value={protocol:1,view:route.view,conversation:route.conversation,showConversations:route.showConversations};
  if(!valid(value,views))return false;
- try{sessionStorage.setItem(slot(owner),JSON.stringify(value));return true;}catch{return false;}
+ try{const encoded=JSON.stringify(value);sessionStorage.setItem(slot(owner),encoded);return sessionStorage.getItem(slot(owner))===encoded&&validOwner(owner);}catch{return false;}
 }
