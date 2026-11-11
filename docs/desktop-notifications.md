@@ -12,6 +12,16 @@
 
 ## 未完成范围
 
-M20.04 尚未完成。当前工作台没有调用 preload 的 showTaskNotification/initializeNotificationState 等通知入口，完整任务事件订阅、桌面通知偏好界面、OS 权限入口、任务撤销生命周期和 M24 桌面生命周期仍需连接原任务数据来源。不能用轮询猜测完成、旧页面状态、WebPush 投递或内存点击记录冒充原任务完成与系统权限。
+M20.04 尚未完成。工作台顶部已接入当前设备的通知设置及原菜单入口，原 showTaskNotification/initializeNotificationState 任务通知入口尚未接入。完整任务事件订阅、任务撤销生命周期、OS 权限状态及 M24 桌面生命周期仍需连接原任务数据来源。不能用轮询猜测完成、旧页面状态、WebPush 投递或内存点击记录冒充原任务完成与系统权限。
 
 本次为底层源码增量，未运行测试、构建、Electron、浏览器或 OS 通知，也没有安装、重启或部署。
+
+## 设备偏好界面
+
+工作台顶部的“桌面通知”和原生菜单通知设置打开同一个设备面板，不切换或丢弃当前任务/对话。普通浏览器没有原 jotDesktop bridge 时不显示该入口。面板使用原 readNotificationPreferences/setNotificationPreferences/readNotificationPermission 和权限事件；字段校验复用主进程相同的通知策略，不另存浏览器偏好。
+
+设备开关、时区免打扰时段只通过明确保存写入。编辑中不会申请权限；保存回执校验后显示主进程确认值。结果不明时保留草稿并禁止再次保存，用户重新读取已保存状态后才恢复编辑。保存期间使用独立 pending 标志，与工作台 pending 合并，互不清除。关闭面板将焦点返回原按钮，菜单打开则聚焦设置区域。
+
+权限请求是用户点击后调用原浏览器 Notification.requestPermission，再读取主进程的原权限结果；没有自动弹窗、测试通知或 API 探测。设备开关保存为开启后才可申请。显示的 granted/denied/default 是当前应用 origin 的浏览器权限，不能证明 Windows 通知设置、macOS 系统授权、Focus Assist/系统免打扰等允许展示，界面保留这一差异。未增加 OS 设置跳转或假装已经确认全部系统权限。
+
+本次不发送任务通知，也不根据通知偏好推断任务完成。完整原任务事件来源与撤销接线继续开发，未运行产品或测试。
