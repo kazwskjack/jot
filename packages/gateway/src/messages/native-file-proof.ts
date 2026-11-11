@@ -20,3 +20,19 @@ export function assertNativeFileProof(key:string|undefined,owner:string,source:N
  const expected=signNativeFileProof(key,owner,source,pdf);
  if(!timingSafeEqual(Buffer.from(proof,'ascii'),Buffer.from(expected,'ascii')))throw Error('native_file_reference_unproven');
 }
+
+/** The shared reference codec must validate this structure before owner-bound admission. */
+export function assertNativeReferenceProof(key:string|undefined,owner:string,value:Record<string,unknown>){
+ if(value.native_source===undefined)return;
+ const native=value.native_source as {membersSha:string;memberIndex:number;openSha:string;proof:string;asOfSeq?:string};
+ const file=value.file as {path:string;sha256:string;size:number};
+ const source:NativeFileProofSource={conversationId:value.conversationId as string,runId:value.runId as string,
+  activityId:value.activityId as string,resultSha:value.resultSha as string,membersSha:native.membersSha,
+  memberIndex:native.memberIndex,path:file.path,openSha:native.openSha,sha256:file.sha256,size:file.size,
+  ...(native.asOfSeq!==undefined?{asOfSeq:native.asOfSeq}:{})};
+ assertNativeFileProof(key,owner,source,native.proof);
+ if(value.print_view!==undefined){
+  const pdf=value.print_view as NativeFileProofPdf&{proof:string};
+  assertNativeFileProof(key,owner,source,pdf.proof,pdf);
+ }
+}

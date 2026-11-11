@@ -849,6 +849,8 @@ export type OfficePreviewStatus = {
   execution_authorized: false;
 };
 
+export type NativeFileReferenceProvenance={protocol:1;membersSha:string;memberIndex:number;openSha:string;proof:string;asOfSeq?:string};
+export type NativeFileReferenceFile={path:string;sha256:string;size:number};
 export type OfficePrintView={protocol:1;sha256:string;size:number;pageCount:number;proof:string};
 
 export type {TerminalInfo,TerminalInventory} from '../src/terminal/inventory.js';

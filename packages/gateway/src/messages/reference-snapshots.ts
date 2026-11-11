@@ -1,3 +1,4 @@
+import {assertNativeReferenceProof} from './native-file-proof.ts';
 import {assertOfficePrintProof} from './office-print-proof.ts';
 import {validateAttachmentManifest} from '../artifacts/pinned-manifest.ts';
 import {createHash} from 'node:crypto';
@@ -32,7 +33,11 @@ export const commandReferenceSnapshotsInstalled=(db:DatabaseSync)=>Boolean(db.pr
 export function assertReferenceSnapshotImages(db:DatabaseSync,ownerId:string,conversationId:string,items:Array<Record<string,unknown>>,officePrintProofKey?:string){
  for(const value of items){
   const reference=validateContentReference(value) as {reference:{selectionMode:string};image_artifact?:{artifact_id:string;version:number;sha256:string;size_bytes:number}};
-  assertOfficePrintProof(officePrintProofKey,ownerId,value);
+  if(value.native_source!==undefined){
+   if(value.conversationId!==conversationId)throw Error('native_file_reference_unproven');
+   assertNativeReferenceProof(officePrintProofKey,ownerId,value);
+  }
+  else assertOfficePrintProof(officePrintProofKey,ownerId,value);
   if(reference.reference.selectionMode!=='region')continue;
   const image=reference.image_artifact!;
   const row=db.prepare(`SELECT a.current_version,v.sha256,v.size_bytes,v.mime_type,v.metadata_json FROM ga_artifacts a

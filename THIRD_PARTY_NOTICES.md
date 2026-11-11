@@ -332,3 +332,5 @@ the original owner, activity/history/member identity and complete opened source,
 with PDF output SHA/size/pages added for derived proofs. Original native and
 PilotDeck integration notices apply. Native selection/reference snapshot
 integration is tracked in the execution worklist.
+
+Native member reference snapshots reuse the retained PilotDeck selection schemas through Jot’s strict content-reference codec. Native source revision and server receipts remain separate from numeric workspace versions; original attribution and AGPL terms above apply.

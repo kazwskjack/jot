@@ -77,6 +77,10 @@ export class RunRepository {
           WHERE m.id=? AND c.id=? AND c.owner_id=?`).get(String(duplicate.id),conversationId,ownerId);
         if(!original||original.role!=='user'||original.status!=='complete'||original.run_id!==duplicate.run_id
           ||original.content_json!==JSON.stringify(encodeInputContent(String(duplicate.id),input.content)))throw Error('content_reference_request_conflict');
+        if(referenceSnapshots.items.some(value=>value.native_source!==undefined)
+          &&!this.db.prepare('SELECT 1 FROM ga_message_reference_snapshots WHERE message_id=?').get(String(duplicate.id))){
+          assertReferenceSnapshotImages(this.db,ownerId,conversationId,referenceSnapshots.items,this.options.officePrintProofKey);
+        }
         captureMessageReferenceSnapshots(this.db,conversationId,String(duplicate.id),referenceSnapshots.items);
       });
       return { accepted: true, message_id: duplicate.id, run_id: duplicate.run_id, conversation_id: conversationId };

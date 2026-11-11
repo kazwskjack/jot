@@ -678,7 +678,7 @@ export async function buildServer(config: {
 
   app.setErrorHandler((error, request, reply) => {
     const code = error instanceof Error ? error.message : 'internal_error';
-    if(['content_reference_request_invalid','content_reference_request_too_large','content_reference_attachment_mismatch','office_print_reference_unproven'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
+    if(['content_reference_request_invalid','content_reference_request_too_large','content_reference_attachment_mismatch','office_print_reference_unproven','native_file_reference_unproven'].includes(code))return reply.code(422).send({error:{code:code.toUpperCase()}});
     if(code==='terminal_command_invalid')return reply.code(422).send({error:{code:'TERMINAL_INPUT_INVALID'}});
     if(code==='terminal_receipt_conflict')return reply.code(409).send({error:{code:'TERMINAL_RECEIPT_CONFLICT'}});
     if(code==='office_preview_binary_unavailable')return reply.code(503).send({error:{code:'OFFICE_PREVIEW_BINARY_UNAVAILABLE'}});

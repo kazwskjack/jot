@@ -11,6 +11,21 @@ const positive=value=>Number.isSafeInteger(value)&&value>0;
 const invalid=()=>Error('content_reference_invalid');
 const relative=value=>text(value,4096)&&value.length>0&&!/[\\:\u0000-\u001f\u007f]/.test(value)&&value.split('/').every(part=>part&&part!=='.'&&part!=='..');
 
+// Native revisions identify verified opened bytes, independently of workspace numeric versions.
+function referenceFile(value){
+ const file=value?.file,native=value?.native_source;
+ if(native!==undefined){
+  if(!exact(native,['protocol','membersSha','memberIndex','openSha','proof'],['asOfSeq'])||native.protocol!==1
+   ||!sha(native.membersSha)||!sha(native.openSha)||!Number.isSafeInteger(native.memberIndex)||native.memberIndex<0
+   ||typeof native.proof!=='string'||native.proof.length!==43||!/^[A-Za-z0-9_-]{43}$/.test(native.proof)
+   ||native.asOfSeq!==undefined&&(typeof native.asOfSeq!=='string'||native.asOfSeq.length>19||!/^(0|[1-9][0-9]{0,18})$/.test(native.asOfSeq))
+   ||!exact(file,['path','sha256','size'])||!text(file.path,32768)||!file.path||file.path.includes('\0'))return false;
+ }else if(!exact(file,['path','version','sha256','size'])||!relative(file.path)||!Number.isSafeInteger(file.version)||file.version<0)return false;
+ return sha(file.sha256)&&Number.isSafeInteger(file.size)&&file.size>=0;
+}
+const referenceRevision=value=>value.native_source?.openSha??String(value.file.version);
+const referenceName=value=>value.native_source?value.file.path.split(/[\\/]/).at(-1):value.file.path.split('/').at(-1);
+
 // Validate the original Office source, then reuse the native PDF selection shape without rewriting stored data.
 function officePrintPdfSource(value){
  const print=value?.print_view,ref=value?.reference,source=ref?.source,renderer=ref?.renderer;
@@ -18,7 +33,7 @@ function officePrintPdfSource(value){
  const mime=officePreviewFormat(path)?.mediaType;
  if(!exact(print,['protocol','sha256','size','pageCount','proof'])||print.protocol!==1||!sha(print.sha256)
   ||!Number.isSafeInteger(print.size)||print.size<100||print.size>20*1024*1024
-  ||!positive(print.pageCount)||print.pageCount>50000||typeof print.proof!=='string'||!/^[A-Za-z0-9_-]{43}$/.test(print.proof)
+  ||!positive(print.pageCount)||print.pageCount>50000||typeof print.proof!=='string'||print.proof.length!==43||!/^[A-Za-z0-9_-]{43}$/.test(print.proof)
   ||typeof mime!=='string'||source?.mimeType!==mime||value.file.size>OFFICE_PRINT_SOURCE_MAX_BYTES
   ||!exact(renderer,['id','backend','locatorQuality'])||renderer.id!=='office-pdf'||renderer.backend!=='libreoffice'
   ||renderer.locatorQuality!==(ref.selectionMode==='text'?'approximate':'visual'))throw invalid();
@@ -33,17 +48,17 @@ function officePrintPdfSource(value){
 export function validateTextReferenceSource(value,conversation){
  if(value?.print_view!==undefined||value?.reference?.renderer?.id==='office-pdf'){validateTextReferenceSource(officePrintPdfSource(value),conversation);return;}
  if(['docx','pptx'].includes(value?.reference?.renderer?.id)){validateOfficeTextReferenceSource(value,conversation);return;}
- if(!exact(value,['conversationId','runId','activityId','resultSha','file','reference'],['rotation'])
-  ||value.rotation!==undefined&&![0,90,180,270].includes(value.rotation)||value.conversationId!==conversation||!id(value.runId)||!id(value.activityId)||!sha(value.resultSha))throw invalid();
+ if(!exact(value,['conversationId','runId','activityId','resultSha','file','reference'],['rotation','native_source'])
+  ||value.rotation!==undefined&&![0,90,180,270].includes(value.rotation)||value.conversationId!==conversation||!(value.native_source?identifier:id)(value.runId)||!(value.native_source?identifier:id)(value.activityId)||!sha(value.resultSha))throw invalid();
  const source=value.file,ref=value.reference;
- if(!exact(source,['path','version','sha256','size'])||!relative(source.path)||!Number.isSafeInteger(source.version)||source.version<0||!sha(source.sha256)||!Number.isSafeInteger(source.size)||source.size<0
+ if(!referenceFile(value)
   ||!exact(ref,['schemaVersion','kind','id','selectionMode','source','renderer','locator','selectedText','createdAt'],['surroundingText','truncated'])
   ||ref.schemaVersion!==1||ref.kind!=='content-reference'||ref.selectionMode!=='text'||!id(ref.id)
   ||!text(ref.createdAt,100)||!Number.isFinite(Date.parse(ref.createdAt))||!text(ref.selectedText,100000)||!ref.selectedText.trim()
   ||ref.surroundingText!==undefined&&!text(ref.surroundingText,101000)||ref.truncated!==undefined&&typeof ref.truncated!=='boolean')throw invalid();
  const file=ref.source,renderer=ref.renderer,locator=ref.locator;
- if(!exact(file,['relativePath','fileName','mimeType','revision'])||file.relativePath!==source.path||file.fileName!==source.path.split('/').at(-1)||file.mimeType!=='application/pdf'
-  ||!exact(file.revision,['id','sha256','size'])||file.revision.id!==String(source.version)||file.revision.sha256!==source.sha256||file.revision.size!==source.size
+ if(!exact(file,['relativePath','fileName','mimeType','revision'])||file.relativePath!==source.path||file.fileName!==referenceName(value)||file.mimeType!=='application/pdf'
+  ||!exact(file.revision,['id','sha256','size'])||file.revision.id!==referenceRevision(value)||file.revision.sha256!==source.sha256||file.revision.size!==source.size
   ||!exact(renderer,['id','backend','locatorQuality'])||renderer.id!=='pdf'||renderer.backend!=='builtin'||renderer.locatorQuality!=='semantic'
   ||!exact(locator,['surface','pageNumbers','quote','rects'])||locator.surface!=='page'||!Array.isArray(locator.pageNumbers)||!locator.pageNumbers.length
   ||locator.pageNumbers.some((page,index)=>!positive(page)||index>0&&page<=locator.pageNumbers[index-1])
@@ -57,20 +72,19 @@ export function validateTextReferenceSource(value,conversation){
 }
 
 function validateOfficeTextReferenceSource(value,conversation){
- if(!exact(value,['conversationId','runId','activityId','resultSha','file','reference','text_view'])
+ if(!exact(value,['conversationId','runId','activityId','resultSha','file','reference','text_view'],['native_source'])
   ||value.text_view!==1&&!(value.text_view===2&&value.reference?.renderer?.id==='docx')||value.conversationId!==conversation
   ||!id(value.conversationId)||!identifier(value.runId)||!identifier(value.activityId)||!sha(value.resultSha))throw invalid();
  const file=value.file,ref=value.reference;
- if(!exact(file,['path','version','sha256','size'])||!relative(file.path)||!Number.isSafeInteger(file.version)||file.version<0
-  ||!sha(file.sha256)||!Number.isSafeInteger(file.size)||file.size<0
+ if(!referenceFile(value)
   ||!exact(ref,['schemaVersion','kind','id','selectionMode','source','renderer','locator','selectedText','createdAt'],['surroundingText','truncated'])
   ||ref.schemaVersion!==1||ref.kind!=='content-reference'||ref.selectionMode!=='text'||!identifier(ref.id)
   ||!text(ref.createdAt,100)||!Number.isFinite(Date.parse(ref.createdAt))||!text(ref.selectedText,100000)||!ref.selectedText.trim()
   ||ref.surroundingText!==undefined&&!text(ref.surroundingText,101000)||ref.truncated!==undefined&&typeof ref.truncated!=='boolean')throw invalid();
  const source=ref.source,renderer=ref.renderer,locator=ref.locator;
  const docx=renderer?.id==='docx',mime=docx?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':'application/vnd.openxmlformats-officedocument.presentationml.presentation';
- if(!exact(source,['relativePath','fileName','mimeType','revision'])||source.relativePath!==file.path||source.fileName!==file.path.split('/').at(-1)||source.mimeType!==mime
-  ||!exact(source.revision,['id','sha256','size'])||source.revision.id!==String(file.version)||source.revision.sha256!==file.sha256||source.revision.size!==file.size
+ if(!exact(source,['relativePath','fileName','mimeType','revision'])||source.relativePath!==file.path||source.fileName!==referenceName(value)||source.mimeType!==mime
+  ||!exact(source.revision,['id','sha256','size'])||source.revision.id!==referenceRevision(value)||source.revision.sha256!==file.sha256||source.revision.size!==file.size
   ||!exact(renderer,['id','backend','locatorQuality'])||!['docx','pptx'].includes(renderer.id)||renderer.backend!=='builtin'||renderer.locatorQuality!=='semantic'
   ||!exact(locator,docx?['surface','quote','occurrenceIndex']:['surface','quote','occurrenceIndex','slideNumbers'],docx?['headingPath','rects']:['rects'])
   ||locator.surface!==(docx?'document':'slide')||!Number.isSafeInteger(locator.occurrenceIndex)||locator.occurrenceIndex<0
@@ -108,18 +122,18 @@ export function validateOfficeRegionView(view,renderer){
 export function validateRegionCaptureSource(capture,conversation){
  if(capture?.print_view!==undefined||capture?.reference?.renderer?.id==='office-pdf'){validateRegionCaptureSource(officePrintPdfSource(capture),conversation);return capture;}
  const docx=capture?.reference?.renderer?.id==='docx',pptx=capture?.reference?.renderer?.id==='pptx',xlsx=capture?.reference?.renderer?.id==='xlsx',office=docx||pptx||xlsx;
- if(!exact(capture,['conversationId','runId','activityId','resultSha','file','reference','imageBytes','rotation'],office?['region_view']:[])
+ if(!exact(capture,['conversationId','runId','activityId','resultSha','file','reference','imageBytes','rotation'],office?['region_view','native_source']:['native_source'])
   ||capture.conversationId!==conversation||!identifier(capture.runId)||!identifier(capture.activityId)||!sha(capture.resultSha)
   ||!positive(capture.imageBytes)||![0,90,180,270].includes(capture.rotation))throw invalid();
  const source=capture.file,ref=capture.reference;
- if(!exact(source,['path','version','sha256','size'])||!relative(source.path)||!Number.isSafeInteger(source.version)||source.version<0||!sha(source.sha256)||!Number.isSafeInteger(source.size)||source.size<0
+ if(!referenceFile(capture)
   ||!exact(ref,['schemaVersion','kind','id','selectionMode','source','renderer','locator','image','createdAt'],['nearbyText'])
   ||ref.schemaVersion!==1||ref.kind!=='content-reference'||ref.selectionMode!=='region'||!identifier(ref.id)||typeof ref.createdAt!=='string'||!Number.isFinite(Date.parse(ref.createdAt))
   ||ref.nearbyText!==undefined&&(typeof ref.nearbyText!=='string'||ref.nearbyText.length>100000))throw invalid();
  const file=ref.source,renderer=ref.renderer,locator=ref.locator,image=ref.image;
  const mime=docx?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':pptx?'application/vnd.openxmlformats-officedocument.presentationml.presentation':xlsx?'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':'application/pdf';
- if(!exact(file,['relativePath','fileName','mimeType','revision'])||file.relativePath!==source.path||file.fileName!==source.path.split('/').at(-1)||file.mimeType!==mime
-  ||!exact(file.revision,['id','size','sha256'])||file.revision.id!==String(source.version)||file.revision.size!==source.size||file.revision.sha256!==source.sha256
+ if(!exact(file,['relativePath','fileName','mimeType','revision'])||file.relativePath!==source.path||file.fileName!==referenceName(capture)||file.mimeType!==mime
+  ||!exact(file.revision,['id','size','sha256'])||file.revision.id!==referenceRevision(capture)||file.revision.size!==source.size||file.revision.sha256!==source.sha256
   ||!exact(renderer,['id','backend','locatorQuality'])||renderer.id!==(docx?'docx':pptx?'pptx':xlsx?'xlsx':'pdf')||renderer.backend!=='builtin'||renderer.locatorQuality!=='visual'
   ||!exact(locator,docx?['surface','rect']:pptx?['surface','slideNumber','rect']:xlsx?['surface','sheetId','sheetName','rect']:['surface','pageNumber','rect'],xlsx?['anchorRange']:[])||locator.surface!==(docx?'document':pptx?'slide':xlsx?'sheet':'page')||!office&&!positive(locator.pageNumber)
   ||!exact(locator.rect,['x','y','width','height'])||Object.values(locator.rect).some(number=>typeof number!=='number'||!Number.isFinite(number)||number<0||number>1)
@@ -148,18 +162,17 @@ function cellMatrix(value,check){
  return Array.isArray(value)&&value.length<=100&&value.every(row=>Array.isArray(row)&&row.length<=50&&row.every(check));
 }
 export function validateCellReferenceSource(value,conversation){
- if(!exact(value,['conversationId','runId','activityId','resultSha','file','reference'],['cell_view'])||value.cell_view!==undefined&&![1,2].includes(value.cell_view)||value.conversationId!==conversation
+ if(!exact(value,['conversationId','runId','activityId','resultSha','file','reference'],['cell_view','native_source'])||value.cell_view!==undefined&&![1,2].includes(value.cell_view)||value.conversationId!==conversation
   ||!id(value.conversationId)||!identifier(value.runId)||!identifier(value.activityId)||!sha(value.resultSha))throw invalid();
  const file=value.file,ref=value.reference;
- if(!exact(file,['path','version','sha256','size'])||!relative(file.path)||!Number.isSafeInteger(file.version)||file.version<0
-  ||!sha(file.sha256)||!Number.isSafeInteger(file.size)||file.size<0
+ if(!referenceFile(value)
   ||!exact(ref,['schemaVersion','kind','id','selectionMode','source','renderer','locator','cells','createdAt'],['headers','surroundingValues'])
   ||ref.schemaVersion!==1||ref.kind!=='content-reference'||ref.selectionMode!=='cells'||!identifier(ref.id)
   ||!text(ref.createdAt,100)||!Number.isFinite(Date.parse(ref.createdAt)))throw invalid();
  const source=ref.source,renderer=ref.renderer,locator=ref.locator;
- if(!exact(source,['relativePath','fileName','mimeType','revision'])||source.relativePath!==file.path||source.fileName!==file.path.split('/').at(-1)
+ if(!exact(source,['relativePath','fileName','mimeType','revision'])||source.relativePath!==file.path||source.fileName!==referenceName(value)
   ||source.mimeType!=='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-  ||!exact(source.revision,['id','sha256','size'])||source.revision.id!==String(file.version)||source.revision.sha256!==file.sha256||source.revision.size!==file.size
+  ||!exact(source.revision,['id','sha256','size'])||source.revision.id!==referenceRevision(value)||source.revision.sha256!==file.sha256||source.revision.size!==file.size
   ||!exact(renderer,['id','backend','locatorQuality'])||renderer.id!=='xlsx'||renderer.backend!=='builtin'||renderer.locatorQuality!=='semantic'
   ||!exact(locator,['surface','sheetId','sheetName','ranges','activeRange'])||locator.surface!=='sheet'||!text(locator.sheetId,192)||!locator.sheetId
   ||!text(locator.sheetName,512)||!locator.sheetName||!Array.isArray(locator.ranges)||!locator.ranges.length||locator.ranges.length>100
@@ -192,7 +205,7 @@ export function validateCellReferenceSource(value,conversation){
 }
 
 export function validateContentReference(snapshot){
- if(!exact(snapshot,['conversationId','runId','activityId','resultSha','file','reference','execution_authorized'],['rotation','imageBytes','image_artifact','text_view','region_view','cell_view','print_view'])
+ if(!exact(snapshot,['conversationId','runId','activityId','resultSha','file','reference','execution_authorized'],['rotation','imageBytes','image_artifact','text_view','region_view','cell_view','print_view','native_source'])
   ||snapshot.execution_authorized!==false||!id(snapshot.conversationId))throw invalid();
  const {execution_authorized,image_artifact,...source}=snapshot;
  if(snapshot.reference?.selectionMode==='text'){
