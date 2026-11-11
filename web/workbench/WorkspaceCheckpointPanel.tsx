@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
+import {workspaceUiMessage} from './workspace-ui-messages';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {request,taskDraftScope} from '../jot/client';
 import {useDurableFileRecovery} from './useDurableFileRecovery';
@@ -16,6 +18,8 @@ export default function WorkspaceCheckpointPanel(props:Props){
  return <CheckpointPanel key={recovery.key} {...props} scope={scope} store={recovery.store} recoveryLoading={recovery.loading} recoveryError={recovery.error} onReloadRecovery={recovery.reload}/>;
 }
 function CheckpointPanel({workspace,project,canWrite,onPending,onChanged,scope,store,recoveryLoading,recoveryError,onReloadRecovery}:Props&{scope:string;store:DurableFileRecoveryStore|null;recoveryLoading:boolean;recoveryError:string;onReloadRecovery:()=>void}){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const showMessage=(value:string)=>workspaceUiMessage(value,language);
  const alive=useRef(true);
  const current=()=>alive.current&&!!scope&&taskDraftScope()===scope;
  const mutation=useMutationReceipt(store,undefined,checkpointCommandTransport(store,request,current));
@@ -57,37 +61,37 @@ function CheckpointPanel({workspace,project,canWrite,onPending,onChanged,scope,s
  };
  const create=()=>{const selectedPaths=[...new Set(paths.split(/[,\r\n]+/).map(path=>path.trim()).filter(Boolean))];if(!selectedPaths.length){setError('请输入至少一个项目内相对路径。');return;}void send('create',prefix,{project_id:project,paths:selectedPaths});};
  const pagingLocked=busy||mutation.pending||restorePending||resource.loading;
- return <section aria-label="项目文件检查点" className="wb-form">
-  <h3>项目文件检查点</h3><p className="wb-hint">选择要保存的路径。恢复时先审阅当前与目标版本，每次恢复一个路径。</p>
-  {recoveryLoading&&<p role="status">正在读取文件操作持久回执…</p>}
-  {recoveryError&&<p role="alert">{recoveryError}</p>}
-  <button disabled={busy||restorePending||recoveryLoading} onClick={onReloadRecovery}>重读待确认检查点请求</button>
-  {error&&<p role="alert">{error}</p>}
-  {notice&&<p role="status">{notice}</p>}
-  <label>相对路径（逗号或换行分隔）<textarea value={paths} disabled={!canWrite||!store||busy||mutation.pending||restorePending} onChange={event=>setPaths(event.target.value)}/></label>
-  <button disabled={!canWrite||!store||!project||busy||restorePending||mutation.pending} onClick={create}>创建检查点</button>
+ return <section lang={language} aria-label={t("项目文件检查点","Project File Checkpoints")} className="wb-form">
+  <h3>{t("项目文件检查点","Project File Checkpoints")}</h3><p className="wb-hint">{t("选择要保存的路径。恢复时先审阅当前与目标版本，每次恢复一个路径。","Choose paths to save. Review current and target versions before restoring one path at a time.")}</p>
+  {recoveryLoading&&<p role="status">{t("正在读取文件操作持久回执…","Reading Durable File Operation Receipts…")}</p>}
+  {recoveryError&&<p role="alert">{showMessage(recoveryError)}</p>}
+  <button disabled={busy||restorePending||recoveryLoading} onClick={onReloadRecovery}>{t("重读待确认检查点请求","Read Unconfirmed Checkpoint Request Again")}</button>
+  {error&&<p role="alert">{showMessage(error)}</p>}
+  {notice&&<p role="status">{showMessage(notice)}</p>}
+  <label>{t('相对路径（逗号或换行分隔）','Relative Paths (Comma or Newline Separated)')}<textarea value={paths} disabled={!canWrite||!store||busy||mutation.pending||restorePending} onChange={event=>setPaths(event.target.value)}/></label>
+  <button disabled={!canWrite||!store||!project||busy||restorePending||mutation.pending} onClick={create}>{t("创建检查点","Create Checkpoint")}</button>
   {mutation.pending&&<div role="status">
-   <p>{store?.closing?'已保留结束原请求的意图，请继续确认结束回执。':'已保留原创建或审阅请求。'}</p>
-   <button disabled={!canWrite||!store||busy||restorePending} onClick={()=>void send('retry',prefix,undefined)}>{store?.closing?'重试结束原请求':'重试原检查点请求'}</button>
-   <button disabled={!canWrite||!store||store.closing||busy||restorePending} onClick={()=>void send('close',prefix,undefined)}>结束原创建或审阅请求</button>
-   <p>结束操作会保留原意图和快照记录，已完成的请求会返回原回执。</p>
+   <p>{store?.closing?t("已保留结束原请求的意图，请继续确认结束回执。","The intent to end the original request is retained. Continue confirming its closing receipt."):t("已保留原创建或审阅请求。","The Original Create or Review Request Is Retained")}</p>
+   <button disabled={!canWrite||!store||busy||restorePending} onClick={()=>void send('retry',prefix,undefined)}>{store?.closing?t("重试结束原请求","Retry Ending Original Request"):t("重试原检查点请求","Retry Original Checkpoint Request")}</button>
+   <button disabled={!canWrite||!store||store.closing||busy||restorePending} onClick={()=>void send('close',prefix,undefined)}>{t("结束原创建或审阅请求","End Original Create or Review Request")}</button>
+   <p>{t("结束操作会保留原意图和快照记录，已完成的请求会返回原回执。","Ending retains the original intent and snapshot records. Completed requests return their original receipt.")}</p>
   </div>}
-  <button disabled={pagingLocked} onClick={refresh}>刷新检查点</button>
-  <p>每页25个检查点，当前第 {cursors.length} 页。</p>
-  {resource.loading&&<p role="status">正在读取检查点目录…</p>}
-  {resource.error&&<p role="alert">{resource.error} <button disabled={pagingLocked} onClick={resource.reload}>重试读取目录</button></p>}
+  <button disabled={pagingLocked} onClick={refresh}>{t("刷新检查点","Refresh Checkpoints")}</button>
+  <p>{t(`每页25个检查点，当前第 ${cursors.length} 页。`,`25 Checkpoints per Page; Current Page ${cursors.length}.`)}</p>
+  {resource.loading&&<p role="status">{t("正在读取检查点目录…","Reading Checkpoint Catalog…")}</p>}
+  {resource.error&&<p role="alert">{showMessage(resource.error)} <button disabled={pagingLocked} onClick={resource.reload}>{t("重试读取目录","Retry Reading Catalog")}</button></p>}
   {page&&!resource.loading&&!resource.error&&<>
-   {!page.items.length&&<p role="status">此页没有检查点。</p>}
+   {!page.items.length&&<p role="status">{t("此页没有检查点。","No Checkpoints on This Page")}</p>}
    <ul>{page.items.map(item=>{
     const path=selected[item.checkpoint_id]??item.paths[0]??'',kind=`review:${item.checkpoint_id}:${path}`;
-    return <li key={item.checkpoint_id}><strong>{item.checkpoint_id}</strong><small>{item.state==='ready'?'可用':'副本已清理'}</small>
-     <select aria-label="恢复路径" value={path} disabled={busy||mutation.pending||restorePending} onChange={event=>setSelected(value=>({...value,[item.checkpoint_id]:event.target.value}))}>{item.paths.map(value=><option key={value} value={value}>{value}</option>)}</select>
-     <button disabled={!canWrite||busy||restorePending||item.state!=='ready'||!path||mutation.pending||!store} onClick={()=>void send(kind,`${prefix}/${encodeURIComponent(item.checkpoint_id)}/restore-review`,{project_id:project,path})}>检查恢复内容</button>
+    return <li key={item.checkpoint_id}><strong>{item.checkpoint_id}</strong><small>{item.state==='ready'?t("可用","Available"):t("副本已清理","Copy Pruned")}</small>
+     <select aria-label={t("恢复路径","Restore Path")} value={path} disabled={busy||mutation.pending||restorePending} onChange={event=>setSelected(value=>({...value,[item.checkpoint_id]:event.target.value}))}>{item.paths.map(value=><option key={value} value={value}>{value}</option>)}</select>
+     <button disabled={!canWrite||busy||restorePending||item.state!=='ready'||!path||mutation.pending||!store} onClick={()=>void send(kind,`${prefix}/${encodeURIComponent(item.checkpoint_id)}/restore-review`,{project_id:project,path})}>{t("检查恢复内容","Review Restore Content")}</button>
     </li>;
    })}</ul>
   </>}
-  <button disabled={pagingLocked||cursors.length===1} onClick={()=>setCursors(values=>values.slice(0,-1))}>上一页检查点</button>
-  <button disabled={pagingLocked||!!resource.error||!page?.next_before_checkpoint_id} onClick={()=>{const next=page?.next_before_checkpoint_id;if(next)setCursors(values=>[...values,next]);}}>下一页检查点</button>
+  <button disabled={pagingLocked||cursors.length===1} onClick={()=>setCursors(values=>values.slice(0,-1))}>{t("上一页检查点","Previous Checkpoint Page")}</button>
+  <button disabled={pagingLocked||!!resource.error||!page?.next_before_checkpoint_id} onClick={()=>{const next=page?.next_before_checkpoint_id;if(next)setCursors(values=>[...values,next]);}}>{t("下一页检查点","Next Checkpoint Page")}</button>
   <CheckpointRestoreRecovery workspace={workspace} project={project} review={review} canWrite={canWrite&&!busy&&!mutation.pending} onClose={()=>setReview(null)} onPending={setRestorePending} onApplied={()=>{refresh();onChanged();}}/>
  </section>;
 }

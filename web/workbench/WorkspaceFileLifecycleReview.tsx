@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
+import {workspaceUiMessage} from './workspace-ui-messages';
 import React,{useEffect,useState} from 'react';
 import {workbenchApi} from './client';
 import type {WorkspaceFile,WorkbenchFileLifecycleHistoryItem,WorkbenchFileLifecycleHistoryPage,WorkbenchFileLifecyclePreview,WorkbenchFileLifecycleReceipt} from './types';
@@ -9,25 +11,29 @@ type Command=FileLifecycleCommand;
 type FileRef=Pick<WorkspaceFile,'path'|'version'|'sha256'>;
 
 export function WorkspaceFileLifecycleHistoryListing({page,onMore,onRefresh,onPreviewSource}:{page:WorkbenchFileLifecycleHistoryPage&{loading:boolean;error:string};onMore:()=>void;onRefresh:()=>void;onPreviewSource:(item:WorkbenchFileLifecycleHistoryItem)=>void}){
- return <section className="wb-file-lifecycle-history" aria-label="文件操作历史">
-  <div className="wb-file-lifecycle-heading"><div><h3>文件操作历史</h3><p className="wb-hint">改名与删除记录来自不可变操作回执；文件内容版本请在打开文件后查看。</p></div><button type="button" disabled={page.loading} onClick={onRefresh}>刷新历史</button></div>
-  {page.error&&<p className="wb-error" role="alert">{page.error}</p>}
-  {page.loading&&!page.items.length&&<p className="wb-status" role="status">正在读取操作历史…</p>}
-  {!page.loading&&!page.error&&!page.items.length&&<p className="wb-status">暂无改名或删除记录。</p>}
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const showMessage=(value:string)=>workspaceUiMessage(value,language);
+ return <section lang={language} className="wb-file-lifecycle-history" aria-label={t("文件操作历史","File Operation History")}>
+  <div className="wb-file-lifecycle-heading"><div><h3>{t("文件操作历史","File Operation History")}</h3><p className="wb-hint">{t("改名与删除记录来自不可变操作回执；文件内容版本请在打开文件后查看。","Rename and deletion records come from immutable operation receipts. Open a file to view content versions.")}</p></div><button type="button" disabled={page.loading} onClick={onRefresh}>{t("刷新历史","Refresh History")}</button></div>
+  {page.error&&<p className="wb-error" role="alert">{showMessage(page.error)}</p>}
+  {page.loading&&!page.items.length&&<p className="wb-status" role="status">{t("正在读取操作历史…","Reading Operation History…")}</p>}
+  {!page.loading&&!page.error&&!page.items.length&&<p className="wb-status">{t("暂无改名或删除记录。","No Rename or Deletion Records Yet")}</p>}
   {!!page.items.length&&<ol>{page.items.map(item=><li key={item.command_key}>
    <div className="wb-file-lifecycle-entry">
-    <strong>{item.action==='rename'?'重命名':'删除'} · {item.source.path}{item.action==='rename'&&<> → {item.target.path}</>}</strong>
-    <small>来源：{item.source.path} · v{item.source.version}{item.action==='rename'&&<>；目标：{item.target.path} · v{item.target.version}</>}</small>
-    <small>操作时间：{new Date(item.applied_at).toLocaleString()}</small>
-    <button type="button" onClick={()=>onPreviewSource(item)}>预览历史版本</button>
-    <details><summary>不可变回执</summary><dl><div><dt>命令 ID</dt><dd><code>{item.command_key}</code></dd></div><div><dt>预览 SHA-256</dt><dd><code>{item.preview_sha256}</code></dd></div></dl><pre>{JSON.stringify(item,null,2)}</pre></details>
+    <strong>{item.action==='rename'?t("重命名","Rename"):t("删除","Delete")} · {item.source.path}{item.action==='rename'&&<> → {item.target.path}</>}</strong>
+    <small>{t("来源：","Source: ")}{item.source.path} · v{item.source.version}{item.action==='rename'&&<>{t("；目标：","; Target: ")}{item.target.path} · v{item.target.version}</>}</small>
+    <small>{t("操作时间：","Operation Time: ")}{new Date(item.applied_at).toLocaleString()}</small>
+    <button type="button" onClick={()=>onPreviewSource(item)}>{t("预览历史版本","Preview Historical Version")}</button>
+    <details><summary>{t("不可变回执","Immutable Receipt")}</summary><dl><div><dt>{t("命令 ID","Command ID")}</dt><dd><code>{item.command_key}</code></dd></div><div><dt>{t("预览 SHA-256","Preview SHA-256")}</dt><dd><code>{item.preview_sha256}</code></dd></div></dl><pre>{JSON.stringify(item,null,2)}</pre></details>
    </div>
   </li>)}</ol>}
-  {page.next_cursor&&<button type="button" disabled={page.loading} onClick={onMore}>{page.loading?'正在加载…':'加载更多历史'}</button>}
+  {page.next_cursor&&<button type="button" disabled={page.loading} onClick={onMore}>{page.loading?t("正在加载…","Loading…"):t("加载更多历史","Load More History")}</button>}
  </section>;
 }
 
 export function WorkspaceFileLifecycleReview({workspace,project,file,action,canWrite,onClose,onApplied,ownerScope,lifecycleStorage,resumeCommand}:{workspace:string;project:string;file:FileRef;action:Action;canWrite:boolean;onClose:()=>void;onApplied:()=>void;ownerScope:string;lifecycleStorage:Storage|null;resumeCommand?:Command|null}){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const showMessage=(value:string)=>workspaceUiMessage(value,language);
  const scope={owner_scope:ownerScope,workspace_id:workspace,project_id:project};
  const [targetPath,setTargetPath]=useState(resumeCommand?.target_path??file.path),[preview,setPreview]=useState<WorkbenchFileLifecyclePreview|null>(null),[command,setCommand]=useState<Command|null>(resumeCommand??null),
   [stage,setStage]=useState<'edit'|'preview'|'applying'|'applied'|'not_applied'|'unknown'>(resumeCommand?'unknown':'edit'),[busy,setBusy]=useState(false),[error,setError]=useState(''),
@@ -78,20 +84,20 @@ export function WorkspaceFileLifecycleReview({workspace,project,file,action,canW
  };
  useEffect(()=>{if(resumeCommand)void reconcile(resumeCommand);},[resumeCommand]);
  const close=()=>{if(command)clearPendingFileLifecycleCommand(lifecycleStorage,scope,command.command_key);onClose();};
- const label=action==='rename'?'重命名':'删除';
- return <div className="wb-file-lifecycle-overlay"><section className="wb-file-lifecycle-review" role="dialog" aria-modal="true" aria-label={`${label}共同文件`}>
-  <div className="wb-file-lifecycle-heading"><h3>{label}共同文件</h3><button type="button" disabled={closed} aria-label="关闭文件操作" onClick={close}>关闭</button></div>
-  <p>当前文件：<code>{file.path}</code> · v{file.version}</p>
-  {action==='rename'&&<label>新路径<input disabled={busy||stage!=='edit'} value={targetPath} onChange={event=>setTargetPath(event.target.value)} maxLength={1000}/></label>}
-  {(stage==='edit'||stage==='unknown')&&stage==='edit'&&<button type="button" className="wb-primary" disabled={!canWrite||busy||(action==='rename'&&!targetPath.trim())} onClick={()=>void makePreview()}>{busy?'正在预览…':`预览${label}`}</button>}
-  {preview&&stage==='preview'&&<div className="wb-file-lifecycle-preview" aria-label="操作影响预览"><h4>操作影响预览</h4><p>源文件：<code>{preview.source.path}</code> · v{preview.source.version}</p>{preview.action==='rename'&&<p>目标路径：<code>{preview.target.path}</code> · v{preview.target.version}</p>}<p>来源引用 {preview.source_refs.length} 项{preview.action==='rename'&&<>；目标引用 {preview.target_refs.length} 项</>}</p><details><summary>查看引用</summary><pre>{JSON.stringify({source_refs:preview.source_refs,...(preview.action==='rename'?{target_refs:preview.target_refs}:{})},null,2)}</pre></details>
-   <div className="wb-actions"><button type="button" disabled={busy||!canWrite||!command} onClick={()=>void submit(command)}>确认{label}</button><button type="button" disabled={busy} onClick={()=>{setPreview(null);setCommand(null);setStage('edit');}}>返回修改</button></div>
+ const label=action==='rename'?t("重命名","Rename"):t("删除","Delete");
+ return <div lang={language} className="wb-file-lifecycle-overlay"><section className="wb-file-lifecycle-review" role="dialog" aria-modal="true" aria-label={t(`${label}共同文件`,`${label} Shared File`)}>
+  <div className="wb-file-lifecycle-heading"><h3>{t(`${label}共同文件`,`${label} Shared File`)}</h3><button type="button" disabled={closed} aria-label={t("关闭文件操作","Close File Operation")} onClick={close}>{t("关闭","Close")}</button></div>
+  <p>{t("当前文件：","Current File: ")}<code>{file.path}</code> · v{file.version}</p>
+  {action==='rename'&&<label>{t("新路径","New Path")}<input disabled={busy||stage!=='edit'} value={targetPath} onChange={event=>setTargetPath(event.target.value)} maxLength={1000}/></label>}
+  {(stage==='edit'||stage==='unknown')&&stage==='edit'&&<button type="button" className="wb-primary" disabled={!canWrite||busy||(action==='rename'&&!targetPath.trim())} onClick={()=>void makePreview()}>{busy?t("正在预览…","Preparing Preview…"):t(`预览${label}`,`Preview ${label}`)}</button>}
+  {preview&&stage==='preview'&&<div className="wb-file-lifecycle-preview" aria-label={t("操作影响预览","Operation Impact Preview")}><h4>{t("操作影响预览","Operation Impact Preview")}</h4><p>{t("源文件：","Source File: ")}<code>{preview.source.path}</code> · v{preview.source.version}</p>{preview.action==='rename'&&<p>{t("目标路径：","Target Path: ")}<code>{preview.target.path}</code> · v{preview.target.version}</p>}<p>{t(`来源引用 ${preview.source_refs.length} 项`,`${preview.source_refs.length} Source References`)}{preview.action==='rename'&&<>{t(`；目标引用 ${preview.target_refs.length} 项`,`; ${preview.target_refs.length} Target References`)}</>}</p><details><summary>{t("查看引用","View References")}</summary><pre>{JSON.stringify({source_refs:preview.source_refs,...(preview.action==='rename'?{target_refs:preview.target_refs}:{})},null,2)}</pre></details>
+   <div className="wb-actions"><button type="button" disabled={busy||!canWrite||!command} onClick={()=>void submit(command)}>{t(`确认${label}`,`Confirm ${label}`)}</button><button type="button" disabled={busy} onClick={()=>{setPreview(null);setCommand(null);setStage('edit');}}>{t("返回修改","Back to Edit")}</button></div>
   </div>}
-  {stage==='applying'&&<p role="status">正在提交并确认操作结果…</p>}
-  {error&&<p className="wb-error" role="alert">{error}</p>}
-  {stage==='not_applied'&&<div className="wb-actions"><button type="button" disabled={busy||!canWrite} onClick={()=>void submit(command)}>按同一命令重试</button></div>}
-  {stage==='unknown'&&command&&<button type="button" disabled={busy} onClick={()=>void reconcile()}>{busy?'正在查询…':'重新查询操作状态'}</button>}
-  {stage==='applied'&&receipt&&<div className="wb-file-lifecycle-result" role="status"><h4>操作已完成{stage==='applied'&&command&&'，回执已确认'}</h4><p>命令 ID：<code>{receipt.command_key}</code></p><p>来源路径：<code>{receipt.source.path}</code>{receipt.action==='rename'&&<> → <code>{receipt.target.path}</code></>}</p><p>完成时间：{new Date(receipt.applied_at).toLocaleString()}</p><details><summary>查看完整回执</summary><pre>{JSON.stringify(receipt,null,2)}</pre></details><button type="button" onClick={close}>完成</button></div>}
+  {stage==='applying'&&<p role="status">{t("正在提交并确认操作结果…","Submitting and Confirming Operation Result…")}</p>}
+  {error&&<p className="wb-error" role="alert">{showMessage(error)}</p>}
+  {stage==='not_applied'&&<div className="wb-actions"><button type="button" disabled={busy||!canWrite} onClick={()=>void submit(command)}>{t("按同一命令重试","Retry the Same Command")}</button></div>}
+  {stage==='unknown'&&command&&<button type="button" disabled={busy} onClick={()=>void reconcile()}>{busy?t("正在查询…","Querying…"):t("重新查询操作状态","Query Operation Status Again")}</button>}
+  {stage==='applied'&&receipt&&<div className="wb-file-lifecycle-result" role="status"><h4>{t("操作已完成","Operation Complete")}{stage==='applied'&&command&&t("，回执已确认","; Receipt Confirmed")}</h4><p>{t("命令 ID：","Command ID: ")}<code>{receipt.command_key}</code></p><p>{t("来源路径：","Source Path: ")}<code>{receipt.source.path}</code>{receipt.action==='rename'&&<> → <code>{receipt.target.path}</code></>}</p><p>{t("完成时间：","Completed at: ")}{new Date(receipt.applied_at).toLocaleString()}</p><details><summary>{t("查看完整回执","View Complete Receipt")}</summary><pre>{JSON.stringify(receipt,null,2)}</pre></details><button type="button" onClick={close}>{t("完成","Done")}</button></div>}
  </section></div>;
 }
 

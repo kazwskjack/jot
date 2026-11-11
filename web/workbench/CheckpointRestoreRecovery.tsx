@@ -1,3 +1,6 @@
+import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
+import {useApplicationLanguage,useApplicationText,applicationText} from '../jot/application-language';
+import {workspaceUiMessage} from './workspace-ui-messages';
 import React,{useEffect,useMemo,useState,useRef} from 'react';
 import {useDurableFileRecovery} from './useDurableFileRecovery';
 import type {DurableFileRecoveryStore} from './durable-file-recovery.mjs';
@@ -80,10 +83,11 @@ export async function readCheckpointRestoreDiff(
  return {kind: 'text', text: checkpointTextDiff(before, target, review.before.kind === 'absent', review.target.kind === 'absent')};
 }
 
-function reviewStateLabel(state:WorkspaceCheckpointRestoreReview['before']){
- if(state.kind==='absent')return '不存在';
- const mode=state.executable===null?'执行位未知':state.executable?'可执行':'不可执行';
- return `文件（按原始字节保存；文本/二进制不作推断） · v${state.version} · SHA-256 ${state.sha256} · ${state.size} B · ${mode}`;
+function reviewStateLabel(state:WorkspaceCheckpointRestoreReview['before'],language:ApplicationLanguage){
+ const t=applicationText(language);
+ if(state.kind==='absent')return t('不存在','Absent');
+ const mode=state.executable===null?t('执行位未知','Executable Bit Unknown'):state.executable?t('可执行','Executable'):t('不可执行','Not Executable');
+ return t(`文件（按原始字节保存；文本/二进制不作推断） · v${state.version} · SHA-256 ${state.sha256} · ${state.size} B · ${mode}`,`File (Original Bytes; Text/Binary Not Inferred) · v${state.version} · SHA-256 ${state.sha256} · ${state.size} B · ${mode}`);
 }
 
 type Props={workspace:string;project:string;review:WorkspaceCheckpointRestoreReview|null;canWrite:boolean;onClose:()=>void;onPending:(value:boolean)=>void;onApplied:(receipt:WorkspaceCheckpointRestoreReceipt)=>void};
@@ -94,6 +98,12 @@ export default function CheckpointRestoreRecovery(props:Props){
  return <RestoreRecovery key={recovery.key} {...props} scope={scope} store={recovery.store} recoveryLoading={recovery.loading} recoveryError={recovery.error} onReloadRecovery={recovery.reload}/>;
 }
 function RestoreRecovery({workspace,project,review,canWrite,onClose,onPending,onApplied,scope,store,recoveryLoading,recoveryError,onReloadRecovery}:Props&{scope:string;store:DurableFileRecoveryStore|null;recoveryLoading:boolean;recoveryError:string;onReloadRecovery:()=>void}){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const showMessage=(value:string)=>workspaceUiMessage(value,language);
+ const showDiff=(value:RestoreDiff)=>{
+  const header='--- 当前版本\n+++ 检查点版本\n';
+  return language==='en'&&value.kind==='text'&&value.text.startsWith(header)?'--- Current Version\n+++ Checkpoint Version\n'+value.text.slice(header.length):showMessage(value.text);
+ };
  const [command,setCommand]=useState<any>(()=>store?.read()?.command??null),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
  const [dismissed,setDismissed]=useState(false);
  const [pendingOperation,setPendingOperation]=useState<{commandKey:string;operationId:string}|null>(null);
@@ -196,8 +206,8 @@ function RestoreRecovery({workspace,project,review,canWrite,onClose,onPending,on
  useEffect(()=>{if(command&&busy&&!dismissed)dialogRef.current?.focus();},[command,busy,dismissed]);
  useEffect(()=>{if(returnAfterFinish.current&&!command&&!review){returnAfterFinish.current=false;focusReturn();}},[command,review]);
  useEffect(()=>{if(review&&!command){setDismissed(false);setMessage('');}},[review?.review_id]);
- if(dismissed&&command)return <section className="wb-form" role="status" aria-label="检查点恢复待回执"><p>恢复仍未结算。原请求和回执线索已保留，不会重新发送。</p><button ref={resumeRef} onClick={()=>setDismissed(false)}>继续查看原恢复回执</button></section>;
- return <section ref={dialogRef} id={command?'restore-pending':undefined} tabIndex={command&&!dialogOpen?-1:undefined} role={dialogOpen?'alertdialog':command?'region':undefined} aria-modal={dialogOpen?'true':undefined} aria-labelledby={dialogOpen?'checkpoint-restore-title':undefined} aria-describedby={dialogOpen?'checkpoint-restore-description':undefined} aria-label={dialogOpen?undefined:'检查点恢复与回执'} className="wb-form"
+ if(dismissed&&command)return <section lang={language} className="wb-form" role="status" aria-label={t("检查点恢复待回执","Checkpoint Restore Awaiting Receipt")}><p>{t("恢复仍未结算。原请求和回执线索已保留，不会重新发送。","The restore is not settled. The original request and receipt references are retained; it will not be resent.")}</p><button ref={resumeRef} onClick={()=>setDismissed(false)}>{t("继续查看原恢复回执","Continue Viewing Original Restore Receipt")}</button></section>;
+ return <section lang={language} ref={dialogRef} id={command?'restore-pending':undefined} tabIndex={command&&!dialogOpen?-1:undefined} role={dialogOpen?'alertdialog':command?'region':undefined} aria-modal={dialogOpen?'true':undefined} aria-labelledby={dialogOpen?'checkpoint-restore-title':undefined} aria-describedby={dialogOpen?'checkpoint-restore-description':undefined} aria-label={dialogOpen?undefined:t("检查点恢复与回执","Checkpoint Restore and Receipt")} className="wb-form"
   onKeyDown={event=>{
    if(event.key==='Escape'){
     event.preventDefault();if(command)dismissPending();else if(dialogOpen)closeReview();return;
@@ -208,20 +218,20 @@ function RestoreRecovery({workspace,project,review,canWrite,onClose,onPending,on
    if(event.shiftKey&&(active===first||!dialogRef.current?.contains(active))){event.preventDefault();last!.focus();}
    else if(!event.shiftKey&&(active===last||!dialogRef.current?.contains(active))){event.preventDefault();first.focus();}
   }}>
-  <h3 id="checkpoint-restore-title">检查点恢复</h3>
-  {recoveryLoading&&<p role="status">正在读取物理恢复持久回执…</p>}
-  {recoveryError&&<p role="alert">{recoveryError}</p>}
-  {!dialogOpen&&<button type="button" disabled={busy||recoveryLoading} onClick={onReloadRecovery}>重读待确认物理恢复请求</button>}
-  {store?.issue&&<p role="alert">{store.issue}；原恢复记录保留。</p>}
-  {message&&<p role="status">{message}</p>}
-  {command?<><p>原恢复命令待确认：{command.body.project_id} / {command.body.path}</p><button ref={receiptRef} disabled={busy||!current()} onClick={()=>void check()}>读取原恢复回执</button>{pendingOperation?.commandKey===command.key&&<button disabled={busy||!canWrite||!current()||!store||!!store.issue} onClick={()=>void reconcile()}>核对并结算原恢复</button>}<button disabled={busy||!canWrite||!current()||!store||!!store.issue} onClick={()=>void closeOriginal()}>{store?.closing?'重试确认结束原恢复':'结束尚未登记的原恢复'}</button><p>已登记的恢复可继续读取或结算原回执。</p><button disabled={!current()} onClick={dismissPending}>稍后检查</button></>:review&&<>
-   <p id="checkpoint-restore-description">当前状态：{reviewStateLabel(review.before)}。检查点目标：{reviewStateLabel(review.target)}。确认仅恢复 {review.path}。</p>
-   <p>恢复范围为所选共同文件路径。外部操作保留各自的回执与处理流程。</p>
-   <section aria-label="恢复差异预览">
-    {!difference||difference.review_id!==review.review_id?<p role="status">正在读取并校验恢复差异…</p>:difference.error?<p role="alert">{difference.error}</p>:difference.value?.kind==='text'?<pre aria-label="恢复文本差异">{difference.value.text}</pre>:<p>{difference.value?.text}</p>}
+  <h3 id="checkpoint-restore-title">{t("检查点恢复","Checkpoint Restore")}</h3>
+  {recoveryLoading&&<p role="status">{t("正在读取物理恢复持久回执…","Reading Durable Physical Restore Receipts…")}</p>}
+  {recoveryError&&<p role="alert">{showMessage(recoveryError)}</p>}
+  {!dialogOpen&&<button type="button" disabled={busy||recoveryLoading} onClick={onReloadRecovery}>{t("重读待确认物理恢复请求","Read Unconfirmed Physical Restore Request Again")}</button>}
+  {store?.issue&&<p role="alert">{showMessage(store.issue)}{t('；原恢复记录保留。','; the original restore record is retained.')}</p>}
+  {message&&<p role="status">{showMessage(message)}</p>}
+  {command?<><p>{t('原恢复命令待确认：','Original Restore Command Unconfirmed: ')}{command.body.project_id} / {command.body.path}</p><button ref={receiptRef} disabled={busy||!current()} onClick={()=>void check()}>{t("读取原恢复回执","Read Original Restore Receipt")}</button>{pendingOperation?.commandKey===command.key&&<button disabled={busy||!canWrite||!current()||!store||!!store.issue} onClick={()=>void reconcile()}>{t("核对并结算原恢复","Reconcile and Settle Original Restore")}</button>}<button disabled={busy||!canWrite||!current()||!store||!!store.issue} onClick={()=>void closeOriginal()}>{store?.closing?t("重试确认结束原恢复","Retry Confirming Original Restore End"):t("结束尚未登记的原恢复","End Unrecorded Original Restore")}</button><p>{t("已登记的恢复可继续读取或结算原回执。","Recorded restores can continue reading or settling their original receipt.")}</p><button disabled={!current()} onClick={dismissPending}>{t("稍后检查","Check Later")}</button></>:review&&<>
+   <p id="checkpoint-restore-description">{t('当前状态：','Current State: ')}{reviewStateLabel(review.before,language)}{t('。检查点目标：','. Checkpoint Target: ')}{reviewStateLabel(review.target,language)}{t('。确认仅恢复 ','. Confirm Restoring Only ')}{review.path}{t('。','.')}</p>
+   <p>{t("恢复范围为所选共同文件路径。外部操作保留各自的回执与处理流程。","Restoration is scoped to the selected shared file path. External operations retain their own receipts and handling flows.")}</p>
+   <section aria-label={t("恢复差异预览","Restore Diff Preview")}>
+    {!difference||difference.review_id!==review.review_id?<p role="status">{t("正在读取并校验恢复差异…","Reading and Verifying Restore Diff…")}</p>:difference.error?<p role="alert">{showMessage(difference.error)}</p>:difference.value?.kind==='text'?<pre aria-label={t("恢复文本差异","Restore Text Diff")}>{showDiff(difference.value)}</pre>:<p>{difference.value?showDiff(difference.value):undefined}</p>}
    </section>
-   <button ref={cancelRef} id="restore-cancel" disabled={busy} onClick={closeReview}>取消</button>
-   <button ref={confirmRef} id="restore-confirm" disabled={busy||!canWrite||!diffReady||!current()||!store||!!store.issue} onClick={()=>void submit()}>确认恢复此路径</button>
+   <button ref={cancelRef} id="restore-cancel" disabled={busy} onClick={closeReview}>{t("取消","Cancel")}</button>
+   <button ref={confirmRef} id="restore-confirm" disabled={busy||!canWrite||!diffReady||!current()||!store||!!store.issue} onClick={()=>void submit()}>{t("确认恢复此路径","Confirm Restoring This Path")}</button>
   </>}
  </section>;
 }
