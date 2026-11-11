@@ -9,8 +9,9 @@ import {withImmediateTransaction} from '../db/database.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {assertRetainedFileCapacity,nativeStageReservation} from './retained-file-quota.ts';
 
-type NativeFileRecord={protocol:1;binding:string;source:NativeFileProofSource;source_metadata_sha256?:string};
-const metadataHash=(source:NativeFileProofSource)=>createHash('sha256').update(canonicalJson(source)).digest('hex');
+type NativeFileRecord={protocol:1;binding:string;source:NativeFileProofSource;source_metadata_sha256?:string;activity_seq?:string};
+const metadataHash=(source:NativeFileProofSource,activitySeq?:string)=>createHash('sha256').update(canonicalJson(activitySeq===undefined?source:{source,activity_seq:activitySeq})).digest('hex');
+const sequence=(value:unknown):value is string=>typeof value==='string'&&value.length<=19&&/^(0|[1-9][0-9]{0,18})$/.test(value)&&String(BigInt(value))===value&&BigInt(value)<=9223372036854775807n;
 const sameRecord=(a:NativeFileRecord,b:NativeFileRecord)=>a.binding===b.binding&&canonicalJson(a.source)===canonicalJson(b.source);
 const limit=512*1024*1024,metadataLimit=256*1024;
 const sha=(value:unknown):value is string=>typeof value==='string'&&value.length===64&&/^[a-f0-9]{64}$/.test(value);
@@ -51,8 +52,9 @@ export async function readRetainedNativeFile(root:string,binding:string,signal:A
  try{
   const chunks:Buffer[]=[];for await(const chunk of privateBytes(join(entry,'source.json'),metadataLimit,signal))chunks.push(chunk);
   const record=JSON.parse(Buffer.concat(chunks).toString('utf8')) as NativeFileRecord;
-  if(!record||!['binding,protocol,source','binding,protocol,source,source_metadata_sha256'].includes(Object.keys(record).sort().join(','))||record.protocol!==1||record.binding!==binding||!validSource(record.source)
-   ||record.source_metadata_sha256!==undefined&&(!sha(record.source_metadata_sha256)||record.source_metadata_sha256!==metadataHash(record.source)))throw invalid();
+  if(!record||!['binding,protocol,source','binding,protocol,source,source_metadata_sha256','activity_seq,binding,protocol,source,source_metadata_sha256'].includes(Object.keys(record).sort().join(','))||record.protocol!==1||record.binding!==binding||!validSource(record.source)
+   ||record.activity_seq!==undefined&&(!sequence(record.activity_seq)||record.source_metadata_sha256===undefined||record.source.asOfSeq!==undefined&&BigInt(record.activity_seq)>BigInt(record.source.asOfSeq))
+   ||record.source_metadata_sha256!==undefined&&(!sha(record.source_metadata_sha256)||record.source_metadata_sha256!==metadataHash(record.source,record.activity_seq)))throw invalid();
   return record;
  }catch(error){signal.throwIfAborted();throw invalid();}
 }
@@ -83,9 +85,10 @@ export async function loadRetainedNativeFile(root:string,record:NativeFileRecord
 }
 
 /** Admission already proved the actual owned native member and complete original opened bytes. */
-export async function retainNativeFile(db:DatabaseSync,root:string,binding:string,source:NativeFileProofSource,bytes:PinnedByteSource,signal:AbortSignal):Promise<boolean>{
- if(!isAbsolute(root)||!sha(binding)||!validSource(source)||bytes.sha256!==source.sha256||bytes.sizeBytes!==source.size)throw invalid();
- const record:NativeFileRecord={protocol:1,binding,source,source_metadata_sha256:metadataHash(source)},metadata=Buffer.from(JSON.stringify(record));if(metadata.length>metadataLimit)throw invalid();
+export async function retainNativeFile(db:DatabaseSync,root:string,binding:string,source:NativeFileProofSource,bytes:PinnedByteSource,signal:AbortSignal,activitySeq?:string):Promise<boolean>{
+ if(!isAbsolute(root)||!sha(binding)||!validSource(source)||bytes.sha256!==source.sha256||bytes.sizeBytes!==source.size
+  ||activitySeq!==undefined&&(!sequence(activitySeq)||source.asOfSeq!==undefined&&BigInt(activitySeq)>BigInt(source.asOfSeq)))throw invalid();
+ const record:NativeFileRecord={protocol:1,binding,source,source_metadata_sha256:metadataHash(source,activitySeq),...(activitySeq!==undefined?{activity_seq:activitySeq}:{})},metadata=Buffer.from(JSON.stringify(record));if(metadata.length>metadataLimit)throw invalid();
  await mkdir(root,{recursive:true,mode:0o700});await directory(root);
  const folder=join(root,'retained-native-files'),destination=join(folder,binding);
  await mkdir(folder,{recursive:true,mode:0o700});await directory(folder);

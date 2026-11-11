@@ -304,19 +304,22 @@ function textBoundary(text:string,offset:number){
  return offset>0&&/[\uD800-\uDBFF]/.test(text[offset-1]!)&&/[\uDC00-\uDFFF]/.test(text[offset]!)?offset-1:offset;
 }
 
-function originalActivity(db:DatabaseSync,owner:string,conversationId:string,activityId:string,runId:string,asOfSeq?:string){
- const event=db.prepare(`SELECT e.payload_json FROM ga_events e
+export function readOriginalActivitySnapshot(db:DatabaseSync,owner:string,conversationId:string,activityId:string,runId:string,asOfSeq?:string){
+ const event=db.prepare(`SELECT CAST(e.seq AS TEXT) seq,e.payload_json FROM ga_events e
   JOIN ga_runs r ON r.id=e.run_id AND r.conversation_id=e.conversation_id
   JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=?
   WHERE e.conversation_id=? AND e.run_id=? AND e.type='activity.upsert'
    AND json_extract(e.payload_json,'$.activity_id')=? AND (? IS NULL OR e.seq<=CAST(? AS INTEGER)) ORDER BY e.seq DESC LIMIT 1`)
-  .get(owner,conversationId,runId,activityId,asOfSeq??null,asOfSeq??null) as {payload_json:string}|undefined;
+  .get(owner,conversationId,runId,activityId,asOfSeq??null,asOfSeq??null) as {seq:string;payload_json:string}|undefined;
  if(!event)throw Error('activity_tool_result_not_found');
  const activity=parsedObject(event.payload_json);
  if(!activity||activity.activity_id!==activityId||activity.run_id!==runId)throw Error('activity_tool_result_not_found');
- return activity;
+ return {seq:event.seq,activity};
 }
 
+function originalActivity(db:DatabaseSync,owner:string,conversationId:string,activityId:string,runId:string,asOfSeq?:string){
+ return readOriginalActivitySnapshot(db,owner,conversationId,activityId,runId,asOfSeq).activity;
+}
 export {originalActivity as readOriginalActivity};
 
 /** The caller authorizes the conversation and holds the original read transaction. */

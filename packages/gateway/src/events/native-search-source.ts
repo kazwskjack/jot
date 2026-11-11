@@ -13,7 +13,7 @@ import type {FastifyInstance,FastifyRequest,FastifyReply} from 'fastify';
 import type {ActivityToolResultPage,ActivityToolResultSearchPage,ActivityToolResultMatch,ActivityNativeSearchMembersPage,ActivityNativeFileOpeningsPage,NativeMemberOfficeDocumentPage} from '../../contracts/types.ts';
 import {withReadTransaction} from '../db/database.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
-import {readOriginalActivity,type NativeSearchCandidate} from './activity-tool-result.ts';
+import {readOriginalActivitySnapshot,type NativeSearchCandidate} from './activity-tool-result.ts';
 import {readActivityHistory} from './activity-history.ts';
 import {readNativeMemberExecution} from '../workbench/native-member-owner-controls.ts';
 import {sessionProjectionId} from '../harness/session-event-projector.ts';
@@ -36,9 +36,12 @@ export interface NativeSearchSourceClient {
 }
 
 /** Original activity, native run binding and child receipts form one owned snapshot. */
-function source(db:DatabaseSync,owner:string,conversationId:string,runId:string,activityId:string,asOfSeq?:string) {
+function source(db:DatabaseSync,owner:string,conversationId:string,runId:string,activityId:string,asOfSeq?:string,activitySeq?:string) {
   return withReadTransaction(db,()=>{
-    const activity = readOriginalActivity(db,owner,conversationId,activityId,runId,asOfSeq);
+    // The stored event revision never rewrites the original public history/signature boundary.
+    if(activitySeq!==undefined&&asOfSeq!==undefined&&BigInt(activitySeq)>BigInt(asOfSeq))throw Error('activity_tool_result_source_changed');
+    const snapshot=readOriginalActivitySnapshot(db,owner,conversationId,activityId,runId,activitySeq??asOfSeq),activity=snapshot.activity;
+    if(activitySeq!==undefined&&snapshot.seq!==activitySeq)throw Error('activity_tool_result_source_changed');
     if(asOfSeq!==undefined)readActivityHistory(db,conversationId,{as_of_seq:asOfSeq,run_id:runId,limit:1});
     const detail = activity.detail as Input|undefined;
     const tool = detail?.tool_name, callSeq = detail?.native_search_call_seq, resultSeq = detail?.native_search_result_seq;
@@ -81,7 +84,7 @@ function source(db:DatabaseSync,owner:string,conversationId:string,runId:string,
       sessionId = binding?.session_id;
     }
     if (!sessionId) throw Error('activity_tool_result_not_found');
-    return {sessionId,activity,tool:tool as 'glob'|'grep',callSeq:Number(callSeq),resultSeq:Number(resultSeq),callSha,resultSha,
+    return {sessionId,activity,activitySeq:snapshot.seq,tool:tool as 'glob'|'grep',callSeq:Number(callSeq),resultSeq:Number(resultSeq),callSha,resultSha,
       identity:hash({owner,conversationId,runId,sessionId,activity,callSha:callSha??null,resultSha:resultSha??null,...(asOfSeq?{asOfSeq}:{})})};
   });
 }
@@ -244,10 +247,42 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
         throw Error('activity_tool_result_source_invalid');
       if (downloads.size >= 4) return reply.code(429).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_CAPACITY'}});
       downloads.add(reservation);
-      const original = source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined);
+      const findRetained=async()=>{
+        if(!retainedRoot||query.open_sha256===undefined)return undefined;
+        let current:ReturnType<typeof source>|undefined;
+        try{current=source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined);}
+        catch(error){if(!(error instanceof Error)||!['activity_tool_result_not_found','activity_tool_result_source_changed','activity_tool_result_source_invalid'].includes(error.message))throw error;}
+        if(current){
+          const saved=await readRetainedNativeFile(retainedRoot,retainedNativeBinding(owner,current.identity,query.open_sha256 as string),signal);
+          if(saved){
+            const original=source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined,saved.activity_seq);
+            if(original.identity!==current.identity)throw Error('activity_tool_result_source_changed');return {saved,original};
+          }
+        }
+        if([...downloads].reduce((sum,value)=>sum+value.bytes,0)+64*1024*1024>downloadBudget)return 'capacity' as const;
+        reservation.bytes=64*1024*1024;
+        try{
+          let found:{saved:Awaited<ReturnType<typeof listRetainedNativeFiles>>[number];original:ReturnType<typeof source>}|undefined;
+          const records=await listRetainedNativeFiles(retainedRoot,signal);let scanned=0;
+          for(const saved of records){
+            if(++scanned%8===0)await new Promise<void>(resolve=>setImmediate(resolve));signal.throwIfAborted();
+            const prior=saved.source;
+            if(prior.conversationId!==conversationId||prior.runId!==runId||prior.activityId!==activityId||prior.resultSha!==query.result_sha256
+              ||prior.membersSha!==query.members_sha256||prior.memberIndex!==Number(memberIndex)||prior.openSha!==query.open_sha256||prior.asOfSeq!==asOfSeq)continue;
+            let original:ReturnType<typeof source>;
+            try{original=source(db,owner,conversationId,runId,activityId,prior.asOfSeq,saved.activity_seq);}
+            catch(error){if(error instanceof Error&&['activity_tool_result_not_found','activity_tool_result_source_changed','activity_tool_result_source_invalid'].includes(error.message))continue;throw error;}
+            if(saved.binding!==retainedNativeBinding(owner,original.identity,prior.openSha))continue;
+            if(found)throw Error('activity_tool_result_source_changed');found={saved,original};
+          }
+          return found;
+        }finally{reservation.bytes=0;}
+      };
+      const retainedOpening=await findRetained();
+      if(retainedOpening==='capacity')return reply.code(429).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_CAPACITY'}});
+      const saved=retainedOpening?.saved,original=retainedOpening?.original??source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined);
       let openedSource:PinnedByteSource,proofSource:NativeFileProofSource,verifyPreviewAuthority:()=>Promise<void>,retained=false;
       const retentionBinding=(opened:string)=>retainedNativeBinding(owner,original.identity,opened);
-      const saved=retainedRoot&&query.open_sha256!==undefined?await readRetainedNativeFile(retainedRoot,retentionBinding(query.open_sha256 as string),signal):undefined;
       if(saved){
         const prior=saved.source;
         if(prior.conversationId!==conversationId||prior.runId!==runId||prior.activityId!==activityId||prior.resultSha!==query.result_sha256
@@ -260,7 +295,7 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
         reservation.bytes=prior.size;store=createPinnedByteStore(snapshotRoot);
         const writer=await store.begin(prior.sha256,prior.size,signal);await loadRetainedNativeFile(retainedRoot!,saved,writer,signal);
         openedSource=writer.source;proofSource=prior;retained=true;
-        verifyPreviewAuthority=async()=>{signal.throwIfAborted();if(source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined).identity!==original.identity)throw Error('activity_tool_result_source_changed');};
+        verifyPreviewAuthority=async()=>{signal.throwIfAborted();if(source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined,saved.activity_seq).identity!==original.identity)throw Error('activity_tool_result_source_changed');};
       }else{
         if(!client?.readNativeSearchMemberFileRange||!client.readNativeFileRange)throw Error('activity_tool_result_source_invalid');
         const memberInput:NativeSearchMembersRequest = {call_seq:original.callSeq,tool_name:original.tool,
@@ -325,7 +360,7 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
       const openProof=nativeProofs?.sign(owner,proofSource);
       const retainOpened=async()=>{
         if(!retained&&retainedRoot){
-          try{retained=await retainNativeFile(db,retainedRoot,retentionBinding(openedSha),proofSource,openedSource,signal);}
+          try{retained=await retainNativeFile(db,retainedRoot,retentionBinding(openedSha),proofSource,openedSource,signal,original.activitySeq);}
           catch(error){signal.throwIfAborted();app.log.warn({err:error},'Native opened source was not retained');}
         }
         await verifyPreviewAuthority();
@@ -421,26 +456,30 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
         return reply.code(429).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_CAPACITY'}});
       downloads.add(reservation);signal.throwIfAborted();
       const original=source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined);
-      const describe=(value:ReturnType<typeof source>)=>({identity:value.identity,semantic:hash({session:value.sessionId,activity:value.activity,call:value.callSha??null,result:value.resultSha??null})});
-      const descriptor=describe(original),authorities=new Map([[asOfSeq as string|undefined,descriptor]]);
+      const describe=(value:ReturnType<typeof source>)=>({identity:value.identity,semantic:hash({session:value.sessionId,activityId:value.activity.activity_id,toolCallId:value.activity.tool_call_id,
+        tool:value.tool,callSeq:value.callSeq,resultSeq:value.resultSeq,call:value.callSha??null,result:value.resultSha??null})});
+      const descriptor=describe(original),authorityKey=(boundary:string|undefined,revision:string|undefined)=>JSON.stringify([boundary??null,revision??null]);
+      const authorities=new Map<string,{boundary:string|undefined;revision:string|undefined;descriptor:ReturnType<typeof describe>}>();
       const records=retainedRoot?await listRetainedNativeFiles(retainedRoot,signal):[],eligible:typeof records=[];
       let scanned=0;
       for(const record of records){
         if(++scanned%8===0)await new Promise<void>(resolve=>setImmediate(resolve));
         signal.throwIfAborted();const saved=record.source;
         if(saved.conversationId!==conversationId||saved.runId!==runId||saved.activityId!==activityId)continue;
-        let authority=authorities.get(saved.asOfSeq);
+        if(asOfSeq!==undefined&&(saved.asOfSeq!==undefined&&BigInt(saved.asOfSeq)>BigInt(asOfSeq as string)
+          ||record.activity_seq!==undefined&&BigInt(record.activity_seq)>BigInt(asOfSeq as string)))continue;
+        const key=authorityKey(saved.asOfSeq,record.activity_seq);let authority=authorities.get(key);
         if(!authority){
-          try{authority=describe(source(db,owner,conversationId,runId,activityId,saved.asOfSeq));}
+          try{authority={boundary:saved.asOfSeq,revision:record.activity_seq,descriptor:describe(source(db,owner,conversationId,runId,activityId,saved.asOfSeq,record.activity_seq))};}
           catch(error){if(error instanceof Error&&['activity_tool_result_not_found','activity_tool_result_source_changed','activity_tool_result_source_invalid'].includes(error.message))continue;throw error;}
-          authorities.set(saved.asOfSeq,authority);
+          authorities.set(key,authority);
         }
-        if(authority.semantic!==descriptor.semantic||record.binding!==retainedNativeBinding(owner,authority.identity,saved.openSha))continue;
+        if(authority.descriptor.semantic!==descriptor.semantic||record.binding!==retainedNativeBinding(owner,authority.descriptor.identity,saved.openSha))continue;
         eligible.push(record);
       }
       // Preserve each original context; the requested history boundary never becomes an alias for stored file provenance.
       let checked=0;
-      for(const [boundary,authority] of authorities){if(++checked%8===0)await new Promise<void>(resolve=>setImmediate(resolve));signal.throwIfAborted();if(source(db,owner,conversationId,runId,activityId,boundary).identity!==authority.identity)throw Error('activity_tool_result_source_changed');}
+      for(const authority of authorities.values()){if(++checked%8===0)await new Promise<void>(resolve=>setImmediate(resolve));signal.throwIfAborted();if(source(db,owner,conversationId,runId,activityId,authority.boundary,authority.revision).identity!==authority.descriptor.identity)throw Error('activity_tool_result_source_changed');}
       if(source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined).identity!==original.identity)throw Error('activity_tool_result_source_changed');
       const openingSha=hash({protocol:'jot-owned-native-openings/v1',owner,activity:original.identity,records:eligible});
       if(query.openings_sha256!==undefined&&query.openings_sha256!==openingSha||offset>eligible.length)throw Error('activity_tool_result_source_changed');

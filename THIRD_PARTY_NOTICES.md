@@ -352,3 +352,5 @@ Native staging reservations, including crash leftovers, remain charged to that s
 
 Owned retained-opening discovery and its original-version preview/download panel extend the existing attributed native search-member UI. Inventory validates original actor/activity/source contexts without loading a live SDK or original file; exact-open viewing retains the original full-byte and quote-proof lifecycle. Member and retained-opening panels are mutually exclusive.
 New retained source records include a canonical source-metadata SHA-256 to detect metadata corruption during inventory/reopening. Existing private v1 records retain their original owner-bound read compatibility; a new digest is never retroactively asserted for an older record.
+
+Retained native openings now additionally capture the original immutable gateway activity event sequence inside the checked private metadata. Reopening resolves that exact owned event and preserves the original source digest/history/signature context, so later detail-only projection updates need not erase retained source provenance. Legacy records remain compatible without asserting a reconstructed event sequence.
