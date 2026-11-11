@@ -1,3 +1,5 @@
+import {timingSafeEqual} from 'node:crypto';
+import {claimStandaloneNativeAttempt} from './standalone-admissions.ts';
 import type {FastifyInstance} from 'fastify';
 import type {DatabaseSync} from 'node:sqlite';
 import {StandaloneTerminalAdmissions,type StandaloneTerminalClient} from './standalone-service.ts';
@@ -15,7 +17,21 @@ function failure(error:unknown){
  return{status:503,code:'STANDALONE_TERMINAL_UNAVAILABLE'};
 }
 /** Existing actor/CSRF hooks remain mandatory; admission storage owns dispatch replay protection. */
-export function registerStandaloneTerminalAdmissionRoutes(app:FastifyInstance,options:{db:DatabaseSync;actor:(request:{headers:Record<string,unknown>})=>string;workspaces:readonly string[];client?:StandaloneTerminalClient|undefined}){
+export function registerStandaloneTerminalAdmissionRoutes(app:FastifyInstance,options:{db:DatabaseSync;actor:(request:{headers:Record<string,unknown>})=>string;workspaces:readonly string[];client?:StandaloneTerminalClient|undefined;internalToken?:string|undefined}){
+ app.post('/internal/v1/workbench/standalone-terminal-native-attempt',{config:{standaloneTerminalInternal:true},bodyLimit:4096,onRequest:async(request,reply)=>{
+  const actual=Buffer.from(String(request.headers.authorization??'')),expected=Buffer.from('Bearer '+(options.internalToken??''));
+  if(!options.internalToken||options.internalToken.length<32||actual.length!==expected.length||!timingSafeEqual(actual,expected))return reply.code(401).send({error:{code:'UNAUTHORIZED'}});
+ }},async(request,reply)=>{
+  reply.header('cache-control','private, no-store');
+  try{
+   const body=request.body;
+   if(Object.keys(request.query as object).length||!object(body)||!exact(body,'authority_sha256,expected_state_sha256,expected_version,owner_id,request_id,session_id')
+    ||typeof body.owner_id!=='string'||!uuid(body.request_id)||typeof body.session_id!=='string'||!hash(body.authority_sha256)
+    ||!hash(body.expected_state_sha256)||!Number.isSafeInteger(body.expected_version)||Number(body.expected_version)<1)throw Error('standalone_terminal_input_invalid');
+   return claimStandaloneNativeAttempt(options.db,{owner_id:body.owner_id,request_id:body.request_id,session_id:body.session_id,
+    authority_sha256:body.authority_sha256,expected_version:Number(body.expected_version),expected_state_sha256:body.expected_state_sha256});
+  }catch(error){const result=failure(error);return reply.code(result.status).send({error:{code:result.code}});}
+ });
  const service=new StandaloneTerminalAdmissions(options.db,options.workspaces,options.client),path='/v1/standalone-terminals/admissions';
  app.get(path+'/:requestId',async(request,reply)=>{
   reply.header('cache-control','private, no-store');

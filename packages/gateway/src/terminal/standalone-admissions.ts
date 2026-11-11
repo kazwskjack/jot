@@ -64,3 +64,22 @@ export function confirmStandaloneTerminalAdmission(db:DatabaseSync,input:Expecte
   return transition(db,input,'ready',input.native_identity_sha256);
  });
 }
+
+/** The authenticated native producer takes this durable, single-use I/O fence before SDK admission. */
+export function claimStandaloneNativeAttempt(db:DatabaseSync,input:Expected&{session_id:string}){
+ if(!id(input.session_id)||!hash(input.authority_sha256)||!Number.isSafeInteger(input.expected_version)||input.expected_version<1||!hash(input.expected_state_sha256))throw Error('standalone_terminal_input_invalid');
+ return withImmediateTransaction(db,()=>{
+  const row=source(db,input.owner_id,input.request_id);
+  if(!row)throw Error('standalone_terminal_admission_missing');
+  if(row.session_id!==input.session_id||row.authority_sha256!==input.authority_sha256)throw Error('standalone_terminal_authority_changed');
+  const previous=db.prepare('SELECT session_id,authority_sha256 FROM ga_standalone_terminal_native_attempts WHERE owner_id=? AND request_id=?')
+   .get(input.owner_id,input.request_id) as {session_id:string;authority_sha256:string}|undefined;
+  const result=(allowed:boolean)=>({protocol:1 as const,owner_id:row.owner_id,request_id:row.request_id,session_id:row.session_id,
+   authority_sha256:row.authority_sha256,create_allowed:allowed,execution_authorized:false as const});
+  if(previous){if(previous.session_id!==row.session_id||previous.authority_sha256!==row.authority_sha256)throw Error('standalone_terminal_authority_changed');return result(false);}
+  if(row.state!=='dispatched'||row.version!==input.expected_version||view(row).state_sha256!==input.expected_state_sha256)throw Error('standalone_terminal_state_changed');
+  db.prepare('INSERT INTO ga_standalone_terminal_native_attempts(owner_id,request_id,session_id,authority_sha256,attempted_at) VALUES(?,?,?,?,?)')
+   .run(row.owner_id,row.request_id,row.session_id,row.authority_sha256,new Date().toISOString());
+  return result(true);
+ });
+}

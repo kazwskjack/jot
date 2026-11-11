@@ -478,6 +478,7 @@ export async function buildServer(config: {
 
   app.addHook('preHandler', async (request, reply) => {
     // These server-registered component routes verify their own mandatory bearer.
+    if((request.routeOptions.config as {standaloneTerminalInternal?:boolean}).standaloneTerminalInternal===true)return;
     if((request.routeOptions.config as {hostSettingsInternal?:boolean}).hostSettingsInternal===true)return;
     if((request.routeOptions.config as {pluginProfileInternal?:boolean}).pluginProfileInternal===true)return;
     if((request.routeOptions.config as {hookExecutionInternal?:boolean}).hookExecutionInternal===true)return;
@@ -1097,7 +1098,7 @@ export async function buildServer(config: {
       finally{documentPreviewBusy=false;}
     }});
   registerTerminalInventoryRoutes(app,{db,actor,client:config.terminalInventoryClient});
-  registerStandaloneTerminalAdmissionRoutes(app,{db,actor,workspaces:config.workspaces,client:config.standaloneTerminalClient});
+  registerStandaloneTerminalAdmissionRoutes(app,{db,actor,workspaces:config.workspaces,client:config.standaloneTerminalClient,internalToken:config.internalChannelToken});
   registerTerminalControlRoutes(app,{db,actor,client:config.terminalControlClient});
   registerTerminalReceiptRoutes(app,{db,actor,client:config.terminalControlClient});
   registerTerminalStreamRoutes(app,{db,actor,client:config.terminalStreamClient});

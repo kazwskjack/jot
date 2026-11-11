@@ -1,3 +1,4 @@
+import type {StandaloneTerminalAdmission} from '../terminal/standalone-admissions.ts';
 import {validateNativeSearchMembersRequest,validateNativeSearchMembers,validateNativeSearchMemberRangeRequest,validateNativeSearchMemberRange,type NativeSearchMembersRequest,type NativeSearchMembers,type NativeSearchMemberRangeRequest,type NativeSearchMemberRange} from './native-search-members.js';
 import {validateHostSettingsProductCommand,validateHostSettingsProductResult,validateHostSettingsEditor,validateHostSettingsApprovalRequest,type HostSettingsProductCommand,type HostSettingsApprovalRequest} from '../host-admin/settings-product-contract.ts';
 import {validateNativeFileRangeRequest,validateNativeFileRange,type NativeFileRangeRequest,type NativeFileRange} from './native-file-range.js';
@@ -258,6 +259,26 @@ export class SessionControllerClient {
       session_id: sessionId, cwd, agent_preset: agentPreset,
       ...(workbenchRunId ? { workbench_context: { run_id: workbenchRunId, ...(workbenchExecutionLease?{execution_lease:normalizeExecutionLease(workbenchExecutionLease)}:{}),...(workWorkspace?{work_workspace:workWorkspace}:{}) } } : {}),
     }, signal)
+  }
+
+  private async standaloneTerminalPost(path:string,body:Record<string,unknown>,signal:AbortSignal){
+    signal.throwIfAborted();
+    const response=await this.fetchImpl(this.baseUrl+path,{method:'POST',redirect:'error',headers:{authorization:'Bearer '+this.token,'content-type':'application/json'},body:JSON.stringify(body),signal});
+    signal.throwIfAborted();const reader=response.body?.getReader();if(!reader)throw Error('standalone_terminal_source_unconfirmed');
+    const chunks:Uint8Array[]=[];let size=0,done=false;
+    try{for(;;){const part=await reader.read();signal.throwIfAborted();if(part.done){done=true;break;}size+=part.value.byteLength;if(size>65536)throw Error('standalone_terminal_source_unconfirmed');chunks.push(part.value);}}
+    finally{if(!done)await reader.cancel().catch(()=>{});reader.releaseLock();}
+    if(!response.ok)throw Error('standalone_terminal_source_unconfirmed');
+    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+  }
+  readAuthority(owner:string,workspace:string,signal:AbortSignal){
+    return this.standaloneTerminalPost('/v1/standalone-terminals/authority',{owner_id:owner,workspace_id:workspace},signal);
+  }
+  createSession(admission:StandaloneTerminalAdmission,signal:AbortSignal){
+    return this.standaloneTerminalPost('/v1/standalone-terminals/create',admission,signal);
+  }
+  observeSession(admission:StandaloneTerminalAdmission,signal:AbortSignal){
+    return this.standaloneTerminalPost('/v1/standalone-terminals/observe',admission,signal);
   }
 
   async modelCatalog(signal:AbortSignal){return this.post('/v1/models',{},signal);}

@@ -1,3 +1,4 @@
+import {createStandaloneTerminalHost,normalizeStandaloneTerminalBindings} from './standalone-terminal-host.js'
 import {createTerminalControl} from './terminal-control.js'
 import {createNativeSearchSource} from './native-search-source.js'
 import {createNativeWorkspaceFileReader} from './native-workspace-file-reader.js'
@@ -229,7 +230,7 @@ function decodeFilename(headers) {
   return value && Buffer.byteLength(value, 'utf8') <= 255 && !/[\u0000\/\\]/.test(value) ? value : null
 }
 
-export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,nativeCommandQueryHost,nativePlanModeHost,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,trustedModelMetadataReader,trustedModelMetadataEnabled=false,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,pluginProfileControl,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard,taskmasterInstallationReader,taskmasterRuntimeVersionReader,terminalInventoryReader,terminalControl,nativeSearchSource,nativeWorkspaceFileReader }) {
+export function createAdapterHandler({ controller, fileUploads, agents, sessions, persistence, speechController, voiceEnabled = false, token, workbenchBridge,skillContentCommand,skillCatalogCommand,skillResourceCommand,nativeCommandQueryHost,nativePlanModeHost,budgetModelSelector,nativeRoleHost,nativeTaskScheduler,nativeHandoffRecovery,nativeClaimedComposer,memoryExtractionHost,conversationGoalRunHost,ordinaryInputRunHost,ordinaryInputAdmissionHost,ordinaryCompletionReader,ordinarySteeringObservationReader,ordinaryRunCompletionReader,chatMaintenanceObserver,chatCheckpointRecovery,chatPostAnswer,nativeIdleObservation=false,sessionNotFoundError,modelCatalogReader,trustedModelMetadataReader,trustedModelMetadataEnabled=false,requireOrdinaryModelPolicy=false,chatExecutionPolicy,chatModeReadiness,mcpControlRoute,pluginProfileControl,hostPolicyBootstrap,hostSettingsProductHandler,hostAdmissionGuard,taskmasterInstallationReader,taskmasterRuntimeVersionReader,terminalInventoryReader,terminalControl,standaloneTerminalHost,nativeSearchSource,nativeWorkspaceFileReader }) {
   const allowedPresets=new Set(ALLOWED_AGENT_PRESETS)
   if(chatExecutionPolicy!==undefined){normalizeChatExecutionPolicy(chatExecutionPolicy);if(!requireOrdinaryModelPolicy||!ordinaryInputAdmissionHost)throw Error('ordinary_execution_policy_config_invalid');allowedPresets.add('jot-chat')}
   const voiceHandler = voiceEnabled ? createVoiceAdapterHandler({ speechController, token }) : null
@@ -260,6 +261,18 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
 
   const dispatch=async ({ method, url, headers, body, signal = new AbortController().signal },activityAdmissionId) => {
     if (!authorized(headers.authorization, token)) return json(401, { error: 'unauthorized' })
+    if(['/v1/standalone-terminals/authority','/v1/standalone-terminals/create','/v1/standalone-terminals/observe'].includes(url.pathname)){
+      if(method!=='POST')return json(405,{error:'method_not_allowed'});
+      if(url.search||!body||typeof body!=='object'||Array.isArray(body))return json(422,{error:'standalone_terminal_input_invalid'});
+      if(!standaloneTerminalHost)return json(503,{error:'standalone_terminal_host_unavailable'});
+      try{
+        if(url.pathname.endsWith('/authority')){
+          if(Object.keys(body).sort().join(',')!=='owner_id,workspace_id')return json(422,{error:'standalone_terminal_input_invalid'});
+          return json(200,await standaloneTerminalHost.readAuthority(body.owner_id,body.workspace_id,signal));
+        }
+        return json(200,await(url.pathname.endsWith('/create')?standaloneTerminalHost.createSession(body,signal):standaloneTerminalHost.observeSession(body,signal)));
+      }catch{return json(503,{error:'standalone_terminal_source_unconfirmed'});}
+    }
     if(url.pathname === '/v1/taskmaster/installation') {
       if(method !== 'POST') return json(405, {error: 'method_not_allowed'})
       if(!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).join(',') !== 'owner_id'
@@ -1016,6 +1029,7 @@ export function apply(ctx, config = {}) {
     ctx.provide('jotHooksRuntime',hooksRuntime);
     ctx.effect(()=>()=>hooksRuntime.close());
   }
+  if(config.standaloneTerminalWorkspaces!==undefined)normalizeStandaloneTerminalBindings(config.standaloneTerminalWorkspaces,new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')));
   if(config.pluginProfileEnabled!==undefined&&typeof config.pluginProfileEnabled!=='boolean')throw Error('plugin_profile_config_invalid');
   if(config.pluginProfileEnabled===true&&config.hostSettingsBootstrap===undefined)throw Error('plugin_profile_bootstrap_required');
   if(config.hostCredentialRefs!==undefined&&validateHostCredentialRefs(config.hostCredentialRefs).length&&(!config.hostSettingsBootstrap||config.hostSettingsOwnerRoutesEnabled!==true))throw Error('host_credentials_route_invalid')
@@ -1315,12 +1329,19 @@ export function apply(ctx, config = {}) {
         return connection.createPeer({principal:{kind:'owner'},interactions:'none'});
       }});
     ctx.effect(()=>()=>terminalControl.dispose());
+    if(config.standaloneTerminalWorkspaces?.length&&typeof workbenchBridge?.claimStandaloneTerminalAttempt!=='function')throw Error('standalone_terminal_host_unavailable');
+    const standaloneTerminalHost=config.standaloneTerminalWorkspaces?.length?createStandaloneTerminalHost({bindings:config.standaloneTerminalWorkspaces,
+      allowedPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),
+      readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext')),sessionController:()=>ctx.sessionController,
+      agents:ctx.agents,sessions:ctx.sessions,sessionNotFoundError:ApiSessionNotFound,
+      claimAttempt:(packet,signal)=>{if(typeof workbenchBridge?.claimStandaloneTerminalAttempt!=='function')throw Error('standalone_terminal_host_unavailable');return workbenchBridge.claimStandaloneTerminalAttempt(packet,signal);}}):undefined;
+    if(standaloneTerminalHost)ctx.effect(()=>()=>standaloneTerminalHost.dispose());
     const taskmasterRuntime=createTaskmasterRuntimeVersionReader({readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext'))});
     ctx.effect(()=>()=>taskmasterRuntime.close());
     const handler = createAdapterHandler({ controller: ctx.sessionController, fileUploads: ctx.fileUploads, agents: ctx.agents,
       sessions:ctx.sessions,persistence:ctx.sessionPersistence,sessionNotFoundError:ApiSessionNotFound,
       speechController, voiceEnabled, token, workbenchBridge, skillContentCommand, skillCatalogCommand, skillResourceCommand, nativeCommandQueryHost, nativePlanModeHost,
-      terminalControl,nativeSearchSource,nativeWorkspaceFileReader,
+      terminalControl,standaloneTerminalHost,nativeSearchSource,nativeWorkspaceFileReader,
       terminalInventoryReader:(ownerId,sessionId,signal)=>{
         signal?.throwIfAborted();
         const identity=resolveOwnerBoundDshProfileContext(ctx.get('profileContext'));
