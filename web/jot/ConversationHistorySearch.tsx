@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import {prefersReducedMotion} from './useInterfaceAppearance';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 // Search interaction and IME handling adapted from PilotDeck 783499ff,
@@ -12,7 +14,6 @@ import ArtifactTextSearch from './ArtifactTextSearch';
 import './conversation-history-search.css';
 
 type ContentDocument={kind:'content';id:string;text:string};
-const sourceLabels={activity:'工具步骤',message:'消息正文',content:'已加载内容'};
 const searchAttributes={activity:'data-chat-search-activity',message:'data-chat-search-message',content:'data-chat-search-content'};
 type SearchDocument={element:HTMLElement;text:string;nodes:Array<{node:Text;start:number;end:number}>};
 type SharedProps={
@@ -65,6 +66,8 @@ function readSearchDocument(element:HTMLElement,visibleOnly=false):SearchDocumen
 function searchPattern(query:string){return new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'giu');}
 
 export default function ConversationHistorySearch(props:Props){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const sourceLabels={activity:t("工具步骤","Tool Step"),message:t("消息正文","Message Body"),content:t("已加载内容","Loaded Content")};
  const {root,activities,runs,onRevealActivity,onLoadActivityHistory,activityHistorySeq,renderedRevision,ready}=props;
  const conversation=props.scope==='activities'?undefined:props;
  const conversationId=conversation?.conversationId,messages=conversation?.messages??EMPTY_MESSAGES;
@@ -282,11 +285,11 @@ export default function ConversationHistorySearch(props:Props){
   return()=>container?.removeEventListener('keydown',keydown);
  });
 
- return <div className="jot-history-search">
+ return <div lang={language} className="jot-history-search">
   <style>{`::highlight(${highlightName}){background:#f4cd54;color:#151515}`}</style>
-  <button ref={opener} data-desktop-target="find" type="button" aria-expanded={open} disabled={!ready} onClick={openSearch}>{activityOnly?'搜索公开记录':'搜索当前会话'}</button>
-  {open&&<div role="search" aria-label={activityOnly?'公开记录搜索':'会话历史搜索'}>
-   <input ref={input} type="search" aria-label={activityOnly?'搜索公开记录':'搜索会话内容'} placeholder={activityOnly?'搜索公开记录…':'搜索会话内容…'} value={draft} autoComplete="off" spellCheck={false}
+  <button ref={opener} data-desktop-target="find" type="button" aria-expanded={open} disabled={!ready} onClick={openSearch}>{activityOnly?t('搜索公开记录','Search Public Records'):t('搜索当前会话','Search This Conversation')}</button>
+  {open&&<div role="search" aria-label={activityOnly?t('公开记录搜索','Public Record Search'):t('会话历史搜索','Conversation History Search')}>
+   <input ref={input} type="search" aria-label={activityOnly?t('搜索公开记录','Search Public Records'):t('搜索会话内容','Search Conversation Content')} placeholder={activityOnly?t('搜索公开记录…','Search public records…'):t('搜索会话内容…','Search conversation content…')} value={draft} autoComplete="off" spellCheck={false}
     onChange={event=>{setDraft(event.currentTarget.value);if(!composing.current){changeQuery(event.currentTarget.value);}}}
     onCompositionStart={()=>{composing.current=true;compositionEnded.current=0;}}
     onCompositionEnd={event=>{composing.current=false;compositionEnded.current=Date.now();setDraft(event.currentTarget.value);changeQuery(event.currentTarget.value);}}
@@ -295,19 +298,19 @@ export default function ConversationHistorySearch(props:Props){
      if(event.key==='Enter'&&Date.now()-compositionEnded.current>=150){event.preventDefault();navigate(event.shiftKey?-1:1);}
      if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();}
     }}/>
-   <span role="status" aria-live="polite">{needle?(total?`${activeIndex+1} / ${total}`:'没有匹配结果'):'输入搜索词'}{loading?' · 正在加载完整历史':''}</span>
-   <button type="button" disabled={!total} onClick={()=>navigate(-1)}>上一个结果</button>
-   <button type="button" disabled={!total} onClick={()=>navigate(1)}>下一个结果</button>
-   <button type="button" onClick={close}>关闭搜索</button>
+   <span role="status" aria-live="polite">{needle?(total?`${activeIndex+1} / ${total}`:t('没有匹配结果','No matches')):t('输入搜索词','Enter a search term')}{loading?t(' · 正在加载完整历史',' · Loading full history'):''}</span>
+   <button type="button" disabled={!total} onClick={()=>navigate(-1)}>{t('上一个结果','Previous Result')}</button>
+   <button type="button" disabled={!total} onClick={()=>navigate(1)}>{t('下一个结果','Next Result')}</button>
+   <button type="button" onClick={close}>{t('关闭搜索','Close Search')}</button>
    {active&&<p className="jot-history-search-excerpt">{sourceLabels[active.source.kind]} · {active.source.text.slice(Math.max(0,active.offset-60),active.offset+active.length+60)}</p>}
-   <small>{activityOnly?'搜索范围为已加载的公开记录。步骤历史的加载进度和保留缺口显示在时间线上方。':'公开步骤历史的加载进度和保留缺口显示在时间线上方。'} 已打开内容参与当前页搜索，未打开的工具正文、交互记录和文本文件原版本另列检索结果。</small>
-   {(props.resultSearchSeq??activityHistorySeq)&&ready&&needle&&<ConversationDisplayBoundary key={JSON.stringify(['tools',taskDraftScope(),props.conversationId,props.scope==='activities'?props.runId:null,needle.trim()])} label="工具正文检索"><ToolResultSearch conversationId={props.conversationId} asOfSeq={(props.resultSearchSeq??activityHistorySeq)!}
+   <small>{activityOnly?t('搜索范围为已加载的公开记录。步骤历史的加载进度和保留缺口显示在时间线上方。','Search covers loaded public records. Step-history loading progress and retention gaps appear above the timeline.'):t('公开步骤历史的加载进度和保留缺口显示在时间线上方。','Public step-history loading progress and retention gaps appear above the timeline.')} {t('已打开内容参与当前页搜索，未打开的工具正文、交互记录和文本文件原版本另列检索结果。','Open content is included in the current-page search. Unopened tool bodies, interaction records and original text-file versions have separate search results.')}</small>
+   {(props.resultSearchSeq??activityHistorySeq)&&ready&&needle&&<ConversationDisplayBoundary key={JSON.stringify(['tools',taskDraftScope(),props.conversationId,props.scope==='activities'?props.runId:null,needle.trim()])} label={t('工具正文检索','Tool Body Search')}><ToolResultSearch conversationId={props.conversationId} asOfSeq={(props.resultSearchSeq??activityHistorySeq)!}
     {...(props.scope==='activities'?{runId:props.runId}:{})} query={needle} onRevealActivity={onRevealActivity}/></ConversationDisplayBoundary>}
-   {ready&&needle&&<ConversationDisplayBoundary key={JSON.stringify(['interactions',taskDraftScope(),props.conversationId,props.scope==='activities'?props.runId:null,needle.trim()])} label="交互记录检索"><InteractionSearch conversationId={props.conversationId}
+   {ready&&needle&&<ConversationDisplayBoundary key={JSON.stringify(['interactions',taskDraftScope(),props.conversationId,props.scope==='activities'?props.runId:null,needle.trim()])} label={t('交互记录检索','Interaction Record Search')}><InteractionSearch conversationId={props.conversationId}
     {...(props.scope==='activities'?{runId:props.runId}:{})} query={needle}/></ConversationDisplayBoundary>}
-   {ready&&needle&&<ConversationDisplayBoundary key={JSON.stringify(['files',taskDraftScope(),props.conversationId,props.scope==='activities'?props.runId:null,needle.trim()])} label="文件正文检索"><ArtifactTextSearch conversationId={props.conversationId}
+   {ready&&needle&&<ConversationDisplayBoundary key={JSON.stringify(['files',taskDraftScope(),props.conversationId,props.scope==='activities'?props.runId:null,needle.trim()])} label={t('文件正文检索','File Body Search')}><ArtifactTextSearch conversationId={props.conversationId}
     {...(props.scope==='activities'?{runId:props.runId}:{})} query={needle}/></ConversationDisplayBoundary>}
-   {error&&<p role="alert">完整历史尚未加载，当前结果来自已加载的公开记录。{error} <button type="button" disabled={loading} onClick={()=>setRetry(value=>value+1)}>继续加载历史</button></p>}
+   {error&&<p role="alert">{t('完整历史尚未加载，当前结果来自已加载的公开记录。','Full history has not loaded. Current results cover loaded public records.')}{' '}{conversationUiError(error,language)} <button type="button" disabled={loading} onClick={()=>setRetry(value=>value+1)}>{t('继续加载历史','Continue Loading History')}</button></p>}
   </div>}
  </div>;
 }

@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import React,{useEffect,useRef,useState} from 'react';
 import {ApiError,abortableDelay,request,taskDraftScope} from './client';
@@ -11,6 +13,7 @@ const sequence=(value:unknown):value is string=>typeof value==='string'&&/^(0|[1
 type State={identity:string;items:ActivityToolResultMatch[];scanned:number;unavailable:number;unsearched:number;gap:boolean;loading:boolean;next?:string;error?:string};
 
 export default function ToolResultSearch({conversationId,runId,asOfSeq:latestSeq,query,onRevealActivity}:{conversationId:string;runId?:string;asOfSeq:string;query:string;onRevealActivity:(value:ActivityReveal)=>void}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),q=query.trim(),scopeIdentity=JSON.stringify([owner,conversationId,runId,q]);
  // Keep paging stable while live events advance the available search boundary.
  const [snapshot,setSnapshot]=useState({scopeIdentity,seq:latestSeq});
@@ -87,34 +90,34 @@ export default function ToolResultSearch({conversationId,runId,asOfSeq:latestSeq
  },[batchIdentity,revision]);
  if(!q)return null;
  const current=state?.identity===batchIdentity?state:undefined,hit=selected?.identity===batchIdentity?selected.hit:undefined;
- return <section className="jot-tool-result-search" aria-label="未打开工具正文搜索">
+ return <section lang={language} className="jot-tool-result-search" aria-label={t('未打开工具正文搜索','Unopened Tool Body Search')}>
   <div data-chat-search-ignore>
-   <h4>原工具结果正文</h4>
-   <button type="button" onClick={()=>{setSnapshot({scopeIdentity,seq:latestSeq});setCursor({identity,previous:[]});setRevision(value=>value+1);}}>刷新正文搜索</button>
-   <p role="status">{current?.loading?'正在搜索原结果正文':`本批命中 ${current?.items.length??0} 条工具正文`} · 本批已检查 {current?.scanned??0} 条步骤记录</p>
-   <small>搜索固定历史边界内已留存的 MCP 文本、原文件列表及文件、网页读取回执、原生大结果来源和来源可确认的文件变更差异。每条正文列出首处命中，可打开原结果继续查看。</small>
-   {Boolean(current?.unavailable)&&<p role="status">本批有 {current!.unavailable} 条步骤暂无可确认的结果正文。</p>}
-   {Boolean(current?.unsearched)&&<p role="status">本批有 {current!.unsearched} 条结果含尚未纳入搜索的文件内容、原生行预览范围或后续列表记录。</p>}
-   {current?.gap&&<p role="status">原事件历史存在保留缺口，搜索覆盖当前可读取的记录。</p>}
+   <h4>{t('原工具结果正文','Original Tool Result Bodies')}</h4>
+   <button type="button" onClick={()=>{setSnapshot({scopeIdentity,seq:latestSeq});setCursor({identity,previous:[]});setRevision(value=>value+1);}}>{t('刷新正文搜索','Refresh Body Search')}</button>
+   <p role="status">{current?.loading?t('正在搜索原结果正文','Searching original result bodies'):t(`本批命中 ${current?.items.length??0} 条工具正文`,`${current?.items.length??0} matching tool bodies in this batch`)} · {t(`本批已检查 ${current?.scanned??0} 条步骤记录`,`${current?.scanned??0} step records checked in this batch`)}</p>
+   <small>{t('搜索固定历史边界内已留存的 MCP 文本、原文件列表及文件、网页读取回执、原生大结果来源和来源可确认的文件变更差异。每条正文列出首处命中，可打开原结果继续查看。','Search retained MCP text, original file lists and files, web-reading receipts, native large-result sources and file changes with verified sources within a fixed history boundary. Each body shows its first match. Open the original result to read more.')}</small>
+   {Boolean(current?.unavailable)&&<p role="status">{t(`本批有 ${current!.unavailable} 条步骤暂无可确认的结果正文。`,`${current!.unavailable} steps in this batch have no verifiable result body available.`)}</p>}
+   {Boolean(current?.unsearched)&&<p role="status">{t(`本批有 ${current!.unsearched} 条结果含尚未纳入搜索的文件内容、原生行预览范围或后续列表记录。`,`${current!.unsearched} results in this batch contain file content, native line-preview ranges or later list records not yet included in search.`)}</p>}
+   {current?.gap&&<p role="status">{t('原事件历史存在保留缺口，搜索覆盖当前可读取的记录。','Original event history has retention gaps. Search covers the records currently available.')}</p>}
    <ol>{current?.items.map(item=><li key={JSON.stringify([item.run_id,item.activity_id])}>
     <p>{item.title} · {item.tool_name}</p><p className="jot-history-search-excerpt">{item.excerpt}</p>
-    <button type="button" onClick={()=>setSelected({identity:batchIdentity,hit:item})}>查看命中正文</button>
-    <button type="button" onClick={()=>onRevealActivity({activityId:item.activity_id,key:JSON.stringify([identity,item.activity_id,++revealVersion.current])})}>定位工具步骤</button>
+    <button type="button" onClick={()=>setSelected({identity:batchIdentity,hit:item})}>{t('查看命中正文','View Matching Body')}</button>
+    <button type="button" onClick={()=>onRevealActivity({activityId:item.activity_id,key:JSON.stringify([identity,item.activity_id,++revealVersion.current])})}>{t('定位工具步骤','Locate Tool Step')}</button>
    </li>)}</ol>
-   <nav aria-label="原工具正文搜索翻页">
+   <nav aria-label={t('原工具正文搜索翻页','Original Tool Body Search Pages')}>
     <button type="button" disabled={!current||current.loading||!currentCursor.previous.length} onClick={()=>{
      const previous=currentCursor.previous.slice(0,-1),prior=currentCursor.previous.at(-1);
      setCursor({identity,before:prior,previous});
-    }}>上一批命中</button>
+    }}>{t('上一批命中','Previous Result Batch')}</button>
     <button type="button" disabled={!current||current.loading||!current?.next} onClick={()=>{
      if(current?.next)setCursor({identity,before:current.next,previous:[...currentCursor.previous,before]});
-    }}>搜索更早正文</button>
+    }}>{t('搜索更早正文','Search Earlier Bodies')}</button>
    </nav>
-   {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重新搜索本批</button></p>}
-   {hit&&<button type="button" onClick={()=>setSelected(undefined)}>关闭命中正文</button>}
+   {current?.error&&<p role="alert">{conversationUiError(current.error,language)} <button type="button" onClick={()=>setRevision(value=>value+1)}>{t('重新搜索本批','Search This Batch Again')}</button></p>}
+   {hit&&<button type="button" onClick={()=>setSelected(undefined)}>{t('关闭命中正文','Close Matching Body')}</button>}
   </div>
-  {hit&&<ConversationDisplayBoundary key={JSON.stringify([identity,hit])} label="命中工具正文"><ActivityToolResult conversationId={conversationId}
+  {hit&&<ConversationDisplayBoundary key={JSON.stringify([identity,hit])} label={t('命中工具正文','Matching Tool Body')}><div lang="zh-CN"><ActivityToolResult conversationId={conversationId}
    target={{...(hit.native_source?{nativeSource:true,asOfSeq}:{}),runId:hit.run_id,activityId:hit.activity_id,toolName:hit.tool_name,offset:hit.offset_chars,resultSha:hit.result_sha256,textSha:hit.text_sha256,
-    match:{offset:hit.match_offset_chars,text:hit.match_text}}}/></ConversationDisplayBoundary>}
+    match:{offset:hit.match_offset_chars,text:hit.match_text}}}/></div></ConversationDisplayBoundary>}
  </section>;
 }

@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import ArtifactEditedDiff,{validEditedDiffSource} from './ArtifactEditedDiff';
 import React,{useEffect,useState} from 'react';
@@ -15,6 +17,7 @@ const cursorKey=(value:ArtifactTextCursor)=>JSON.stringify([value.artifact_id,va
 type State={identity:string;items:ArtifactTextMatch[];scanned:number;unavailable:number;skipped:number;loading:boolean;next?:ArtifactTextCursor;error?:string};
 
 export default function ArtifactTextSearch({conversationId,runId,query}:{conversationId:string;runId?:string;query:string}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const [edited,setEdited]=useState(false);
  const owner=taskDraftScope(),q=query.trim(),identity=JSON.stringify([owner,conversationId,runId,q,edited]);
  const [cursor,setCursor]=useState<{identity:string;before?:ArtifactTextCursor;previous:Array<ArtifactTextCursor|undefined>}>({identity,previous:[]});
@@ -80,36 +83,36 @@ export default function ArtifactTextSearch({conversationId,runId,query}:{convers
  },[batchIdentity,revision]);
  if(!q)return null;
  const current=state?.identity===batchIdentity?state:undefined,hit=selected?.identity===batchIdentity?selected.hit:undefined;
- return <section className="jot-artifact-text-search" aria-label="未打开文件正文搜索">
+ return <section lang={language} className="jot-artifact-text-search" aria-label={t("未打开文件正文搜索","Unopened File Body Search")}>
   <div data-chat-search-ignore>
-   <h4>{edited?'原文档编辑差异':'原文件版本正文'}</h4>
-   <div role="group" aria-label="文件正文搜索来源">
-    <button type="button" aria-pressed={!edited} onClick={()=>setEdited(false)}>文件正文</button>
-    <button type="button" aria-pressed={edited} onClick={()=>setEdited(true)}>原编辑差异</button>
+   <h4>{edited?t('原文档编辑差异','Original Document Edit Differences'):t('原文件版本正文','Original File Version Bodies')}</h4>
+   <div role="group" aria-label={t('文件正文搜索来源','File Body Search Source')}>
+    <button type="button" aria-pressed={!edited} onClick={()=>setEdited(false)}>{t('文件正文','File Body')}</button>
+    <button type="button" aria-pressed={edited} onClick={()=>setEdited(true)}>{t('原编辑差异','Original Edit Differences')}</button>
    </div>
-   <button type="button" onClick={()=>{setCursor({identity,previous:[]});setRevision(value=>value+1);}}>刷新文件搜索</button>
-   <p role="status">{current?.loading?'正在读取并检索原文件':`本批命中 ${current?.items.length??0} 个文件版本/分卷`} · 本批已检查 {current?.scanned??0} 个原版本/分卷</p>
-   <small>{edited?'检索原编辑作业前后已保存文档文本的差异，每对版本列出首处命中。打开后可分页阅读，原文本覆盖缺口会单独说明。':'检索本地文本原版本、单卷和已有的文档预览及原读取结果，每个来源列出首处命中。'}成员范围只包含原运行实际引用或产生的版本。</small>
-   {Boolean(current?.unavailable)&&<p role="status">本批有 {current!.unavailable} 个版本/分卷暂不可读取或未通过内容核对。</p>}
-   {Boolean(current?.skipped)&&<p role="status">本批有 {current!.skipped} 个版本/分卷{edited?'缺少可确认的原编辑作业或前后文档预览':'为其他格式或尚无可用的已保存文档文本'}，未计入正文匹配。</p>}
+   <button type="button" onClick={()=>{setCursor({identity,previous:[]});setRevision(value=>value+1);}}>{t('刷新文件搜索','Refresh File Search')}</button>
+   <p role="status">{current?.loading?t('正在读取并检索原文件','Reading and searching original files'):t(`本批命中 ${current?.items.length??0} 个文件版本/分卷`,`${current?.items.length??0} matching file versions/parts in this batch`)} · {t(`本批已检查 ${current?.scanned??0} 个原版本/分卷`,`${current?.scanned??0} original versions/parts checked in this batch`)}</p>
+   <small>{edited?t('检索原编辑作业前后已保存文档文本的差异，每对版本列出首处命中。打开后可分页阅读，原文本覆盖缺口会单独说明。','Search differences between saved document text before and after the original edit job. Each version pair shows its first match. Open it to read pages; gaps in original text coverage are stated separately.'):t('检索本地文本原版本、单卷和已有的文档预览及原读取结果，每个来源列出首处命中。','Search original local text versions, individual parts, available document previews and original read results. Each source shows its first match.')}{t('成员范围只包含原运行实际引用或产生的版本。',' Member scope includes only versions actually referenced or produced by the original run.')}</small>
+   {Boolean(current?.unavailable)&&<p role="status">{t(`本批有 ${current!.unavailable} 个版本/分卷暂不可读取或未通过内容核对。`,`${current!.unavailable} versions/parts in this batch are unavailable or did not pass content verification.`)}</p>}
+   {Boolean(current?.skipped)&&<p role="status">{t(`本批有 ${current!.skipped} 个版本/分卷`,`${current!.skipped} versions/parts in this batch `)}{edited?t('缺少可确认的原编辑作业或前后文档预览','lack a verifiable original edit job or before/after document previews'):t('为其他格式或尚无可用的已保存文档文本','use other formats or have no available saved document text')}{t('，未计入正文匹配。',', and are excluded from body matches.')}</p>}
    <ol>{current?.items.map(item=><li key={cursorKey(item)}>
-    <p>{item.file_name} · 版本 {item.version}{item.part_index===undefined?'':` · 第 ${item.part_index} 卷`}{item.document_job_id?(item.document_operation==='document.read'?' · 已保存原读取结果':' · 已保存文档预览'):''}{item.edited_diff?` · 原编辑 ${item.edited_diff.from_version} → ${item.edited_diff.to_version}`:''}</p><p className="jot-history-search-excerpt">{item.excerpt}</p>
-    <button type="button" onClick={()=>{setSelected({identity:batchIdentity,hit:item});setFileTarget(undefined);}}>查看命中文本</button>
-    <button type="button" onClick={()=>{setSelected({identity:batchIdentity,hit:item});setFileTarget({kind:'file',artifactId:item.artifact_id,label:item.file_name,version:item.version,sha256:item.sha256,...(item.part_index===undefined?{}:{partIndex:item.part_index})});}}>查看文件与版本</button>
+    <p>{item.file_name} · {t('版本','Version')} {item.version}{item.part_index===undefined?'':t(` · 第 ${item.part_index} 卷`,` · Part ${item.part_index}`)}{item.document_job_id?(item.document_operation==='document.read'?t(' · 已保存原读取结果',' · Saved Original Read Result'):t(' · 已保存文档预览',' · Saved Document Preview')):''}{item.edited_diff?t(` · 原编辑 ${item.edited_diff.from_version} → ${item.edited_diff.to_version}`,` · Original Edit ${item.edited_diff.from_version} → ${item.edited_diff.to_version}`):''}</p><p className="jot-history-search-excerpt">{item.excerpt}</p>
+    <button type="button" onClick={()=>{setSelected({identity:batchIdentity,hit:item});setFileTarget(undefined);}}>{t('查看命中文本','View Matching Text')}</button>
+    <button type="button" onClick={()=>{setSelected({identity:batchIdentity,hit:item});setFileTarget({kind:'file',artifactId:item.artifact_id,label:item.file_name,version:item.version,sha256:item.sha256,...(item.part_index===undefined?{}:{partIndex:item.part_index})});}}>{t('查看文件与版本','View File and Version')}</button>
    </li>)}</ol>
-   <nav aria-label="原文件正文搜索翻页">
+   <nav aria-label={t('原文件正文搜索翻页','Original File Body Search Pages')}>
     <button type="button" disabled={!current||current.loading||!currentCursor.previous.length} onClick={()=>{
      const previous=currentCursor.previous.slice(0,-1),prior=currentCursor.previous.at(-1);setCursor({identity,before:prior,previous});
-    }}>上一批命中</button>
+    }}>{t('上一批命中','Previous Result Batch')}</button>
     <button type="button" disabled={!current||current.loading||!current.next} onClick={()=>{
      if(current?.next)setCursor({identity,before:current.next,previous:[...currentCursor.previous,before]});
-    }}>搜索更早版本</button>
+    }}>{t('搜索更早版本','Search Earlier Versions')}</button>
    </nav>
-   {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重新搜索本批</button></p>}
-   {hit&&<button type="button" onClick={()=>{setSelected(undefined);setFileTarget(undefined);}}>关闭命中文件</button>}
+   {current?.error&&<p role="alert">{conversationUiError(current.error,language)} <button type="button" onClick={()=>setRevision(value=>value+1)}>{t('重新搜索本批','Search This Batch Again')}</button></p>}
+   {hit&&<button type="button" onClick={()=>{setSelected(undefined);setFileTarget(undefined);}}>{t('关闭命中文件','Close Matching File')}</button>}
   </div>
-  {hit&&<ConversationDisplayBoundary key={JSON.stringify([batchIdentity,hit,fileTarget])} label="命中文件详情">{fileTarget?<ActivityArtifactDetails key={JSON.stringify([batchIdentity,fileTarget])} conversationId={conversationId} target={fileTarget} onOpen={setFileTarget}/>
+  {hit&&<ConversationDisplayBoundary key={JSON.stringify([batchIdentity,hit,fileTarget])} label={t("命中文件详情","Matching File Details")}><div lang="zh-CN">{fileTarget?<ActivityArtifactDetails key={JSON.stringify([batchIdentity,fileTarget])} conversationId={conversationId} target={fileTarget} onOpen={setFileTarget}/>
    :hit.edited_diff?<ArtifactEditedDiff key={JSON.stringify([batchIdentity,hit])} conversationId={conversationId} file={hit} runId={runId} expected={hit.edited_diff} match={{offset:hit.match_offset_chars,text:hit.match_text}} startOffset={hit.offset_chars}/>
-   :<ArtifactTextResult key={JSON.stringify([batchIdentity,hit])} conversationId={conversationId} runId={runId} target={hit}/>}</ConversationDisplayBoundary>}
+   :<ArtifactTextResult key={JSON.stringify([batchIdentity,hit])} conversationId={conversationId} runId={runId} target={hit}/>}</div></ConversationDisplayBoundary>}
  </section>;
 }
