@@ -8,6 +8,7 @@ import type {Artifact,ActivityToolResultFile} from './types';
 import './assistant-reply-quote.css';
 
 export type FileReferenceIdentity={conversationId:string;runId:string;activityId:string;resultSha:string;native_source?:NativeFileReferenceProvenance;file:Pick<ActivityToolResultFile,'path'|'version'|'sha256'|'size'>|(NativeFileReferenceFile&{version?:never})};
+export const nativeReferenceIdentity=(source:NativeFileReferenceProvenance|undefined)=>source?JSON.stringify([source.protocol,source.membersSha,source.memberIndex,source.openSha,source.proof,source.asOfSeq??null]):undefined;
 export type FileTextReference=FileReferenceIdentity&{print_view?:OfficePrintView;text_view?:1|2;rotation?:number;owner:string;reference:TextContentReference};
 export type FileCellReference=Omit<FileTextReference,'reference'|'rotation'|'text_view'|'print_view'>&{print_view?:never;cell_view?:1|2;reference:CellRangeContentReference};
 export type FileSelectionReference=FileTextReference|FileCellReference;

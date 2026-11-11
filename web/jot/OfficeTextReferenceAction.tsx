@@ -4,12 +4,11 @@
 import React,{useContext,useEffect,useRef,useState,type RefObject} from 'react';
 import {createPortal} from 'react-dom';
 import {taskDraftScope} from './client';
-import {FileTextReferenceContext,type FileTextReference} from './FileTextReferences';
+import {FileTextReferenceContext,type FileTextReference,type FileReferenceIdentity} from './FileTextReferences';
 import {createTextContentReference} from './vendor/pilotdeck-content-reference';
 import {officeTextOccurrence,type OfficeTextView} from './office-text-reference';
-import type {ListedFilePreviewSource} from './activity-file-preview-client';
 
-function selectionReferences(root:HTMLElement,range:Range,view:OfficeTextView,source:ListedFilePreviewSource,owner:string){
+function selectionReferences(root:HTMLElement,range:Range,view:OfficeTextView,source:FileReferenceIdentity,owner:string){
  if(range.collapsed||!root.contains(range.startContainer)||!root.contains(range.endContainer))return [];
  const element=(node:Node)=>node instanceof Element?node:node.parentElement;
  if(!element(range.startContainer)?.closest('[data-office-text-block]')||!element(range.endContainer)?.closest('[data-office-text-block]'))return [];
@@ -33,22 +32,22 @@ function selectionReferences(root:HTMLElement,range:Range,view:OfficeTextView,so
   const suffix=view.text.slice(start+selectedText.length,Math.min(block.offset+block.text.length,start+selectedText.length+80));
   const {conversationId,runId,activityId,resultSha,file}=source;
   const reference=createTextContentReference({selectionMode:'text',
-   source:{relativePath:file.path,fileName:file.path.split('/').at(-1)!,mimeType:view.kind==='docx'?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':'application/vnd.openxmlformats-officedocument.presentationml.presentation',revision:{id:String(file.version),sha256:file.sha256,size:file.size}},
+   source:{relativePath:file.path,fileName:source.native_source?file.path.split(/[\\/]/).at(-1)!:file.path.split('/').at(-1)!,mimeType:view.kind==='docx'?'application/vnd.openxmlformats-officedocument.wordprocessingml.document':'application/vnd.openxmlformats-officedocument.presentationml.presentation',revision:{id:source.native_source?.openSha??String(file.version),sha256:file.sha256,size:file.size}},
    renderer:{id:view.kind,backend:'builtin',locatorQuality:'semantic'},
    locator:{surface:view.kind==='docx'?'document':'slide',...(block.slide!==undefined?{slideNumbers:[block.slide]}:{}),quote:{exact:selectedText,prefix,suffix},occurrenceIndex},
    selectedText,surroundingText:prefix+selectedText+suffix,truncated:view.truncated});
-  references.push({text_view:1,owner,conversationId,runId,activityId,resultSha,file:{path:file.path,version:file.version,sha256:file.sha256,size:file.size},reference});
+  references.push({text_view:1,owner,conversationId,runId,activityId,resultSha,...(source.native_source?{native_source:source.native_source,file:{path:file.path,sha256:file.sha256,size:file.size}}:{file:{path:file.path,version:file.version!,sha256:file.sha256,size:file.size}}),reference});
  }
  return references;
 }
 
 type Action={identity:string;range:Range;references:FileTextReference[];top:number;left:number};
-export default function OfficeTextReferenceAction({root,source,view}:{root:RefObject<HTMLElement|null>;source:ListedFilePreviewSource;view:OfficeTextView}){
+export default function OfficeTextReferenceAction({root,source,view}:{root:RefObject<HTMLElement|null>;source:FileReferenceIdentity;view:OfficeTextView}){
  const context=useContext(FileTextReferenceContext),current=useRef(context);current.current=context;
  const owner=taskDraftScope(),button=useRef<HTMLButtonElement>(null);
- const identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,view.kind]);
+ const identity=JSON.stringify([owner,source.conversationId,source.runId,source.activityId,source.resultSha,source.file.path,source.file.version,source.file.sha256,source.file.size,source.native_source,view.kind]);
  const [action,setAction]=useState<Action>(),[notice,setNotice]=useState('');
- const disabled=!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId;
+ const disabled=!!source.native_source&&!context?.nativeSources?.includes(1)||!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId;
  useEffect(()=>{
   setAction(undefined);setNotice('');if(disabled)return;
   let timer:number|undefined;
@@ -73,7 +72,7 @@ export default function OfficeTextReferenceAction({root,source,view}:{root:RefOb
  },[root,view,source,owner,disabled,identity]);
  const commit=()=>{
   const target=current.current;
-  if(!action||action.identity!==identity||!root.current||!target||target.disabled||target.owner!==owner||taskDraftScope()!==owner||target.conversationId!==source.conversationId)return;
+  if(!action||action.identity!==identity||!root.current||!target||target.disabled||target.owner!==owner||taskDraftScope()!==owner||target.conversationId!==source.conversationId||!!source.native_source&&!target.nativeSources?.includes(1))return;
   let references:FileTextReference[];
   try{references=selectionReferences(root.current,action.range,view,source,owner);}catch{setAction(undefined);return;}
   if(!references.length||JSON.stringify(references.map(value=>value.reference.locator))!==JSON.stringify(action.references.map(value=>value.reference.locator))){setAction(undefined);return;}

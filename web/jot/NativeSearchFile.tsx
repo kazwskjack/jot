@@ -1,3 +1,4 @@
+import type {OfficeCellFocus,OfficeTextFocus} from './FileTextReferences';
 import type {PdfReferenceFocus} from './pdf-file-view-state';
 import type {NativeOfficePrintPin} from './native-office-print-client';
 import {officePreviewFormat} from '../../packages/gateway/src/artifacts/office-preview-format.js';
@@ -14,12 +15,12 @@ const NativeSearchFileOffice=lazy(()=>import('./NativeSearchFileOffice'));
 const NativeSearchFilePdf=lazy(()=>import('./NativeSearchFilePdf'));
 type Opened=NativeMemberOpenedBytes&{downloadUrl:string;imageUrl?:string;text?:string};
 
-export default function NativeSearchFile({source,expected,printPin,focus}:{source:NativeMemberPreviewSource;expected?:{openSha:string;proof:string;sha256:string;size:number};printPin?:NativeOfficePrintPin|undefined;focus?:PdfReferenceFocus|undefined}){
+export default function NativeSearchFile({source,expected,printPin,focus,officeFocus,officeTextFocus}:{source:NativeMemberPreviewSource;expected?:{openSha:string;proof:string;sha256:string;size:number};printPin?:NativeOfficePrintPin|undefined;focus?:PdfReferenceFocus|undefined;officeFocus?:OfficeCellFocus|undefined;officeTextFocus?:OfficeTextFocus|undefined}){
  const owner=taskDraftScope(),identity=JSON.stringify([owner,source,expected,printPin]);
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;opened?:Opened;error?:string}>(),[revision,setRevision]=useState(0);
  const openPin=useRef<{identity:string;sha:string;proof?:string}>();
- const [printMode,setPrintMode]=useState(!!printPin),[structured,setStructured]=useState(false);
+ const [printMode,setPrintMode]=useState(!!printPin),[structured,setStructured]=useState(!!officeFocus||!!officeTextFocus);
  const captureOpen=(sha:string,proof?:string)=>{
   if(taskDraftScope()!==owner||expected&&(sha!==expected.openSha||proof!==expected.proof)||openPin.current?.identity===identity&&(openPin.current.sha!==sha||openPin.current.proof!==undefined&&openPin.current.proof!==proof))return false;
   openPin.current={identity,sha,...(proof?{proof}:{})};return true;
@@ -69,7 +70,7 @@ export default function NativeSearchFile({source,expected,printPin,focus}:{sourc
   {office?.native&&<button type="button" onClick={()=>{setPrintMode(false);setStructured(!structured);}}>{structured?'关闭结构化内容':'查看Office结构化内容'}</button>}
   {office&&<button type="button" onClick={()=>{setStructured(false);setPrintMode(!printMode);}}>{printMode?'关闭转换PDF':'查看Office转换PDF'}</button>}
   {printMode&&office&&<ConversationDisplayBoundary label="原生Office转换预览"><Suspense fallback={<p role="status">正在载入转换PDF查看器…</p>}><NativeSearchOfficePrint source={source} expectedOpenSha={sourceOpenSha} expectedOpenProof={sourceOpenProof} expectedPreview={printPin} focus={focus} onOpened={captureOpen}/></Suspense></ConversationDisplayBoundary>}
-  {structured&&office?.native&&<ConversationDisplayBoundary label="原生Office结构化预览"><Suspense fallback={<p role="status">正在载入Office结构化查看器…</p>}><NativeSearchOfficeDocument source={source} expectedOpenSha={sourceOpenSha} expectedOpenProof={sourceOpenProof} onOpened={captureOpen}/></Suspense></ConversationDisplayBoundary>}
+  {structured&&office?.native&&<ConversationDisplayBoundary label="原生Office结构化预览"><Suspense fallback={<p role="status">正在载入Office结构化查看器…</p>}><NativeSearchOfficeDocument source={source} expectedOpenSha={sourceOpenSha} expectedOpenProof={sourceOpenProof} expectedFile={expected} officeFocus={officeFocus} officeTextFocus={officeTextFocus} onOpened={captureOpen}/></Suspense></ConversationDisplayBoundary>}
   {!structured&&!printMode&&(!current||!opened&&!current.error)&&<p role="status">正在读取并核对完整打开内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'本次读取已取消。'});}}>取消读取</button></p>}
   {opened&&<>
    <p>打开时内容 · {opened.size} 字节 · SHA-256 <code>{opened.sha256}</code></p>

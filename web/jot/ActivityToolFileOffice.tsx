@@ -7,7 +7,7 @@ import OfficePreviewServiceStatus from './OfficePreviewServiceStatus';
 import OfficeTextReferenceAction from './OfficeTextReferenceAction';
 import {officeTextView,resolveOfficeTextReference} from './office-text-reference';
 import {cellRangeCoordinates} from '../../packages/gateway/src/messages/content-reference.js';
-import {FileTextReferenceContext,type OfficeCellFocus,type OfficeTextFocus,type OfficeRegionFocus} from './FileTextReferences';
+import {FileTextReferenceContext,nativeReferenceIdentity,type FileReferenceIdentity,type OfficeCellFocus,type OfficeTextFocus,type OfficeRegionFocus} from './FileTextReferences';
 import {createCellRangeContentReference,type CellRangeSnapshot} from './vendor/pilotdeck-content-reference';
 import './activity-tool-file-office.css';
 import React,{useContext,useEffect,useMemo,useRef,useState} from 'react';
@@ -60,7 +60,7 @@ function spreadsheetReferenceContext(sheet:Extract<OfficeDocumentPreview,{kind:'
  const surroundingValues=matrix(top,left,Math.min(range.bottom-top+2,20,1048576-top+1),Math.min(range.right-left+2,30,16384-left+1));
  return {headers,surroundingValues,incomplete:headerRows>0&&!headers||!surroundingValues};
 }
-function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocumentPreview,{kind:'xlsx'}>;source?:ListedFilePreviewSource|undefined;officeFocus?:OfficeCellFocus}){
+function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocumentPreview,{kind:'xlsx'}>;source?:FileReferenceIdentity|undefined;officeFocus?:OfficeCellFocus}){
  const context=useContext(FileTextReferenceContext),owner=taskDraftScope();
  const root=useRef<HTMLElement>(null),jumped=useRef(false);
  const ranges=useMemo(()=>officeFocus?.value.reference.locator.ranges.map(cellRangeCoordinates)??[],[officeFocus]);
@@ -68,7 +68,7 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
   if(!officeFocus||!source)return undefined;
   const original=officeFocus.value,ref=original.reference;
   const sameSource=original.owner===owner&&original.conversationId===source.conversationId&&original.runId===source.runId
-   &&original.activityId===source.activityId&&original.resultSha===source.resultSha&&original.file.path===source.file.path&&original.file.version===source.file.version&&original.file.sha256===source.file.sha256&&original.file.size===source.file.size;
+   &&original.activityId===source.activityId&&original.resultSha===source.resultSha&&original.file.path===source.file.path&&original.file.version===source.file.version&&nativeReferenceIdentity(original.native_source)===nativeReferenceIdentity(source.native_source)&&original.file.sha256===source.file.sha256&&original.file.size===source.file.size;
   const index=value.sheets.findIndex((sheet,index)=>`sheet-${index}`===ref.locator.sheetId&&sheet.name===ref.locator.sheetName);
   if(!sameSource||index<0)return {confirmed:false,index:0,address:''};
   const sheet=value.sheets[index];let confirmed=true;
@@ -104,7 +104,7 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
   window.addEventListener('pointerdown',stop,true);window.addEventListener('pointerup',stop);window.addEventListener('pointercancel',stop);window.addEventListener('blur',stop);
   return()=>{window.removeEventListener('pointerdown',stop,true);window.removeEventListener('pointerup',stop);window.removeEventListener('pointercancel',stop);window.removeEventListener('blur',stop);};
  },[]);
- const sheet=value.sheets[part],disabled=!source||!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId;
+ const sheet=value.sheets[part],disabled=!source||!!source.native_source&&!context?.nativeSources?.includes(1)||!context||context.disabled||context.owner!==owner||context.conversationId!==source.conversationId;
  useEffect(()=>{
   if(jumped.current||!focused?.confirmed||part!==focused.index)return;
   const frame=window.requestAnimationFrame(()=>{
@@ -143,13 +143,13 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
   }catch(error){setNotice(error instanceof Error?error.message:'选区快照尚未完成核对');return;}
   const nearby=spreadsheetReferenceContext(sheet,value.truncated,cellRangeCoordinates(ranges[0]));
   const reference=createCellRangeContentReference({
-   source:{relativePath:source.file.path,fileName:source.file.path.split('/').at(-1)!,mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    revision:{id:String(source.file.version),sha256:source.file.sha256,size:source.file.size}},
+   source:{relativePath:source.file.path,fileName:source.native_source?source.file.path.split(/[\\/]/).at(-1)!:source.file.path.split('/').at(-1)!,mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    revision:{id:source.native_source?.openSha??String(source.file.version),sha256:source.file.sha256,size:source.file.size}},
    renderer:{id:'xlsx',backend:'builtin',locatorQuality:'semantic'},
    locator:{surface:'sheet',sheetId:`sheet-${part}`,sheetName:sheet.name,ranges:[...ranges],activeRange:ranges[0]},
    cells:snapshots,...(nearby.headers?{headers:nearby.headers}:{}),...(nearby.surroundingValues?{surroundingValues:nearby.surroundingValues}:{}),
   });
-  if(context.onAdd({conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,file:{path:source.file.path,version:source.file.version,sha256:source.file.sha256,size:source.file.size},owner,reference})){
+  if(context.onAdd({conversationId:source.conversationId,runId:source.runId,activityId:source.activityId,resultSha:source.resultSha,...(source.native_source?{native_source:source.native_source,file:{path:source.file.path,sha256:source.file.sha256,size:source.file.size}}:{file:{path:source.file.path,version:source.file.version!,sha256:source.file.sha256,size:source.file.size}}),owner,reference})){
    setSelected([]);setRangeDraft('');anchor.current=null;drag.current=undefined;
    setNotice('单元格引用已加入当前对话草稿。'+(rawUnavailable?' 部分原保存值尚未确认，相关选区未附原值矩阵。':'')+(nearby.incomplete?' 部分上下文尚未覆盖，未附对应上下文矩阵。':''));
   }else setNotice('单元格引用尚未保存，请检查草稿状态或减少选中的内容。');
@@ -244,14 +244,14 @@ function OfficeText({text,match}:{text:string;match?:{start:number;end:number}})
  if(!match)return <>{text}</>;
  return <>{text.slice(0,match.start)}<mark data-office-reference-text>{text.slice(match.start,match.end)}</mark>{text.slice(match.end)}</>;
 }
-function OfficeDocumentContent({value,source,officeTextFocus}:{value:Exclude<OfficeDocumentPreview,{kind:'xlsx'}>;source?:ListedFilePreviewSource|undefined;officeTextFocus?:OfficeTextFocus}){
+function OfficeDocumentContent({value,source,officeTextFocus}:{value:Exclude<OfficeDocumentPreview,{kind:'xlsx'}>;source?:FileReferenceIdentity|undefined;officeTextFocus?:OfficeTextFocus}){
  const root=useRef<HTMLElement>(null),jumped=useRef(false),owner=taskDraftScope();
  const view=useMemo(()=>officeTextView(value),[value]);
  const focused=useMemo(()=>{
   const original=officeTextFocus?.value;if(!original||!source)return undefined;
   if(original.text_view!==1||original.owner!==owner||original.conversationId!==source.conversationId||original.runId!==source.runId
    ||original.activityId!==source.activityId||original.resultSha!==source.resultSha||original.file.path!==source.file.path
-   ||original.file.version!==source.file.version||original.file.sha256!==source.file.sha256||original.file.size!==source.file.size)return undefined;
+   ||original.file.version!==source.file.version||nativeReferenceIdentity(original.native_source)!==nativeReferenceIdentity(source.native_source)||original.file.sha256!==source.file.sha256||original.file.size!==source.file.size)return undefined;
   return resolveOfficeTextReference(view,original.reference);
  },[view,source,owner,officeTextFocus]);
  const [part,setPart]=useState(focused?.block.part??0),[page,setPage]=useState(focused?.block.page??0);
@@ -300,7 +300,7 @@ function OfficeDocumentContent({value,source,officeTextFocus}:{value:Exclude<Off
   </>}
  </section>;
 }
-export function OfficeContent({value,source,officeFocus,officeTextFocus}:{value:OfficeDocumentPreview;source?:ListedFilePreviewSource|undefined;officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus}){
+export function OfficeContent({value,source,officeFocus,officeTextFocus}:{value:OfficeDocumentPreview;source?:FileReferenceIdentity|undefined;officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus}){
  if(value.kind==='xlsx')return <SpreadsheetContent value={value} source={source} officeFocus={officeFocus}/>;
  return <OfficeDocumentContent value={value} source={source} officeTextFocus={officeTextFocus}/>;
 }

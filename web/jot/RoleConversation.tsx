@@ -1,5 +1,5 @@
 import {validateTextReference} from './composer-draft-recovery.mjs';
-import {FileTextReferenceContext,FileTextReferences,fileReferenceMessage,fileReferenceSnapshots,isFileRegion,resolveRegionArtifact,type FileReference,type FileSourceReference,type FileRegionDraft,type FileSelectionReference} from './FileTextReferences';
+import {FileTextReferenceContext,FileTextReferences,nativeReferenceIdentity,fileReferenceMessage,fileReferenceSnapshots,isFileRegion,resolveRegionArtifact,type FileReference,type FileSourceReference,type FileRegionDraft,type FileSelectionReference} from './FileTextReferences';
 import FileReferenceSource from './FileReferenceSource';
 import MessageFileReferences from './MessageFileReferences';
 import type {TaskSourceSelection} from '../workbench/types';
@@ -341,7 +341,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
    const reference=item.reference;
    const location=reference.selectionMode==='cells'?[('cell_view' in item?item.cell_view??1:1),reference.locator,reference.cells,reference.headers,reference.surroundingValues]
     :reference.renderer.id==='pdf'?[reference.selectedText,reference.locator.pageNumbers]:[('text_view' in item?item.text_view:undefined),reference.selectedText,reference.locator];
-   return JSON.stringify([item.runId,item.activityId,item.resultSha,item.file.path,item.file.version,item.file.sha256,item.file.size,item.native_source,item.print_view,location]);
+   return JSON.stringify([item.runId,item.activityId,item.resultSha,item.file.path,item.file.version,item.file.sha256,item.file.size,nativeReferenceIdentity(item.native_source),item.print_view,location]);
   };
   const known=new Set(fileReferences.filter((item):item is FileSelectionReference=>!isFileRegion(item)).map(fingerprint));
   const added:FileSelectionReference[]=[];
@@ -357,7 +357,7 @@ function ConversationContent({id,onClose,onTaskSource,onForkConversation,ordinar
   const {reference}=value;
   try{validateRegionCapture(value,id,fileOwner);}catch{setError('区域引用或截图信息未能核对，请重新选择。');return Promise.resolve(false);}
   if(file.type!=='image/png'||file.name!==reference.image.name||file.size!==value.imageBytes||file.size<1||file.size>maxBytes){setError('区域引用或截图信息未能核对，请重新选择。');return Promise.resolve(false);}
-  if(fileReferences.some(item=>isFileRegion(item)&&item.runId===value.runId&&item.activityId===value.activityId&&item.resultSha===value.resultSha&&item.file.path===value.file.path&&item.file.version===value.file.version&&item.file.sha256===value.file.sha256&&JSON.stringify(item.native_source)===JSON.stringify(value.native_source)&&item.reference.image.sha256===reference.image.sha256&&JSON.stringify(item.reference.locator)===JSON.stringify(reference.locator)&&JSON.stringify(item.region_view)===JSON.stringify(value.region_view)&&JSON.stringify(item.print_view)===JSON.stringify(value.print_view)&&item.rotation===value.rotation))return Promise.resolve(true);
+  if(fileReferences.some(item=>isFileRegion(item)&&item.runId===value.runId&&item.activityId===value.activityId&&item.resultSha===value.resultSha&&item.file.path===value.file.path&&item.file.version===value.file.version&&item.file.sha256===value.file.sha256&&nativeReferenceIdentity(item.native_source)===nativeReferenceIdentity(value.native_source)&&item.reference.image.sha256===reference.image.sha256&&JSON.stringify(item.reference.locator)===JSON.stringify(reference.locator)&&JSON.stringify(item.region_view)===JSON.stringify(value.region_view)&&JSON.stringify(item.print_view)===JSON.stringify(value.print_view)&&item.rotation===value.rotation))return Promise.resolve(true);
   const candidate={...value,uploadEntryId:''};
   if(goalPrompt(replyQuoteMessage(fileReferenceMessage(draft,[...fileReferences,candidate]),replyQuotes),ordinary&&!chatMode&&!run&&goalMode).length>100000){setError('引用与消息过长，请减少引用或缩短消息');return Promise.resolve(false);}
   return new Promise<boolean>(resolve=>{

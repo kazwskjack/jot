@@ -1,13 +1,14 @@
+import type {OfficeCellFocus,OfficeTextFocus} from './FileTextReferences';
 import React,{useEffect,useRef,useState} from 'react';
 import {OfficeContent} from './ActivityToolFileOffice';
 import {normalizeOfficePreviewContent,officePreviewFormat} from '../../packages/gateway/src/artifacts/document-preview-content';
 import {ApiError,request,taskDraftScope} from './client';
 import type {NativeMemberOfficeDocumentPage} from '../../packages/gateway/contracts/types';
-import {nativeMemberDownloadUrl,type NativeMemberPreviewSource} from './activity-file-preview-client';
+import {nativeMemberReferenceSource,nativeMemberDownloadUrl,type NativeMemberPreviewSource} from './activity-file-preview-client';
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
 
-export default function NativeSearchOfficeDocument({source,expectedOpenSha,expectedOpenProof,onOpened}:{source:NativeMemberPreviewSource;expectedOpenSha?:string|undefined;expectedOpenProof?:string|undefined;onOpened?:(sha:string,proof?:string)=>boolean}){
- const owner=taskDraftScope(),identity=JSON.stringify([owner,source]);
+export default function NativeSearchOfficeDocument({source,expectedOpenSha,expectedOpenProof,expectedFile,officeFocus,officeTextFocus,onOpened}:{source:NativeMemberPreviewSource;expectedOpenSha?:string|undefined;expectedOpenProof?:string|undefined;expectedFile?:{sha256:string;size:number}|undefined;officeFocus?:OfficeCellFocus|undefined;officeTextFocus?:OfficeTextFocus|undefined;onOpened?:(sha:string,proof?:string)=>boolean}){
+ const owner=taskDraftScope(),identity=JSON.stringify([owner,source,expectedFile]);
  const held=useRef<{identity:string;sha:string;proof?:string;revision:number}>();
  const [state,setState]=useState<{identity:string;page?:NativeMemberOfficeDocumentPage;error?:string}>(),[revision,setRevision]=useState(0);
  useEffect(()=>{
@@ -31,6 +32,7 @@ export default function NativeSearchOfficeDocument({source,expectedOpenSha,expec
     ||typeof page.sha256!=='string'||!/^[a-f0-9]{64}$/.test(page.sha256)||!Number.isSafeInteger(page.size_bytes)||page.size_bytes<0||page.size_bytes>100*1024*1024
     ||page.media_type!==format.mediaType||page.document?.kind!==format.kind||!page.engine||typeof page.engine.name!=='string'||page.engine.name.length>200
     ||typeof page.engine.version!=='string'||page.engine.version.length>200)throw Error('原生Office结构化来源尚未确认');
+   if(expectedFile&&(page.sha256!==expectedFile.sha256||page.size_bytes!==expectedFile.size))throw Error('原引用文件摘要或大小已变化');
    const document=normalizeOfficePreviewContent(page.media_type,page.document);
    if(onOpened&&!onOpened(page.open_sha256,page.open_proof))throw Error('原打开来源已变化，请重新打开文件');
    held.current={identity,sha:page.open_sha256,revision,...(page.open_proof?{proof:page.open_proof}:{})};
@@ -55,7 +57,7 @@ export default function NativeSearchOfficeDocument({source,expectedOpenSha,expec
    <p>{page.size_bytes} 字节 · SHA-256 <code>{page.sha256}</code></p>
    <a href={nativeMemberDownloadUrl(source)+'&open_sha256='+page.open_sha256+(page.open_proof?'&open_proof='+page.open_proof:'')} download={source.member.path.split(/[\\/]/).at(-1)||'file'} onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载此结构化来源</a>
    {page.document.truncated&&<p role="status">当前解析结果存在截断，请对照完整打开文件。</p>}
-   <section className="jot-office-content" data-chat-search-content={JSON.stringify(['native-office',identity,page.open_sha256])}><OfficeContent key={page.open_sha256} value={page.document}/></section>
+   <section className="jot-office-content" data-chat-search-content={JSON.stringify(['native-office',identity,page.open_sha256])}><OfficeContent key={JSON.stringify([page.open_sha256,officeFocus?.key,officeTextFocus?.key])} value={page.document} source={nativeMemberReferenceSource(source,{openSha:page.open_sha256,sha256:page.sha256,size:page.size_bytes,proof:page.open_proof})} officeFocus={officeFocus} officeTextFocus={officeTextFocus}/></section>
   </>}
   {current?.error&&<p role="alert">{current.error}</p>}
   <button type="button" onClick={()=>setRevision(value=>value+1)}>重新解析同次打开来源</button>
