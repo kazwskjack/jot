@@ -1,6 +1,6 @@
 # 独立原生 Session 接入
 
-当前源码已连接 Gateway 的准备、读取、派发、取消、观察流程与原生 Host 的身份、创建、只读观察实现。已确认独立 Session 的终端清单也已接入源码；独立终端的 control、PTY stream 和产品界面尚未接通；`ready` 只表示观察到原持久 Session，不表示终端进程已启动或 CLI 已登录。
+当前源码已连接 Gateway 的准备、读取、派发、取消、观察流程与原生 Host 的身份、创建、只读观察实现。已确认独立 Session 的终端清单也已接入源码；独立终端的 shell/尺寸选项和显式恢复已接入源码；创建/关闭操作、PTY stream 和产品界面尚未接通；`ready` 只表示观察到原持久 Session，不表示终端进程已启动或 CLI 已登录。
 
 ## 显式配置
 
@@ -34,3 +34,11 @@ Linux Host 使用它本机的绝对目录。工作区 ID 必须同时在 Gateway
 `GET /v1/standalone-terminals/admissions/:requestId/terminals` 只读取当前账户、当前配置工作区内已达到 ready 的独立 Session。Host 在读取原生终端 controller 前后核对持久 Session 身份及原确认摘要，Gateway 返回前复核 admission 状态。响应沿用既有 TerminalInventory 公共字段，不含终端输出或私有日志。
 
 此读取不会恢复 Agent、创建 Session 或终端，也不表示 CLI 已登录。尚未完成独立终端操作、PTY 数据流及界面；原生能力缺失会返回不可用，不伪造空清单。
+
+## 终端选项与显式恢复
+
+`GET /v1/standalone-terminals/admissions/:requestId/terminals/options` 读取原生已加载 Agent 的 shell、cwd、尺寸限制及清单。读取失败不会自动恢复 Agent。
+
+`POST /v1/standalone-terminals/admissions/:requestId/terminals/recover` 接受空对象和请求键，由用户显式调用原终端恢复路径。它只解析已确认的持久 Session，不创建缺失 Session、终端或提交提示词/CLI 命令；沿用原 SDK 的 Agent 恢复行为。缺失、忙碌或无法核对身份时返回不可用，不创建替代 Session。恢复期间断开或超时不会触发自动重试；后续可先重读选项。
+
+两条路径都需要当前账户、已配置工作区和 ready admission，Host 在操作前后验证 profile、目录、Session header、注册表及终端 controller，Gateway 返回前重读 admission。完整命令回执、创建/关闭、PTY 输入/输出及界面仍待接入。

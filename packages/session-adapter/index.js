@@ -261,7 +261,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
 
   const dispatch=async ({ method, url, headers, body, signal = new AbortController().signal },activityAdmissionId) => {
     if (!authorized(headers.authorization, token)) return json(401, { error: 'unauthorized' })
-    if(['/v1/standalone-terminals/authority','/v1/standalone-terminals/create','/v1/standalone-terminals/observe','/v1/standalone-terminals/inventory'].includes(url.pathname)){
+    if(['/v1/standalone-terminals/authority','/v1/standalone-terminals/create','/v1/standalone-terminals/observe','/v1/standalone-terminals/inventory','/v1/standalone-terminals/options','/v1/standalone-terminals/recover'].includes(url.pathname)){
       if(method!=='POST')return json(405,{error:'method_not_allowed'});
       if(url.search||!body||typeof body!=='object'||Array.isArray(body))return json(422,{error:'standalone_terminal_input_invalid'});
       if(!standaloneTerminalHost)return json(503,{error:'standalone_terminal_host_unavailable'});
@@ -270,6 +270,8 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
           if(Object.keys(body).sort().join(',')!=='owner_id,workspace_id')return json(422,{error:'standalone_terminal_input_invalid'});
           return json(200,await standaloneTerminalHost.readAuthority(body.owner_id,body.workspace_id,signal));
         }
+        if(url.pathname.endsWith('/options'))return json(200,await standaloneTerminalHost.terminalOptions(body,signal));
+        if(url.pathname.endsWith('/recover'))return json(200,await standaloneTerminalHost.recoverTerminal(body,signal));
         if(url.pathname.endsWith('/inventory'))return json(200,await standaloneTerminalHost.readInventory(body,signal));
         return json(200,await(url.pathname.endsWith('/create')?standaloneTerminalHost.createSession(body,signal):standaloneTerminalHost.observeSession(body,signal)));
       }catch{return json(503,{error:'standalone_terminal_source_unconfirmed'});}
@@ -1334,7 +1336,7 @@ export function apply(ctx, config = {}) {
     const standaloneTerminalHost=config.standaloneTerminalWorkspaces?.length?createStandaloneTerminalHost({bindings:config.standaloneTerminalWorkspaces,
       allowedPresets:new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')),
       readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext')),sessionController:()=>ctx.sessionController,
-      agents:ctx.agents,sessions:ctx.sessions,sessionNotFoundError:ApiSessionNotFound,terminalController:()=>ctx.get('terminalController',false),
+      agents:ctx.agents,sessions:ctx.sessions,sessionNotFoundError:ApiSessionNotFound,terminalController:()=>ctx.get('terminalController',false),terminalControl,
       claimAttempt:(packet,signal)=>{if(typeof workbenchBridge?.claimStandaloneTerminalAttempt!=='function')throw Error('standalone_terminal_host_unavailable');return workbenchBridge.claimStandaloneTerminalAttempt(packet,signal);}}):undefined;
     if(standaloneTerminalHost)ctx.effect(()=>()=>standaloneTerminalHost.dispose());
     const taskmasterRuntime=createTaskmasterRuntimeVersionReader({readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext'))});

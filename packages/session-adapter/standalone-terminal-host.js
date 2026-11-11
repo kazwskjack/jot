@@ -4,6 +4,7 @@ import {isAbsolute} from 'node:path';
 import {createOrResumeSession} from './session-admission.js';
 import {sessionHeaderIdentity} from './session-header-identity.js';
 import {projectTerminalInventory} from '../gateway/src/terminal/inventory.js';
+import {validateTerminalOptions} from '../gateway/src/terminal/control.js';
 const id=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(value);
 const uuid=value=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
 const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
@@ -27,7 +28,7 @@ export function normalizeStandaloneTerminalBindings(bindings,allowedPresets){
  }));
 }
 /** Native owner profile and operator-provisioned paths supply all creation authority. */
-export function createStandaloneTerminalHost({bindings,allowedPresets,readIdentity,sessionController,agents,sessions,sessionNotFoundError,claimAttempt,terminalController}){
+export function createStandaloneTerminalHost({bindings,allowedPresets,readIdentity,sessionController,agents,sessions,sessionNotFoundError,claimAttempt,terminalController,terminalControl}){
  if(typeof readIdentity!=='function'||typeof sessionController!=='function'||typeof agents?.get!=='function'||typeof sessions?.get!=='function'||typeof claimAttempt!=='function')throw Error('standalone_terminal_host_unavailable');
  const origin=Object.freeze({...readIdentity()}),controller=sessionController(),lifetime=new AbortController();
  if(!id(origin?.ownerId)||!id(origin?.profileId)||typeof origin.profileDirectory!=='string'||!isAbsolute(origin.profileDirectory)
@@ -83,6 +84,22 @@ export function createStandaloneTerminalHost({bindings,allowedPresets,readIdenti
   return Object.freeze({protocol:1,owner_id:admission.owner_id,workspace_id:admission.workspace_id,session_id:admission.session_id,
    authority_sha256:admission.authority_sha256,status:header?'ready':'unknown',native_identity_sha256:header?digest(sessionHeaderIdentity(header)):null,execution_authorized:false});
  };
+ const confirmed=async(admission,signal,operation)=>{
+  const active=AbortSignal.any([signal,lifetime.signal]),scope=check(admission,active,true),terminals=terminalController?.();
+  if(!terminals)return fail();
+  const inspect=async()=>{const header=await inspection(admission,active,true);
+   if(!header||digest(sessionHeaderIdentity(header))!==admission.native_identity_sha256)return fail();};
+  await inspect();if(terminalController()!==terminals)return fail();
+  const value=await operation(active,scope);await inspect();
+  if(terminalController()!==terminals)return fail();check(admission,active,true);return value;
+ };
+ const options=(admission,signal,recover)=>confirmed(admission,signal,async(active,scope)=>{
+  const method=recover?'recover':'options';
+  if(typeof terminalControl?.[method]!=='function')throw Error('terminal_control_unavailable');
+  const value=validateTerminalOptions(await terminalControl[method](admission.owner_id,admission.session_id,active),admission.session_id);
+  if(value.environment.cwd!==scope.row.cwd)return fail();
+  return value;
+ });
  return Object.freeze({
   readAuthority(owner,workspace,signal){return current(owner,workspace,signal).authority;},
   async observeSession(admission,signal){return observe(admission,AbortSignal.any([signal,lifetime.signal]));},
@@ -102,16 +119,14 @@ export function createStandaloneTerminalHost({bindings,allowedPresets,readIdenti
     beforeAdmission:async()=>{check(admission,active);if(await inspection(admission,active))throw Error('standalone_terminal_session_already_present');check(admission,active);}});
    check(admission,active);return observe(admission,active);
   },
+  terminalOptions(admission,signal){return options(admission,signal,false);},
+  recoverTerminal(admission,signal){return options(admission,signal,true);},
   async readInventory(admission,signal){
-   const active=AbortSignal.any([signal,lifetime.signal]);check(admission,active,true);
-   const header=await inspection(admission,active,true);
-   if(!header||digest(sessionHeaderIdentity(header))!==admission.native_identity_sha256)return fail();
-   const terminals=terminalController?.();
-   if(typeof terminals?.list!=='function')throw Error('terminal_inventory_unavailable');
-   const inventory=projectTerminalInventory(admission.session_id,terminals.list(admission.session_id));
-   const after=await inspection(admission,active,true);
-   if(terminalController()!==terminals||!after||digest(sessionHeaderIdentity(after))!==admission.native_identity_sha256)return fail();
-   check(admission,active,true);return inventory;
+   return confirmed(admission,signal,async()=>{
+    const terminals=terminalController?.();
+    if(typeof terminals?.list!=='function')throw Error('terminal_inventory_unavailable');
+    return projectTerminalInventory(admission.session_id,terminals.list(admission.session_id));
+   });
   },
   dispose(){lifetime.abort();},
  });

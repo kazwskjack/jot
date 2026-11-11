@@ -41,6 +41,20 @@ export function registerStandaloneTerminalAdmissionRoutes(app:FastifyInstance,op
    const value=service.read(owner,id);if(!value)throw Error('standalone_terminal_admission_missing');return value;
   }catch(error){const result=failure(error);return reply.code(result.status).send({error:{code:result.code}});}
  });
+ for(const recover of [false,true]){
+  const route=path+'/:requestId/terminals/'+(recover?'recover':'options');
+  app.route({method:recover?'POST':'GET',url:route,config:{terminalStreamCommand:true},bodyLimit:4096,handler:async(request,reply)=>{
+   reply.header('cache-control','private, no-store');
+   const abort=new AbortController(),close=()=>abort.abort();request.raw.once('aborted',close);reply.raw.once('close',close);
+   if(request.raw.aborted||reply.raw.destroyed)close();
+   try{
+    const owner=options.actor(request),id=(request.params as {requestId:string}).requestId;
+    if(!uuid(id)||Object.keys(request.query as object).length||recover&&(!object(request.body)||Object.keys(request.body).length||!/^[-A-Za-z0-9._:]{8,128}$/.test(String(request.headers['idempotency-key']??''))))throw Error('standalone_terminal_input_invalid');
+    return await service.terminalOptions(owner,id,abort.signal,recover);
+   }catch(error){const result=failure(error);return reply.code(result.status).send({error:{code:result.code}});}
+   finally{request.raw.off('aborted',close);reply.raw.off('close',close);abort.abort();}
+  });
+ }
  app.get(path+'/:requestId/terminals',async(request,reply)=>{
   reply.header('cache-control','private, no-store');
   const abort=new AbortController(),close=()=>abort.abort();request.raw.once('aborted',close);reply.raw.once('close',close);
