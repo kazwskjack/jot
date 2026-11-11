@@ -184,3 +184,5 @@ export type ActivityToolFileBytes=Pick<ActivityToolFilePage,'conversation_id'|'r
 export type NativeFileSearch={shape:'paths';paths:string[];total:number;truncated:boolean}|{shape:'matches';files:{path:string;matches:{lineNumber:number;line:string}[]}[];total:number;truncated:boolean}|{shape:'source_limit'};
 
 export type ActivityNativeSearchMembersPage=import('../../packages/gateway/contracts/types').ActivityNativeSearchMembersPage;
+
+export type ActivityNativeFileOpeningsPage=import('../../packages/gateway/contracts/types').ActivityNativeFileOpeningsPage;

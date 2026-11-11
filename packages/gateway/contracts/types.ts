@@ -863,6 +863,8 @@ export type {TerminalAttachment,TerminalInput,TerminalInputPacket,TerminalAttach
 
 export type NativeFileSearch={shape:'paths';paths:string[];total:number;truncated:boolean}|{shape:'matches';files:{path:string;matches:{lineNumber:number;line:string}[]}[];total:number;truncated:boolean}|{shape:'source_limit'};
 
+export type ActivityNativeFileOpening={member_index:number;path:string;result_sha256:string;members_sha256:string;open_sha256:string;sha256:string;size_bytes:number;source_as_of_seq?:string};
+export type ActivityNativeFileOpeningsPage={conversation_id:string;run_id:string;activity_id:string;tool_name:'glob'|'grep';scope:'owned_opened_files';as_of_seq?:string;openings_sha256:string;offset_openings:number;total_openings:number;items:ActivityNativeFileOpening[];next_offset_openings?:number;execution_authorized:false};
 export type ActivityNativeSearchMembersPage={
   conversation_id:string;run_id:string;activity_id:string;tool_name:'glob'|'grep';as_of_seq?:string;
   result_sha256:string;members_sha256:string;offset_members:number;total_members:number;original_total:number;

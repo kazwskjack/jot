@@ -15,14 +15,14 @@ const NativeSearchFileOffice=lazy(()=>import('./NativeSearchFileOffice'));
 const NativeSearchFilePdf=lazy(()=>import('./NativeSearchFilePdf'));
 type Opened=NativeMemberOpenedBytes&{downloadUrl:string;imageUrl?:string;text?:string};
 
-export default function NativeSearchFile({source,expected,printPin,focus,officeFocus,officeTextFocus,officeRegionFocus}:{source:NativeMemberPreviewSource;expected?:{openSha:string;proof:string;sha256:string;size:number};printPin?:NativeOfficePrintPin|undefined;focus?:PdfReferenceFocus|undefined;officeFocus?:OfficeCellFocus|undefined;officeTextFocus?:OfficeTextFocus|undefined;officeRegionFocus?:OfficeRegionFocus|undefined}){
+export default function NativeSearchFile({source,expected,printPin,focus,officeFocus,officeTextFocus,officeRegionFocus}:{source:NativeMemberPreviewSource;expected?:{openSha:string;proof?:string;sha256:string;size:number};printPin?:NativeOfficePrintPin|undefined;focus?:PdfReferenceFocus|undefined;officeFocus?:OfficeCellFocus|undefined;officeTextFocus?:OfficeTextFocus|undefined;officeRegionFocus?:OfficeRegionFocus|undefined}){
  const owner=taskDraftScope(),identity=JSON.stringify([owner,source,expected,printPin]);
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;opened?:Opened;error?:string}>(),[revision,setRevision]=useState(0);
  const openPin=useRef<{identity:string;sha:string;proof?:string}>();
  const [printMode,setPrintMode]=useState(!!printPin),[structured,setStructured]=useState(!!officeFocus&&officeFocus.value.cell_view!==2||officeTextFocus?.value.text_view===1);
  const captureOpen=(sha:string,proof?:string)=>{
-  if(taskDraftScope()!==owner||expected&&(sha!==expected.openSha||proof!==expected.proof)||openPin.current?.identity===identity&&(openPin.current.sha!==sha||openPin.current.proof!==undefined&&openPin.current.proof!==proof))return false;
+  if(taskDraftScope()!==owner||expected&&(sha!==expected.openSha||expected.proof!==undefined&&proof!==expected.proof)||openPin.current?.identity===identity&&(openPin.current.sha!==sha||openPin.current.proof!==undefined&&openPin.current.proof!==proof))return false;
   openPin.current={identity,sha,...(proof?{proof}:{})};return true;
  };
  const [raw,setRaw]=useState(false),[byteOffset,setByteOffset]=useState(0);

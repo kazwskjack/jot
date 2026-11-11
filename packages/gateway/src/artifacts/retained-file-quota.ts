@@ -3,9 +3,10 @@ import {join} from 'node:path';
 
 const maxBytes=512*1024*1024,maxEntries=128;
 const nativeStage=/^\.native-stage-([1-9][0-9]{0,8})-[a-f0-9]{64}-[A-Za-z0-9_-]{6}$/;
+export function nativeStageReservation(name:string):number|undefined{const match=nativeStage.exec(name);return match&&match[0].length===name.length&&Number(match[1])<=maxBytes?Number(match[1]):undefined;}
 /** The original database publication transaction serializes persisted entries and native staging reservations. */
 export function assertRetainedFileCapacity(root:string,additionalBytes:number,fullError:string,ignoredStage?:string){
- if(!Number.isSafeInteger(additionalBytes)||additionalBytes<0||ignoredStage!==undefined&&(!nativeStage.test(ignoredStage)||ignoredStage.includes('\n')))throw Error('retained_file_storage_invalid');
+ if(!Number.isSafeInteger(additionalBytes)||additionalBytes<0||ignoredStage!==undefined&&nativeStageReservation(ignoredStage)===undefined)throw Error('retained_file_storage_invalid');
  const directory=lstatSync(root);if(!directory.isDirectory()||directory.isSymbolicLink())throw Error('retained_file_storage_invalid');
  let used=0,count=0;
  for(const [name,pattern,files] of [
@@ -18,9 +19,8 @@ export function assertRetainedFileCapacity(root:string,additionalBytes:number,fu
   for(const entry of entries){
    const path=join(folder,entry),directory=lstatSync(path);
    if(!directory.isDirectory()||directory.isSymbolicLink())throw Error('retained_file_storage_invalid');
-   const stage=name==='retained-native-files'?nativeStage.exec(entry):null;
-   if(stage&&stage[0].length===entry.length){
-    const reserved=Number(stage[1]);if(reserved>maxBytes)throw Error('retained_file_storage_invalid');
+   const reserved=name==='retained-native-files'?nativeStageReservation(entry):undefined;
+   if(reserved!==undefined){
     // Abandoned reservations remain accounted after a process crash; never remove another writer's stage.
     if(entry===ignoredStage)continue;
     count++;used+=reserved;

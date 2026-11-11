@@ -1,4 +1,4 @@
-import {readRetainedNativeFile,loadRetainedNativeFile,retainNativeFile} from '../artifacts/native-file-store.ts';
+import {listRetainedNativeFiles,readRetainedNativeFile,loadRetainedNativeFile,retainNativeFile} from '../artifacts/native-file-store.ts';
 import type {NativeFileProofSource,NativeFileProofPdf} from '../messages/native-file-proof.ts';
 import {OFFICE_SOURCE_MAX_BYTES,officePreviewFormat} from '../artifacts/office-preview-format.js';
 import type {PinnedByteSource} from '../artifacts/pinned-byte-source.ts';
@@ -10,7 +10,7 @@ import {validateNativeSearchMembers,validateNativeSearchMemberRange,type NativeS
 import {createHash} from 'node:crypto';
 import type {DatabaseSync} from 'node:sqlite';
 import type {FastifyInstance,FastifyRequest,FastifyReply} from 'fastify';
-import type {ActivityToolResultPage,ActivityToolResultSearchPage,ActivityToolResultMatch,ActivityNativeSearchMembersPage,NativeMemberOfficeDocumentPage} from '../../contracts/types.ts';
+import type {ActivityToolResultPage,ActivityToolResultSearchPage,ActivityToolResultMatch,ActivityNativeSearchMembersPage,ActivityNativeFileOpeningsPage,NativeMemberOfficeDocumentPage} from '../../contracts/types.ts';
 import {withReadTransaction} from '../db/database.ts';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {readOriginalActivity,type NativeSearchCandidate} from './activity-tool-result.ts';
@@ -23,6 +23,7 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
 const SHA = /^[a-f0-9]{64}$/;
 const MAX_CHARS = 32 * 1024 * 1024;
 const hash = (value:unknown) => createHash('sha256').update(canonicalJson(value)).digest('hex');
+const retainedNativeBinding=(owner:string,activity:string,opened:string)=>hash({protocol:'jot-retained-native-file/v1',owner,activity,opened});
 type Input = Record<string,unknown>;
 export type NativeSearchSourceRequest = {call_seq:number;tool_name:'glob'|'grep';offset_chars:number;source_sha256?:string};
 export type NativeSearchSourceSearchRequest = Omit<NativeSearchSourceRequest,'offset_chars'>&{q:string};
@@ -245,7 +246,7 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
       downloads.add(reservation);
       const original = source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined);
       let openedSource:PinnedByteSource,proofSource:NativeFileProofSource,verifyPreviewAuthority:()=>Promise<void>,retained=false;
-      const retentionBinding=(opened:string)=>hash({protocol:'jot-retained-native-file/v1',owner,activity:original.identity,opened});
+      const retentionBinding=(opened:string)=>retainedNativeBinding(owner,original.identity,opened);
       const saved=retainedRoot&&query.open_sha256!==undefined?await readRetainedNativeFile(retainedRoot,retentionBinding(query.open_sha256 as string),signal):undefined;
       if(saved){
         const prior=saved.source;
@@ -397,6 +398,67 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/members/:memberIndex/download',nativeFileRoute('download'));
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/members/:memberIndex/document',nativeFileRoute('document'));
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/members/:memberIndex/print',nativeFileRoute('print'));
+  app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/openings',async(request,reply)=>{
+    reply.header('cache-control','private, no-store');
+    const abort=new AbortController(),signal=AbortSignal.any([abort.signal,AbortSignal.timeout(20000)]),reservation={bytes:64*1024*1024};
+    let sending=false;
+    const cleanup=()=>{downloads.delete(reservation);request.raw.off('aborted',disconnected);reply.raw.off('close',disconnected);reply.raw.off('finish',cleanup);signal.removeEventListener('abort',timedOut);};
+    const disconnected=()=>{abort.abort();if(sending)cleanup();};
+    const timedOut=()=>{if(sending&&!reply.raw.destroyed)reply.raw.destroy();};
+    signal.addEventListener('abort',timedOut,{once:true});
+    request.raw.once('aborted',disconnected);reply.raw.once('close',disconnected);
+    if(request.raw.aborted||reply.raw.destroyed)disconnected();
+    try{
+      const owner=actor(request),{conversationId,activityId}=request.params as {conversationId:string;activityId:string};
+      const query=request.query as Input,runId=query.run_id,asOfSeq=query.as_of_seq,offsetValue=query.offset_openings??'0',offset=Number(offsetValue);
+      if(!ID.test(conversationId)||!ID.test(activityId)||typeof runId!=='string'||!ID.test(runId)
+        ||Object.keys(query).some(key=>!['run_id','as_of_seq','offset_openings','openings_sha256'].includes(key))
+        ||typeof offsetValue!=='string'||String(offset)!==offsetValue||!Number.isSafeInteger(offset)||offset<0||offset>128
+        ||asOfSeq!==undefined&&(typeof asOfSeq!=='string'||asOfSeq.length>19||!/^(0|[1-9][0-9]{0,18})$/.test(asOfSeq)||String(BigInt(asOfSeq))!==asOfSeq||BigInt(asOfSeq)>9223372036854775807n)
+        ||query.openings_sha256!==undefined&&(typeof query.openings_sha256!=='string'||query.openings_sha256.length!==64||!SHA.test(query.openings_sha256))
+        ||offset>0&&query.openings_sha256===undefined)throw Error('invalid_activity_tool_result_query');
+      if(downloads.size>=4||[...downloads].reduce((sum,value)=>sum+value.bytes,0)+reservation.bytes>downloadBudget)
+        return reply.code(429).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_CAPACITY'}});
+      downloads.add(reservation);signal.throwIfAborted();
+      const original=source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined);
+      const describe=(value:ReturnType<typeof source>)=>({identity:value.identity,semantic:hash({session:value.sessionId,activity:value.activity,call:value.callSha??null,result:value.resultSha??null})});
+      const descriptor=describe(original),authorities=new Map([[asOfSeq as string|undefined,descriptor]]);
+      const records=retainedRoot?await listRetainedNativeFiles(retainedRoot,signal):[],eligible:typeof records=[];
+      let scanned=0;
+      for(const record of records){
+        if(++scanned%8===0)await new Promise<void>(resolve=>setImmediate(resolve));
+        signal.throwIfAborted();const saved=record.source;
+        if(saved.conversationId!==conversationId||saved.runId!==runId||saved.activityId!==activityId)continue;
+        let authority=authorities.get(saved.asOfSeq);
+        if(!authority){
+          try{authority=describe(source(db,owner,conversationId,runId,activityId,saved.asOfSeq));}
+          catch(error){if(error instanceof Error&&['activity_tool_result_not_found','activity_tool_result_source_changed','activity_tool_result_source_invalid'].includes(error.message))continue;throw error;}
+          authorities.set(saved.asOfSeq,authority);
+        }
+        if(authority.semantic!==descriptor.semantic||record.binding!==retainedNativeBinding(owner,authority.identity,saved.openSha))continue;
+        eligible.push(record);
+      }
+      // Preserve each original context; the requested history boundary never becomes an alias for stored file provenance.
+      let checked=0;
+      for(const [boundary,authority] of authorities){if(++checked%8===0)await new Promise<void>(resolve=>setImmediate(resolve));signal.throwIfAborted();if(source(db,owner,conversationId,runId,activityId,boundary).identity!==authority.identity)throw Error('activity_tool_result_source_changed');}
+      if(source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined).identity!==original.identity)throw Error('activity_tool_result_source_changed');
+      const openingSha=hash({protocol:'jot-owned-native-openings/v1',owner,activity:original.identity,records:eligible});
+      if(query.openings_sha256!==undefined&&query.openings_sha256!==openingSha||offset>eligible.length)throw Error('activity_tool_result_source_changed');
+      const selected=eligible.slice(offset,offset+8);
+      const result:ActivityNativeFileOpeningsPage={conversation_id:conversationId,run_id:runId,activity_id:activityId,tool_name:original.tool,
+        scope:'owned_opened_files',openings_sha256:openingSha,offset_openings:offset,total_openings:eligible.length,
+        ...(asOfSeq!==undefined?{as_of_seq:asOfSeq as string}:{}),
+        items:selected.map(({source:saved})=>({member_index:saved.memberIndex,path:saved.path,result_sha256:saved.resultSha,members_sha256:saved.membersSha,
+          open_sha256:saved.openSha,sha256:saved.sha256,size_bytes:saved.size,...(saved.asOfSeq!==undefined?{source_as_of_seq:saved.asOfSeq}:{})})),
+        ...(offset+selected.length<eligible.length?{next_offset_openings:offset+selected.length}:{}),execution_authorized:false};
+      sending=true;reply.raw.once('finish',cleanup);return reply.send(result);
+    }catch(error){
+      if(sending){sending=false;cleanup();}
+      if(error instanceof Error&&['native_file_retained_invalid','native_file_retained_changed'].includes(error.message))return reply.code(409).send({error:{code:'NATIVE_FILE_RETAINED_INVALID'}});
+      if(error instanceof Error&&['AbortError','TimeoutError'].includes(error.name)||/^E[A-Z]+$/.test(String((error as NodeJS.ErrnoException)?.code??'')))return reply.code(503).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_UNAVAILABLE'}});
+      throw error;
+    }finally{if(!sending)cleanup();}
+  });
   app.get('/v1/conversations/:conversationId/activities/:activityId/tool-result/members',async(request,reply)=>{
     reply.header('cache-control','private, no-store');
     const abort = new AbortController(), disconnected = () => abort.abort();
