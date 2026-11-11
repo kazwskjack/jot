@@ -1,9 +1,13 @@
+import {useApplicationLanguage} from '../jot/application-language';
+import {taskUiMessage} from './task-ui-messages';
 import React,{useEffect,useRef,useState} from 'react';
 import type {Run,ResumeReceipt} from '../jot/types';
 import {workbenchApi} from './client';
 import {taskRunCanResume,taskRunMessage,taskResumeError} from './task-run-ui.mjs';
 
 export default function TaskRunControls({run,expectedRunId,enabled,loading,onRefresh,onResumed}:{run:Run;expectedRunId:string;enabled:boolean;loading:boolean;onRefresh:()=>void;onResumed:(receipt:ResumeReceipt)=>void}){
+ const language=useApplicationLanguage();
+ const uiMessage=(value:string)=>taskUiMessage(value,language);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[accepted,setAccepted]=useState(false);
  const inFlight=useRef(false),keys=useRef(new Map<string,string>()),current=useRef<AbortController|null>(null);
  useEffect(()=>{setError('');setAccepted(false);setBusy(false);inFlight.current=false;return()=>{current.current?.abort();};},[expectedRunId]);
@@ -24,5 +28,5 @@ export default function TaskRunControls({run,expectedRunId,enabled,loading,onRef
  };
  if(run.run_id!==expectedRunId)return null;
  const message=taskRunMessage(run);
- return <div className="wb-task-resume">{message&&<p className="wb-status">{message}</p>}{error&&<p className="wb-error" role="alert">{error}</p>}{!accepted&&taskRunCanResume(run,expectedRunId,enabled)&&<><button disabled={busy||loading} onClick={()=>void resume()}>{busy?'正在恢复…':'从保存进度继续'}</button><p className="wb-hint">沿用本次执行的进度和累计额度；恢复不会新建一次触发或自动批准待确认事项。</p></>}</div>;
+ return <div lang={language} className="wb-task-resume">{message&&<p className="wb-status">{uiMessage(message)}</p>}{error&&<p className="wb-error" role="alert">{uiMessage(error)}</p>}{!accepted&&taskRunCanResume(run,expectedRunId,enabled)&&<><button disabled={busy||loading} onClick={()=>void resume()}>{uiMessage(busy?'正在恢复…':'从保存进度继续')}</button><p className="wb-hint">{uiMessage('沿用本次执行的进度和累计额度；恢复不会新建一次触发或自动批准待确认事项。')}</p></>}</div>;
 }
