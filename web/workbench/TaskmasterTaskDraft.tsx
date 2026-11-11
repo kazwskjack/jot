@@ -1,9 +1,13 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
+import {workspaceUiMessage} from './workspace-ui-messages';
 import React,{useMemo,useState} from 'react';
 import {editTaskmasterSource,taskmasterSourceTasks} from '../../packages/gateway/src/persistent-tasks/taskmaster-source';
 import TaskmasterSourceTasks from './TaskmasterSourceTasks';
 
 const blank=()=>({id:'',title:'',description:'',status:'pending',priority:'medium',details:'',dependencies:'[]'});
 export default function TaskmasterTaskDraft({content,disabled,onDraft}:{content:string;disabled:boolean;onDraft:(content:string)=>void}){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const showMessage=(value:string)=>workspaceUiMessage(value,language);
  const [open,setOpen]=useState(false),[index,setIndex]=useState<number|null>(null),[basis,setBasis]=useState<string|null>(null);
  const [fields,setFields]=useState(blank),[tag,setTag]=useState(''),[message,setMessage]=useState('');
  const source=useMemo(()=>{
@@ -35,28 +39,28 @@ export default function TaskmasterTaskDraft({content,disabled,onDraft}:{content:
    onDraft(next);setBasis(null);setMessage('任务字段已应用到原文件草稿。请继续比较修改、确认并保存。');
   }catch(error){setMessage(error instanceof Error&&error.message==='taskmaster_source_too_large'?'修改后的文件超过 1 MiB 上限。':'任务字段无效。请核对唯一 ID、标题、说明和依赖 ID 的 JSON 数组。');}
  }
- return <details open={open} onToggle={event=>setOpen(event.currentTarget.open)}>
-  <summary>Taskmaster 任务字段编辑</summary>
-  <p className="wb-hint">新增和修改作用于此逻辑文件草稿，保存使用原文件权限、会话恢复和版本比较。原文件中的其余字段会保留，JSON 通常按两空格缩进整理，接近 1 MiB 上限时使用紧凑格式。外部任务状态继续作为来源资料。</p>
-  {open&&!source&&(content.trim()?<p role="alert">当前草稿无法解析。请先在文本草稿中修正 Taskmaster JSON。</p>:<button type="button" disabled={disabled} onClick={()=>{onDraft('{\n  "tasks": []\n}\n');setBasis(null);setMessage('已初始化任务文件草稿，请继续比较修改并确认保存。');}}>初始化空任务文件草稿</button>)}
+ return <details lang={language} open={open} onToggle={event=>setOpen(event.currentTarget.open)}>
+  <summary>{t("Taskmaster 任务字段编辑","Taskmaster Task Field Editing")}</summary>
+  <p className="wb-hint">{t("新增和修改作用于此逻辑文件草稿，保存使用原文件权限、会话恢复和版本比较。原文件中的其余字段会保留，JSON 通常按两空格缩进整理，接近 1 MiB 上限时使用紧凑格式。外部任务状态继续作为来源资料。","Additions and edits affect this logical file draft. Saving uses original file permissions, session recovery and version comparison. Other fields are retained. JSON normally uses two-space indentation, with compact formatting near the 1 MiB limit. External task states remain source data.")}</p>
+  {open&&!source&&(content.trim()?<p role="alert">{t("当前草稿无法解析。请先在文本草稿中修正 Taskmaster JSON。","The current draft cannot be parsed. Correct the Taskmaster JSON in the text draft first.")}</p>:<button type="button" disabled={disabled} onClick={()=>{onDraft('{\n  "tasks": []\n}\n');setBasis(null);setMessage('已初始化任务文件草稿，请继续比较修改并确认保存。');}}>{t("初始化空任务文件草稿","Initialize Empty Task File Draft")}</button>)}
   {source&&<>
-   <button type="button" disabled={disabled} onClick={add}>新增顶层任务</button>
+   <button type="button" disabled={disabled} onClick={add}>{t("新增顶层任务","Add Top-level Task")}</button>
    <TaskmasterSourceTasks content={content} onEdit={edit} disabled={disabled}/>
-   {basis!==null&&<form onSubmit={apply} aria-label="Taskmaster 任务字段草稿">
+   {basis!==null&&<form onSubmit={apply} aria-label={t('Taskmaster 任务字段草稿','Taskmaster Task Field Draft')}>
     <fieldset disabled={disabled}>
-     <legend>{index===null?'新增任务':'修改任务'}</legend>
-     {index===null?<label>标签组 <select value={tag} onChange={event=>setTag(event.target.value)}>{source.tags.map(name=><option key={name} value={name}>{name||'未分组'}</option>)}</select></label>:<p>标签组 {tag||'未分组'}</p>}
-     <label>外部任务 ID <input required value={fields.id} readOnly={index!==null} onChange={event=>setFields({...fields,id:event.target.value})}/></label>
-     <label>标题 <input required value={fields.title} onChange={event=>setFields({...fields,title:event.target.value})}/></label>
-     <label>说明 <textarea required={index===null} value={fields.description} onChange={event=>setFields({...fields,description:event.target.value})}/></label>
-     <label>原状态 <input value={fields.status} onChange={event=>setFields({...fields,status:event.target.value})}/></label>
-     <label>优先级 <input value={fields.priority} onChange={event=>setFields({...fields,priority:event.target.value})}/></label>
-     <label>详情 <textarea value={fields.details} onChange={event=>setFields({...fields,details:event.target.value})}/></label>
-     <label>依赖 ID JSON 数组 <textarea value={fields.dependencies} onChange={event=>setFields({...fields,dependencies:event.target.value})}/></label>
-     <button type="submit">应用任务字段到原文件草稿</button>
+     <legend>{index===null?t("新增任务","Add Task"):t("修改任务","Edit Task")}</legend>
+     {index===null?<label>{t("标签组 ","Tag Group ")}<select value={tag} onChange={event=>setTag(event.target.value)}>{source.tags.map(name=><option key={name} value={name}>{name||t("未分组","Ungrouped")}</option>)}</select></label>:<p>{t("标签组 ","Tag Group ")}{tag||t("未分组","Ungrouped")}</p>}
+     <label>{t("外部任务 ID ","External Task ID ")}<input required value={fields.id} readOnly={index!==null} onChange={event=>setFields({...fields,id:event.target.value})}/></label>
+     <label>{t("标题 ","Title ")}<input required value={fields.title} onChange={event=>setFields({...fields,title:event.target.value})}/></label>
+     <label>{t("说明 ","Description ")}<textarea required={index===null} value={fields.description} onChange={event=>setFields({...fields,description:event.target.value})}/></label>
+     <label>{t("原状态 ","Original State ")}<input value={fields.status} onChange={event=>setFields({...fields,status:event.target.value})}/></label>
+     <label>{t("优先级 ","Priority ")}<input value={fields.priority} onChange={event=>setFields({...fields,priority:event.target.value})}/></label>
+     <label>{t("详情 ","Details ")}<textarea value={fields.details} onChange={event=>setFields({...fields,details:event.target.value})}/></label>
+     <label>{t("依赖 ID JSON 数组 ","Dependency ID JSON Array ")}<textarea value={fields.dependencies} onChange={event=>setFields({...fields,dependencies:event.target.value})}/></label>
+     <button type="submit">{t("应用任务字段到原文件草稿","Apply Task Fields to Original File Draft")}</button>
     </fieldset>
    </form>}
   </>}
-  {message&&<p role="status">{message}</p>}
+  {message&&<p role="status">{showMessage(message)}</p>}
  </details>;
 }
