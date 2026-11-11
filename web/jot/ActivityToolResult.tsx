@@ -1,12 +1,14 @@
+import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import NativeFileOpenings from './NativeFileOpenings';
 import NativeSearchMembers from './NativeSearchMembers';
 import ActivityToolFile from './ActivityToolFile';
-import React,{useEffect,useRef,useState} from 'react';
+import React,{lazy,Suspense,useEffect,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
 import type {ActivityToolResultPage,ActivityToolResultFile} from './types';
 
 type Target={nativeSource?:boolean;asOfSeq?:string;runId:string;activityId:string;toolName:string;offset?:number;resultSha?:string;textSha?:string;match?:{offset:number;text:string}};
 const sha=/^[a-f0-9]{64}$/;
+const McpResultContent=lazy(()=>import('./McpResultContent'));
 
 export default function ActivityToolResult({conversationId,target}:{conversationId:string;target:Target}){
  const owner=taskDraftScope(),sourceIdentity=JSON.stringify([owner,conversationId,target]);
@@ -15,6 +17,7 @@ export default function ActivityToolResult({conversationId,target}:{conversation
  const [cursor,setCursor]=useState<{identity:string;offset:number;previous:number[];sha?:string;textSha?:string}>({identity,offset:target.offset??0,previous:[],sha:target.resultSha,textSha:target.textSha});
  const [state,setState]=useState<{identity:string;offset:number;page?:ActivityToolResultPage;error?:string}>();
  const [revision,setRevision]=useState(0);
+ const [richSource,setRichSource]=useState<{identity:string;sha:string}>();
  const [membersIdentity,setMembersIdentity]=useState<string>(),[openingsIdentity,setOpeningsIdentity]=useState<string>();
  const [selected,setSelected]=useState<{identity:string;resultSha:string;file:ActivityToolResultFile}>();
  const currentCursor:typeof cursor=cursor.identity===identity?cursor:{identity,offset:json?0:target.offset??0,previous:[],sha:target.resultSha,textSha:json?undefined:target.textSha};
@@ -73,6 +76,9 @@ export default function ActivityToolResult({conversationId,target}:{conversation
    const nextJson=!json;setJsonSource(nextJson?sourceIdentity:undefined);
    setCursor({identity:JSON.stringify([sourceIdentity,nextJson?'json':'text']),offset:nextJson?0:target.offset??0,previous:[],sha:page?.result_sha256??expected,...(!nextJson&&target.textSha?{textSha:target.textSha}:{})});
   }}>{json?'返回工具文本视图':'查看原始结果JSON'}</button>}
+  {!target.nativeSource&&(page?.source==='mcp'||richSource?.identity===sourceIdentity)&&<button type="button" data-chat-search-ignore aria-expanded={richSource?.identity===sourceIdentity}
+   onClick={()=>{if(richSource?.identity===sourceIdentity)setRichSource(undefined);else if(page?.source==='mcp')setRichSource({identity:sourceIdentity,sha:page.result_sha256});}}>{richSource?.identity===sourceIdentity?'关闭结果内容项':'查看内嵌文件与结果项'}</button>}
+  {richSource?.identity===sourceIdentity&&<ConversationDisplayBoundary key={richSource.sha} label="原结果内容项"><Suspense fallback={<p role="status">正在载入结果内容查看器…</p>}><McpResultContent source={{conversationId,runId:target.runId,activityId:target.activityId,toolName:target.toolName,resultSha:richSource.sha}}/></Suspense></ConversationDisplayBoundary>}
   {json&&<p>原始JSON可能包含非文本结果的编码数据，按同一原工具结果保存的内容分页显示。</p>}
   {(target.toolName==='glob'||target.toolName==='grep')&&<>
    <button type="button" data-chat-search-ignore aria-expanded={membersIdentity===identity} onClick={()=>{setOpeningsIdentity(undefined);setMembersIdentity(membersIdentity===identity?undefined:identity);}}>{membersIdentity===identity?'关闭文件成员':'查看文件成员'}</button>

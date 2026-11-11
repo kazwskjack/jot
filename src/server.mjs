@@ -120,7 +120,7 @@ export async function buildServer(options={}){
           .send(data.toString('utf8').replaceAll('__JOT_DOCX_NONCE__',nonce).replaceAll('__JOT_OFFICE_NONCE__',nonce));
       }
       const ext=path.split('.').pop(),types={html:'text/html',js:'application/javascript',css:'text/css',svg:'image/svg+xml'};
-      return reply.header('Content-Type',types[ext]??'application/octet-stream').header('Content-Security-Policy',`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; frame-src 'self' ${officeOrigin(host)}; object-src 'none'; frame-ancestors 'none'`).send(data);
+      return reply.header('Content-Type',types[ext]??'application/octet-stream').header('Content-Security-Policy',`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; frame-src 'self' ${officeOrigin(host)}; object-src 'none'; frame-ancestors 'none'`).send(data);
     }catch{return reply.code(404).send('Run npm run build before opening the interface.');}
   });
   let closing;
