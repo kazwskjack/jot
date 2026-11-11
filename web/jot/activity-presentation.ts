@@ -179,13 +179,13 @@ export function activityTreeProgress(rows:ActivityRow[],run?:ActivityRun){
  return {total,descendants};
 }
 
-export function visibleActivityRows(rows:ActivityRow[],expanded:Record<string,boolean>,run?:ActivityRun){
+export function visibleActivityRows(rows:ActivityRow[],expanded:Record<string,boolean>,run?:ActivityRun,autoExpand=false){
  const visible:ActivityRow[]=[];
  let hiddenDepth:number|undefined;
  for(const row of rows){
   if(hiddenDepth!==undefined&&row.depth>hiddenDepth)continue;
   hiddenDepth=undefined;visible.push(row);
-  if(!(expanded[row.activity.activity_id]??activityIsActive(row.activity,run)))hiddenDepth=row.depth;
+  if(!(expanded[row.activity.activity_id]??(autoExpand||activityIsActive(row.activity,run))))hiddenDepth=row.depth;
  }
  return visible;
 }

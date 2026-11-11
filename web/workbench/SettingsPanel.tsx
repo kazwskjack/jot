@@ -3,6 +3,7 @@ import type {Caps,HostAdminClient,HostOnboardingSnapshot,HostReadinessResponse,H
 import {taskDraftScope} from '../jot/client';
 import {createHostSettingsSaveAttempt,hostSettingsSaveCommand} from './host-settings-save-attempt.mjs';
 import {createHostSettingsRecovery} from './host-settings-recovery.mjs';
+import {useToolDisplayPreference} from '../jot/useToolDisplayPreference';
 import HostCredentialsPanel from './HostCredentialsPanel';
 import PluginProfilesPanel from './PluginProfilesPanel';
 import HostReadinessPanel from './HostReadinessPanel';
@@ -27,6 +28,7 @@ function conflictVersion(error:unknown){
  return null;
 }
 export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminClient}){
+ const toolDisplay=useToolDisplayPreference();
  const readinessEnabled=hostCapabilityEnabled(caps,'host_readiness');
  const settingsNamespace=typeof caps.workbench?.host_settings_write_namespace==='string'&&/^[a-z][a-z0-9._-]{0,127}$/.test(caps.workbench.host_settings_write_namespace)&&caps.workbench.host_settings_write_namespace!=='jot-host-policy'?caps.workbench.host_settings_write_namespace:null;
  const settingsEnabled=hostCapabilityEnabled(caps,'host_settings')&&settingsNamespace!==null;
@@ -185,6 +187,12 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
   <h2>模型、凭据与安装设置</h2>
   <p className="wb-page-intro">查看模型目录、宿主状态及凭据入口，管理当前 Host profile 的设置与插件包。</p>
   <div className="wb-settings-grid">
+   <section className="wb-form" aria-labelledby="wb-tool-display">
+    <h3 id="wb-tool-display">会话显示</h3>
+    <label className="wb-checkbox"><input type="checkbox" checked={toolDisplay.enabled} disabled={!toolDisplay.available} onChange={event=>toolDisplay.setEnabled(event.currentTarget.checked)}/>自动展开工具步骤</label>
+    <p className="wb-settings-note">显示已加载的工具分组和步骤详情；手动折叠的选择会保留，工具正文和文件仍需主动打开。</p>
+    {!toolDisplay.available?<p role="status">当前账户身份尚未确认，暂不能保存偏好。</p>:!toolDisplay.persisted&&<p role="status">浏览器未保存此偏好，当前页面内的选择仍然有效，刷新后可能恢复之前的设置。</p>}
+   </section>
    {caps.workbench?.plugin_profiles===true&&<PluginProfilesPanel key={currentTaskScope} scopeKey={currentTaskScope} onPendingChange={reportPluginPending}/>}
    {settingsReadEnabled&&<HostCredentialsPanel client={client} scopeKey={currentTaskScope}/>}
    <HostReadinessPanel enabled={readinessEnabled} namespaces={caps.workbench?.host_settings_read_namespaces} client={client} jotCapabilities={caps} scopeKey={currentTaskScope} onReadiness={setReadiness}/>
