@@ -1,3 +1,4 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
 import React,{useCallback,useEffect,useState} from 'react';
 import {useResource} from '../workbench/useResource';
 import {request} from './client';
@@ -7,6 +8,7 @@ import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import type {NativeMemberExecution,NativeMemberExecutionPage,NativeMemberParentRun,NativeMemberParentPage} from './types';
 
 export default function NativeMemberHistory({conversationId}:{conversationId:string}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const [open,setOpen]=useState(false),[selection,setSelection]=useState<NativeMemberParentRun|null>(null);
  const [parentCursors,setParentCursors]=useState<Array<NativeMemberParentRun|undefined>>([undefined]),[parentPage,setParentPage]=useState(0);
  const [cursors,setCursors]=useState<Array<string|undefined>>([undefined]),[page,setPage]=useState(0);
@@ -49,44 +51,44 @@ export default function NativeMemberHistory({conversationId}:{conversationId:str
   const source=parentData?.items.find(run=>run.run_id===id);
   if(source){setSelection(source);reset();}
  };
- return <section className="jot-native-member-history" aria-label="原生成员执行历史">
-  <button type="button" aria-expanded={open} onClick={()=>setOpen(value=>!value)}>{open?'收起成员执行历史':'查看成员执行历史'}</button>
+ return <section lang={language} className="jot-native-member-history" aria-label={t("原生成员执行历史","Native Member Execution History")}>
+  <button type="button" aria-expanded={open} onClick={()=>setOpen(value=>!value)}>{open?t('收起成员执行历史','Collapse Member Execution History'):t('查看成员执行历史','View Member Execution History')}</button>
   {open&&<>
-   <label>原会话父运行 <select value={rootRunId} disabled={parents.loading} onChange={event=>changeRoot(event.currentTarget.value)}>
-    <option value="" disabled>选择父运行</option>
+   <label>{t('原会话父运行','Original Conversation Parent Run')} <select value={rootRunId} disabled={parents.loading} onChange={event=>changeRoot(event.currentTarget.value)}>
+    <option value="" disabled>{t('选择父运行','Select Parent Run')}</option>
     {selection&&selection.conversation_id===conversationId&&!parentData?.items.some(run=>run.run_id===selection.run_id)&&<option value={selection.run_id}>{selection.created_at} · {selection.status} · {selection.run_id}</option>}
     {parentData?.items.map(run=><option key={run.run_id} value={run.run_id}>{run.created_at} · {run.status} · {run.run_id}</option>)}
    </select></label>
-   <button type="button" disabled={parents.loading} onClick={()=>{setParentPage(0);setParentCursors([undefined]);parents.reload();}}>刷新父运行历史</button>
-   {parents.loading&&<p role="status">正在读取原会话的父运行记录…</p>}
-   {parents.error&&<p role="alert">父运行历史暂不可用或权限已更新，可刷新重试。</p>}
-   {!parents.loading&&!parents.error&&parentData&&!parentData.items.length&&<p role="status">当前页没有包含已发布成员的父运行。</p>}
-   <nav aria-label="父运行历史翻页">
-    <button type="button" disabled={parents.loading||parentPage===0} onClick={()=>setParentPage(parentPage-1)}>较新父运行</button><span>第 {parentPage+1} 页父运行</span>
+   <button type="button" disabled={parents.loading} onClick={()=>{setParentPage(0);setParentCursors([undefined]);parents.reload();}}>{t('刷新父运行历史','Refresh Parent Run History')}</button>
+   {parents.loading&&<p role="status">{t('正在读取原会话的父运行记录…','Reading parent runs from the original conversation…')}</p>}
+   {parents.error&&<p role="alert">{t('父运行历史暂不可用或权限已更新，可刷新重试。','Parent run history is unavailable or permissions have changed. Refresh to retry.')}</p>}
+   {!parents.loading&&!parents.error&&parentData&&!parentData.items.length&&<p role="status">{t('当前页没有包含已发布成员的父运行。','This page has no parent runs containing published members.')}</p>}
+   <nav aria-label={t('父运行历史翻页','Parent Run History Pages')}>
+    <button type="button" disabled={parents.loading||parentPage===0} onClick={()=>setParentPage(parentPage-1)}>{t('较新父运行','Newer Parent Runs')}</button><span>{t(`第 ${parentPage+1} 页父运行`,`Parent Runs Page ${parentPage+1}`)}</span>
     <button type="button" disabled={parents.loading||!parentData?.next_cursor} onClick={()=>{
      const last=parentData?.items.at(-1);if(!last||parentData?.next_cursor!==last.run_id)return;
      setParentCursors(prior=>[...prior.slice(0,parentPage+1),last]);setParentPage(parentPage+1);
-    }}>更早父运行</button>
+    }}>{t('更早父运行','Earlier Parent Runs')}</button>
    </nav>
-   <button type="button" disabled={!rootRunId||resource.loading} onClick={()=>{reset();resource.reload();}}>刷新成员历史</button>
-   {resource.loading&&<p role="status">正在读取已发布的原成员执行记录…</p>}
-   {resource.error&&<p role="alert">成员执行历史暂不可用或权限已更新，可刷新重试。</p>}
+   <button type="button" disabled={!rootRunId||resource.loading} onClick={()=>{reset();resource.reload();}}>{t('刷新成员历史','Refresh Member History')}</button>
+   {resource.loading&&<p role="status">{t('正在读取已发布的原成员执行记录…','Reading published original member execution records…')}</p>}
+   {resource.error&&<p role="alert">{t('成员执行历史暂不可用或权限已更新，可刷新重试。','Member execution history is unavailable or permissions have changed. Refresh to retry.')}</p>}
    {!!rootRunId&&!resource.loading&&!resource.error&&pageData&&<>
-    {!pageData.items.length&&<p role="status">当前页没有已发布的成员执行记录。</p>}
+    {!pageData.items.length&&<p role="status">{t('当前页没有已发布的成员执行记录。','This page has no published member execution records.')}</p>}
     <ul>{pageData.items.map(source=><li key={source.child_run_id}>
      <button type="button" aria-pressed={selected?.child_run_id===source.child_run_id} onClick={()=>setSelected(source)}>
       {source.child_session_ref} · {source.child_status} · {source.child_run_id}
      </button>
     </li>)}</ul>
-    <nav aria-label="成员执行历史翻页">
-     <button type="button" disabled={page===0} onClick={()=>{setPage(page-1);setSelected(null);}}>上一页执行</button><span>第 {page+1} 页</span>
+    <nav aria-label={t('成员执行历史翻页','Member Execution History Pages')}>
+     <button type="button" disabled={page===0} onClick={()=>{setPage(page-1);setSelected(null);}}>{t('上一页执行','Previous Execution Page')}</button><span>{t(`第 ${page+1} 页`,`Page ${page+1}`)}</span>
      <button type="button" disabled={!pageData.next_cursor} onClick={()=>{
       const next=pageData?.next_cursor;if(!next)return;
       setCursors(prior=>[...prior.slice(0,page+1),next]);setPage(page+1);setSelected(null);
-     }}>下一页执行</button>
+     }}>{t('下一页执行','Next Execution Page')}</button>
     </nav>
    </>}
-   {selected&&selected.root_run_id===rootRunId&&<ConversationDisplayBoundary label="历史成员步骤">
+   {selected&&selected.root_run_id===rootRunId&&<ConversationDisplayBoundary label={t("历史成员步骤","Historical Member Steps")}>
     <NativeMemberDetails key={selected.child_run_id} rootRunId={rootRunId} childSessionRef={selected.child_session_ref} childRunId={selected.child_run_id} initialOpen/>
    </ConversationDisplayBoundary>}
   </>}

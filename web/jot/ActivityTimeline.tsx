@@ -95,7 +95,7 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,
      {row.issue&&<p role="status" data-chat-search-ignore>{activityUiText(row.issue,language)}</p>}
      {isExpanded&&<>
       {status==='unknown'&&activity.status!=='unknown'&&<p role="status" data-chat-search-ignore>{t('所属运行已结束，此步骤尚无终态回执。','The owning run has ended; this step has no terminal receipt yet.')}</p>}
-      {activity.kind==='subagent'&&activity.detail.todo_input&&<div lang="zh-CN"><NativeTodoInputContent value={activity.detail.todo_input} sourceKey={activityTodoSourceKey(activity)} {...(reveal?.activityId===activity.activity_id?{reveal}:{})}/></div>}
+      {activity.kind==='subagent'&&activity.detail.todo_input&&<div lang={language}><NativeTodoInputContent value={activity.detail.todo_input} sourceKey={activityTodoSourceKey(activity)} {...(reveal?.activityId===activity.activity_id?{reveal}:{})}/></div>}
       <dl>{activityDetailRows(activity,language).map((detail,index)=><React.Fragment key={index}><dt>{detail.label}</dt><dd style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{detail.value}</dd></React.Fragment>)}</dl>
       {typeof activity.detail.tool_name==='string'&&(activity.detail.tool_name==='jot_workspace'||/^jot_mcp_[a-z0-9_]{1,50}$/.test(activity.detail.tool_name)
        ||(activity.kind==='search'||activity.kind==='subagent')&&['glob','grep'].includes(activity.detail.tool_name)&&activity.detail.file_search)&&<button type="button" data-chat-search-ignore onClick={()=>onOpenToolResult(activity)}>{t('查看工具结果正文','View Tool Result Body')}</button>}

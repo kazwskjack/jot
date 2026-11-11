@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {useResource} from '../workbench/useResource';
 import {ApiError,abortableDelay,follow,request,taskDraftScope} from './client';
@@ -12,6 +14,7 @@ import type {Activity,NativeMemberExecution,Run} from './types';
 
 type View={source:NativeMemberExecution};
 function MemberTimeline({view,onOpenMember}:{view:View;onOpenMember:(target:NativeMemberTarget)=>void}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const [history,setHistory]=useState<Activity[]|null>(null);
  const retainHistory=useCallback((values:Activity[])=>setHistory(values),[]);
  const region=useRef<HTMLElement>(null),[historyRequest,setHistoryRequest]=useState(1),[activityReveal,setActivityReveal]=useState<ActivityReveal>();
@@ -73,25 +76,26 @@ function MemberTimeline({view,onOpenMember}:{view:View;onOpenMember:(target:Nati
   return [...merged.values()].filter(activity=>activity.run_id===view.source.child_run_id);
  },[history,live,view.source.child_run_id]);
  const runs=useMemo(()=>({[view.source.child_run_id]:{status:observedRun.status}}),[view.source.child_run_id,observedRun.status]);
- return <section ref={region} data-chat-search-scope aria-label="所选原成员公开步骤">
-  <p>子运行 <code>{view.source.child_run_id}</code> · {observedRun.status} · 版本 {observedRun.version}</p>
-  <p>原父运行 <code>{view.source.root_run_id}</code> · 角色 <code>{view.source.role_ref}</code></p>
-  <small>历史读取边界 {view.source.child_as_of_seq}，更新固定到所选子运行。</small>
-  <button type="button" aria-pressed={following} onClick={()=>setFollowing(value=>!value)}>{following?'暂停实时更新':'继续实时更新'}</button>
-  {streamIssue&&<p role="status">{streamIssue}</p>}
-  <ConversationDisplayBoundary label="成员步骤搜索"><ConversationHistorySearch scope="activities" conversationId={view.source.child_conversation_id} runId={view.source.child_run_id} root={region} activities={activities}
+ return <section lang={language} ref={region} data-chat-search-scope aria-label={t("所选原成员公开步骤","Selected Original Member Public Steps")}>
+  <p>{t('子运行','Child Run')} <code>{view.source.child_run_id}</code> · {observedRun.status} · {t('版本','Version')} {observedRun.version}</p>
+  <p>{t('原父运行','Original Parent Run')} <code>{view.source.root_run_id}</code> · {t('角色','Role')} <code>{view.source.role_ref}</code></p>
+  <small>{t(`历史读取边界 ${view.source.child_as_of_seq}，更新固定到所选子运行。`,`Historical read boundary ${view.source.child_as_of_seq}. Updates are scoped to the selected child run.`)}</small>
+  <button type="button" aria-pressed={following} onClick={()=>setFollowing(value=>!value)}>{following?t('暂停实时更新','Pause Live Updates'):t('继续实时更新','Continue Live Updates')}</button>
+  {streamIssue&&<p role="status">{conversationUiError(streamIssue,language)}</p>}
+  <ConversationDisplayBoundary label={t('成员步骤搜索','Member Step Search')}><ConversationHistorySearch scope="activities" conversationId={view.source.child_conversation_id} runId={view.source.child_run_id} root={region} activities={activities}
    runs={runs} onRevealActivity={revealActivity} onLoadActivityHistory={loadHistory} activityHistorySeq={view.source.child_as_of_seq} resultSearchSeq={cursor.current}
    renderedRevision={activities} ready/></ConversationDisplayBoundary>
-  <ConversationDisplayBoundary label="成员步骤历史"><ActivityHistory conversationId={view.source.child_conversation_id}
+  <ConversationDisplayBoundary label={t('成员步骤历史','Member Step History')}><ActivityHistory conversationId={view.source.child_conversation_id}
    runId={view.source.child_run_id} snapshotSeq={view.source.child_as_of_seq} requestVersion={historyRequest} onLoaded={retainHistory}/></ConversationDisplayBoundary>
-  <ConversationDisplayBoundary label="成员交互历史"><InteractionHistory key={view.source.child_run_id} conversationId={view.source.child_conversation_id} runId={view.source.child_run_id}/></ConversationDisplayBoundary>
-  <ConversationDisplayBoundary label="成员时间线"><ActivityTimeline conversationId={view.source.child_conversation_id} activities={activities} runs={runs} onOpenMember={onOpenMember} {...(activityReveal?{reveal:activityReveal}:{})}/></ConversationDisplayBoundary>
-  {history!==null&&!activities.length&&<p role="status">此子运行暂未记录公开工具步骤。</p>}
+  <ConversationDisplayBoundary label={t('成员交互历史','Member Interaction History')}><div lang="zh-CN"><InteractionHistory key={view.source.child_run_id} conversationId={view.source.child_conversation_id} runId={view.source.child_run_id}/></div></ConversationDisplayBoundary>
+  <ConversationDisplayBoundary label={t('成员时间线','Member Timeline')}><ActivityTimeline conversationId={view.source.child_conversation_id} activities={activities} runs={runs} onOpenMember={onOpenMember} {...(activityReveal?{reveal:activityReveal}:{})}/></ConversationDisplayBoundary>
+  {history!==null&&!activities.length&&<p role="status">{t('此子运行暂未记录公开工具步骤。','No public tool steps have been recorded for this child run yet.')}</p>}
  </section>;
 }
 
 type MemberTarget={root_run_id:string;child_session_ref:string;child_run_id?:string};
 function MemberExecutionView({target,onOpenMember}:{target:MemberTarget;onOpenMember:(target:NativeMemberTarget,from:NativeMemberExecution)=>void}){
+ const t=useApplicationText();
  const owner=taskDraftScope();
  const resource=useResource<View>(async signal=>{
   const source=await request<NativeMemberExecution>(`/runs/${encodeURIComponent(target.root_run_id)}/native-members/${encodeURIComponent(target.child_session_ref)}/execution${target.child_run_id?`?child_run_id=${encodeURIComponent(target.child_run_id)}`:''}`,'GET',undefined,undefined,signal);
@@ -101,15 +105,16 @@ function MemberExecutionView({target,onOpenMember}:{target:MemberTarget;onOpenMe
   return {source};
  },JSON.stringify([owner,target]),true);
  return <>
-  <button type="button" disabled={resource.loading} onClick={resource.reload}>刷新原成员记录</button>
-  {resource.loading&&<p role="status">正在读取原成员绑定和步骤…</p>}
-  {resource.error&&<p role="alert">成员记录暂不可用或权限已更新，可刷新重试。</p>}
+  <button type="button" disabled={resource.loading} onClick={resource.reload}>{t('刷新原成员记录','Refresh Original Member Record')}</button>
+  {resource.loading&&<p role="status">{t('正在读取原成员绑定和步骤…','Reading original member binding and steps…')}</p>}
+  {resource.error&&<p role="alert">{t('成员记录暂不可用或权限已更新，可刷新重试。','The member record is unavailable or permissions have changed. Refresh to retry.')}</p>}
   {!resource.loading&&!resource.error&&resource.data&&<MemberTimeline key={`${resource.data.source.child_run_id}:${resource.data.source.child_as_of_seq}`} view={resource.data}
    onOpenMember={target=>onOpenMember(target,resource.data!.source)}/>}
  </>;
 }
 
 export default function NativeMemberDetails({rootRunId,childSessionRef,childRunId,initialOpen=false}:{rootRunId:string;childSessionRef:string;childRunId?:string;initialOpen?:boolean}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),base:MemberTarget={root_run_id:rootRunId,child_session_ref:childSessionRef,...(childRunId?{child_run_id:childRunId}:{})};
  const identity=JSON.stringify([owner,base]),[open,setOpen]=useState(initialOpen);
  const [navigation,setNavigation]=useState<{identity:string;current:NativeMemberTarget;first:NativeMemberTarget;back:NativeMemberTarget[];trimmed:boolean}>();
@@ -125,16 +130,16 @@ export default function NativeMemberDetails({rootRunId,childSessionRef,childRunI
   const back=[...(current?.back??[]),prior];setError(undefined);
   setNavigation({identity,current:{root_run_id:next.root_run_id,child_session_ref:next.child_session_ref,child_run_id:next.child_run_id},first:current?.first??prior,back:back.slice(-32),trimmed:!!current?.trimmed||back.length>32});
  };
- return <section lang="zh-CN" className="jot-native-member-details" aria-label="原成员执行记录">
-  <button type="button" aria-expanded={open} onClick={()=>setOpen(value=>!value)}>{open?'收起原成员步骤':'查看原成员步骤'}</button>
+ return <section lang={language} className="jot-native-member-details" aria-label={t("原成员执行记录","Original Member Execution Record")}>
+  <button type="button" aria-expanded={open} onClick={()=>setOpen(value=>!value)}>{open?t('收起原成员步骤','Collapse Original Member Steps'):t('查看原成员步骤','View Original Member Steps')}</button>
   {open&&<>
-   {current&&<nav aria-label="成员执行返回位置" data-chat-search-ignore>
-    <button type="button" disabled={!current.back.length} onClick={()=>{setError(undefined);const previous=current.back.at(-1);if(previous)setNavigation({...current,current:previous,back:current.back.slice(0,-1)});}}>返回上一条成员记录</button>
-    <button type="button" onClick={()=>{setError(undefined);setNavigation({...current,current:current.first,back:[],trimmed:false});}}>返回最初成员记录</button>
-    {current.trimmed&&<small>保留最近32个返回位置，可随时返回最初成员记录。</small>}
+   {current&&<nav aria-label={t("成员执行返回位置","Member Execution Return Locations")} data-chat-search-ignore>
+    <button type="button" disabled={!current.back.length} onClick={()=>{setError(undefined);const previous=current.back.at(-1);if(previous)setNavigation({...current,current:previous,back:current.back.slice(0,-1)});}}>{t('返回上一条成员记录','Return to Previous Member Record')}</button>
+    <button type="button" onClick={()=>{setError(undefined);setNavigation({...current,current:current.first,back:[],trimmed:false});}}>{t('返回最初成员记录','Return to First Member Record')}</button>
+    {current.trimmed&&<small>{t('保留最近32个返回位置，可随时返回最初成员记录。','The 32 most recent return locations are retained. You can return to the first member record at any time.')}</small>}
    </nav>}
-   {error?.identity===identity&&<p role="alert">{error.text}</p>}
-   <ConversationDisplayBoundary key={JSON.stringify([identity,target])} label="当前成员执行"><MemberExecutionView target={target} onOpenMember={enter}/></ConversationDisplayBoundary>
+   {error?.identity===identity&&<p role="alert">{conversationUiError(error.text,language)}</p>}
+   <ConversationDisplayBoundary key={JSON.stringify([identity,target])} label={t('当前成员执行','Current Member Execution')}><MemberExecutionView target={target} onOpenMember={enter}/></ConversationDisplayBoundary>
   </>}
  </section>;
 }

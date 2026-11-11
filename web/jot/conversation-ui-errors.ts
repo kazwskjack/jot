@@ -1,6 +1,15 @@
 // Fixed owned conversation UI failures; unknown/raw content stays unchanged.
 import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
 const english:Record<string,string>={
+ "成员更新来源尚未确认，请刷新原成员记录。": "The member update source is unconfirmed. Refresh the original member record.",
+ "成员更新出现记录间隙，请刷新原成员记录。": "Member updates contain a record gap. Refresh the original member record.",
+ "成员步骤身份尚未确认，请刷新原成员记录。": "The member step identity is unconfirmed. Refresh the original member record.",
+ "成员运行身份尚未确认，请刷新原成员记录。": "The member run identity is unconfirmed. Refresh the original member record.",
+ "成员更新格式尚未确认，请刷新原成员记录。": "The member update format is unconfirmed. Refresh the original member record.",
+ "成员更新权限或历史范围已变化，请刷新原成员记录。": "Member update permissions or history scope have changed. Refresh the original member record.",
+ "成员更新连接中断，正在从原序号重连。": "The member update connection was interrupted. Reconnecting from the original sequence.",
+ "下一层成员与当前执行来源尚未确认，请刷新原成员记录。": "The next member level and current execution source are unconfirmed. Refresh the original member record.",
+ "成员执行关联形成循环，已保留当前记录。": "Member execution links form a cycle. The current record is retained.",
  "公开步骤历史序号尚未确认": "The public step-history sequence is unconfirmed.",
  "公开步骤历史结果尚未确认": "The public step-history result is unconfirmed.",
  "公开步骤历史区间尚未确认": "The public step-history interval is unconfirmed.",
