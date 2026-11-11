@@ -1,7 +1,7 @@
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {useResource} from '../workbench/useResource';
-import {ApiError,abortableDelay,follow,request} from './client';
-import {parseNativeMemberExecution} from './native-member-execution';
+import {ApiError,abortableDelay,follow,request,taskDraftScope} from './client';
+import {parseNativeMemberExecution,type NativeMemberTarget} from './native-member-execution';
 import ActivityHistory from './ActivityHistory';
 import InteractionHistory from './InteractionHistory';
 import ActivityTimeline from './ActivityTimeline';
@@ -11,7 +11,7 @@ import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import type {Activity,NativeMemberExecution,Run} from './types';
 
 type View={source:NativeMemberExecution};
-function MemberTimeline({view}:{view:View}){
+function MemberTimeline({view,onOpenMember}:{view:View;onOpenMember:(target:NativeMemberTarget)=>void}){
  const [history,setHistory]=useState<Activity[]|null>(null);
  const retainHistory=useCallback((values:Activity[])=>setHistory(values),[]);
  const region=useRef<HTMLElement>(null),[historyRequest,setHistoryRequest]=useState(1),[activityReveal,setActivityReveal]=useState<ActivityReveal>();
@@ -85,26 +85,56 @@ function MemberTimeline({view}:{view:View}){
   <ConversationDisplayBoundary label="成员步骤历史"><ActivityHistory conversationId={view.source.child_conversation_id}
    runId={view.source.child_run_id} snapshotSeq={view.source.child_as_of_seq} requestVersion={historyRequest} onLoaded={retainHistory}/></ConversationDisplayBoundary>
   <ConversationDisplayBoundary label="成员交互历史"><InteractionHistory key={view.source.child_run_id} conversationId={view.source.child_conversation_id} runId={view.source.child_run_id}/></ConversationDisplayBoundary>
-  <ConversationDisplayBoundary label="成员时间线"><ActivityTimeline conversationId={view.source.child_conversation_id} activities={activities} runs={runs} {...(activityReveal?{reveal:activityReveal}:{})}/></ConversationDisplayBoundary>
+  <ConversationDisplayBoundary label="成员时间线"><ActivityTimeline conversationId={view.source.child_conversation_id} activities={activities} runs={runs} onOpenMember={onOpenMember} {...(activityReveal?{reveal:activityReveal}:{})}/></ConversationDisplayBoundary>
   {history!==null&&!activities.length&&<p role="status">此子运行暂未记录公开工具步骤。</p>}
  </section>;
 }
 
-export default function NativeMemberDetails({rootRunId,childSessionRef,childRunId,initialOpen=false}:{rootRunId:string;childSessionRef:string;childRunId?:string;initialOpen?:boolean}){
- const [open,setOpen]=useState(initialOpen);
+type MemberTarget={root_run_id:string;child_session_ref:string;child_run_id?:string};
+function MemberExecutionView({target,onOpenMember}:{target:MemberTarget;onOpenMember:(target:NativeMemberTarget,from:NativeMemberExecution)=>void}){
+ const owner=taskDraftScope();
  const resource=useResource<View>(async signal=>{
-  const source=await request<NativeMemberExecution>(`/runs/${encodeURIComponent(rootRunId)}/native-members/${encodeURIComponent(childSessionRef)}/execution${childRunId?`?child_run_id=${encodeURIComponent(childRunId)}`:''}`,'GET',undefined,undefined,signal);
+  const source=await request<NativeMemberExecution>(`/runs/${encodeURIComponent(target.root_run_id)}/native-members/${encodeURIComponent(target.child_session_ref)}/execution${target.child_run_id?`?child_run_id=${encodeURIComponent(target.child_run_id)}`:''}`,'GET',undefined,undefined,signal);
   parseNativeMemberExecution(source);
-  if(source.root_run_id!==rootRunId||source.child_session_ref!==childSessionRef||(childRunId!==undefined&&source.child_run_id!==childRunId))throw Error('原成员执行身份尚未确认');
+  if(taskDraftScope()!==owner||source.root_run_id!==target.root_run_id||source.child_session_ref!==target.child_session_ref
+    ||target.child_run_id!==undefined&&source.child_run_id!==target.child_run_id)throw Error('原成员执行身份尚未确认');
   return {source};
- },JSON.stringify([rootRunId,childSessionRef,childRunId??null]),open);
+ },JSON.stringify([owner,target]),true);
+ return <>
+  <button type="button" disabled={resource.loading} onClick={resource.reload}>刷新原成员记录</button>
+  {resource.loading&&<p role="status">正在读取原成员绑定和步骤…</p>}
+  {resource.error&&<p role="alert">成员记录暂不可用或权限已更新，可刷新重试。</p>}
+  {!resource.loading&&!resource.error&&resource.data&&<MemberTimeline key={`${resource.data.source.child_run_id}:${resource.data.source.child_as_of_seq}`} view={resource.data}
+   onOpenMember={target=>onOpenMember(target,resource.data!.source)}/>}
+ </>;
+}
+
+export default function NativeMemberDetails({rootRunId,childSessionRef,childRunId,initialOpen=false}:{rootRunId:string;childSessionRef:string;childRunId?:string;initialOpen?:boolean}){
+ const owner=taskDraftScope(),base:MemberTarget={root_run_id:rootRunId,child_session_ref:childSessionRef,...(childRunId?{child_run_id:childRunId}:{})};
+ const identity=JSON.stringify([owner,base]),[open,setOpen]=useState(initialOpen);
+ const [navigation,setNavigation]=useState<{identity:string;current:NativeMemberTarget;first:NativeMemberTarget;back:NativeMemberTarget[];trimmed:boolean}>();
+ const [error,setError]=useState<{identity:string;text:string}>();
+ const current=navigation?.identity===identity?navigation:undefined,target=current?.current??base;
+ const enter=(next:NativeMemberTarget,from:NativeMemberExecution)=>{
+  if(taskDraftScope()!==owner||from.root_run_id!==target.root_run_id||from.child_session_ref!==target.child_session_ref
+    ||target.child_run_id!==undefined&&from.child_run_id!==target.child_run_id||next.root_run_id!==from.child_run_id){setError({identity,text:'下一层成员与当前执行来源尚未确认，请刷新原成员记录。'});return;}
+  const prior:NativeMemberTarget={root_run_id:from.root_run_id,child_session_ref:from.child_session_ref,child_run_id:from.child_run_id};
+  if(next.child_run_id===prior.child_run_id||next.child_run_id===current?.first.child_run_id||current?.back.some(value=>value.child_run_id===next.child_run_id)){
+   setError({identity,text:'成员执行关联形成循环，已保留当前记录。'});return;
+  }
+  const back=[...(current?.back??[]),prior];setError(undefined);
+  setNavigation({identity,current:{root_run_id:next.root_run_id,child_session_ref:next.child_session_ref,child_run_id:next.child_run_id},first:current?.first??prior,back:back.slice(-32),trimmed:!!current?.trimmed||back.length>32});
+ };
  return <section className="jot-native-member-details" aria-label="原成员执行记录">
   <button type="button" aria-expanded={open} onClick={()=>setOpen(value=>!value)}>{open?'收起原成员步骤':'查看原成员步骤'}</button>
   {open&&<>
-   <button type="button" disabled={resource.loading} onClick={resource.reload}>刷新原成员记录</button>
-   {resource.loading&&<p role="status">正在读取原成员绑定和步骤…</p>}
-   {resource.error&&<p role="alert">成员记录暂不可用或权限已更新，可刷新重试。</p>}
-   {!resource.loading&&!resource.error&&resource.data&&<MemberTimeline key={`${resource.data.source.child_run_id}:${resource.data.source.child_as_of_seq}`} view={resource.data}/>}
+   {current&&<nav aria-label="成员执行返回位置" data-chat-search-ignore>
+    <button type="button" disabled={!current.back.length} onClick={()=>{setError(undefined);const previous=current.back.at(-1);if(previous)setNavigation({...current,current:previous,back:current.back.slice(0,-1)});}}>返回上一条成员记录</button>
+    <button type="button" onClick={()=>{setError(undefined);setNavigation({...current,current:current.first,back:[],trimmed:false});}}>返回最初成员记录</button>
+    {current.trimmed&&<small>保留最近32个返回位置，可随时返回最初成员记录。</small>}
+   </nav>}
+   {error?.identity===identity&&<p role="alert">{error.text}</p>}
+   <ConversationDisplayBoundary key={JSON.stringify([identity,target])} label="当前成员执行"><MemberExecutionView target={target} onOpenMember={enter}/></ConversationDisplayBoundary>
   </>}
  </section>;
 }
