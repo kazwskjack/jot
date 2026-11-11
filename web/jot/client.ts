@@ -2,7 +2,9 @@ import type {Snapshot,AgentEvent} from './types';
 export const base='/workbench-api';
 export class ApiError extends Error{constructor(public status:number,message:string,public data?:unknown){super(message)}}
 let csrfToken='',draftScope='';
+const draftScopeListeners=new Set<()=>void>();
 export const taskDraftScope=()=>draftScope;
+export const subscribeTaskDraftScope=(listener:()=>void)=>{draftScopeListeners.add(listener);return()=>{draftScopeListeners.delete(listener);};};
 function deadline(parent:AbortSignal|undefined,ms:number){
  const controller=new AbortController(),abort=()=>controller.abort();
  if(parent?.aborted)abort();else parent?.addEventListener('abort',abort,{once:true});
@@ -15,7 +17,7 @@ export async function request<T>(path:string,method='GET',body?:unknown,key?:str
  const timed=deadline(signal,body instanceof File?120000:timeoutMs);
  try{
  const r=await fetch(base+'/v1'+path,{method,headers,credentials:'same-origin',cache:'no-store',signal:timed.signal,body:body===undefined?undefined:body instanceof File?body:JSON.stringify(body)});
- if(path==='/capabilities'){const scope=r.headers.get('x-workbench-draft-scope')??'';draftScope=r.ok&&/^[a-f0-9]{64}$/.test(scope)?scope:'';if(r.ok)csrfToken=r.headers.get('x-csrf-token')??'';}
+ if(path==='/capabilities'){const scope=r.headers.get('x-workbench-draft-scope')??'',next=r.ok&&scope.length===64&&/^[a-f0-9]{64}$/.test(scope)?scope:'';if(r.ok)csrfToken=r.headers.get('x-csrf-token')??'';if(next!==draftScope){draftScope=next;for(const notify of [...draftScopeListeners])try{notify();}catch{}}}
  if(!r.ok){const data=await r.json().catch(()=>({}));throw new ApiError(r.status,data.error?.message??data.error?.code??`连接失败 (${r.status})`,data)}
  if(r.status===204)return undefined as T;
  const text=await r.text();return text?JSON.parse(text):undefined as T;
