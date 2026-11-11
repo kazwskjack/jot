@@ -39,9 +39,19 @@ ipcRenderer.on('desktop:command',(_event,value)=>{
  const safe=Object.freeze({protocol:1,command:value.command,owner_scope:value.owner_scope});
  for(const listener of commandListeners)try{listener(safe);}catch{}
 });
+const captionMenuIds=new Set(['menu-jot','menu-file','menu-edit','menu-view','menu-go','menu-help','all']);
+const captionMenuListeners=new Set();
+ipcRenderer.on('desktop:caption-menu',(_event,value)=>{
+ if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='id,protocol'||value.protocol!==1||(value.id!==null&&!captionMenuIds.has(value.id)))return;
+ const safe=Object.freeze({protocol:1,id:value.id});
+ for(const listener of captionMenuListeners)try{listener(safe);}catch{}
+});
 const invoke=(channel,payload)=>ipcRenderer.invoke(channel,payload);
 const bridge=Object.freeze({
  platform:process.platform,
+ showCaptionMenu:value=>invoke('menu.caption.show',value),
+ closeCaptionMenu:()=>invoke('menu.caption.close'),
+ onCaptionMenu(listener){if(typeof listener!=='function')throw TypeError('desktop_listener_invalid');captionMenuListeners.add(listener);return()=>captionMenuListeners.delete(listener);},
  setMenuState:value=>invoke('menu.state.set',value),
  onCommand(listener){if(typeof listener!=='function')throw TypeError('desktop_listener_invalid');commandListeners.add(listener);return()=>commandListeners.delete(listener);},
  selectFile:()=>invoke('dialog.selectFile'),

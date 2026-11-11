@@ -1,3 +1,4 @@
+import {createDesktopCaptionMenu} from './caption-menu.mjs';
 import {mkdir} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {tmpdir} from 'node:os';
@@ -231,8 +232,8 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
    webPreferences:desktopWebPreferences(paths.preloadPath)
   });
   mainWindow=window;
-  let commandMenu=null;
-  const resetCommandMenu=()=>commandMenu?.reset();
+  let commandMenu=null,captionMenu=null;
+  const resetCommandMenu=()=>{captionMenu?.close();commandMenu?.reset();};
   const commandNavigationStarted=(_event,_url,inPlace,mainFrame)=>{if(mainFrame===true&&inPlace!==true)resetCommandMenu();};
   const syncNotificationPermission=()=>{
    void permissionStatus().then(status=>{
@@ -263,6 +264,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   window.webContents.on('render-process-gone',renderProcessGoneHandler);
   window.on('close',event=>{if(!shuttingDown&&tray&&!tray.isDestroyed()){event.preventDefault();window.hide();}});
   commandMenu=createDesktopCommandMenu({Menu,getWindow:()=>mainWindow,appOrigin,restoreWindow,openNotificationSettings,requestQuit:()=>app.quit()});
+  if(process.platform==='win32'||process.platform==='linux')captionMenu=createDesktopCaptionMenu({owner:window,getWindow:()=>mainWindow,appOrigin,Menu,getTemplate:()=>commandMenu.template(true),getCursor:typeof electron.screen?.getCursorScreenPoint==='function'?()=>electron.screen.getCursorScreenPoint():null});
   try{
    tray=new Tray(nativeImage.createFromBuffer(buildTrayIconPng()));
    tray.setToolTip('Jot');
@@ -271,7 +273,11 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   }catch(error){report(new Error('system_tray_unavailable:'+String(error?.message??error)));}
   removeIpcHandlers=registerDesktopIpcHandlers({
    ipcMain,appOrigin,getWindow:()=>mainWindow,stateStore,notificationRuntime,
-   readPermission:permissionStatus,updateLifecycle,setMenuState:value=>commandMenu.setState(value),
+   readPermission:permissionStatus,updateLifecycle,setMenuState:value=>{
+    if(value.owner_scope!==commandMenu.getState().owner_scope||value.blocked||!value.ready)captionMenu?.close();
+    commandMenu.setState(value);
+   },
+   showCaptionMenu:captionMenu?value=>captionMenu.show(value):null,closeCaptionMenu:captionMenu?()=>captionMenu.close():null,
    selectFile:async()=>{
     const parent=mainWindow;
     if(!parent||parent.isDestroyed?.()||typeof dialog?.showOpenDialog!=='function')throw new Error('desktop_file_dialog_unavailable');
@@ -286,7 +292,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   const destroyWindow=()=>{
    if(recoveryTimer)clearTimeout(recoveryTimer);if(stableTimer)clearTimeout(stableTimer);
    window.off('focus',syncNotificationPermission);
-   commandMenu?.reset();window.webContents.off('did-start-navigation',commandNavigationStarted);
+   captionMenu?.dispose();commandMenu?.reset();window.webContents.off('did-start-navigation',commandNavigationStarted);
    window.webContents.off('did-finish-load',didFinishLoadHandler);window.webContents.off('render-process-gone',renderProcessGoneHandler);
    window.webContents.off('will-navigate',denyNavigation);window.webContents.off('will-redirect',denyNavigation);
    window.webContents.session.off('will-download',downloadHandler);

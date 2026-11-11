@@ -1,6 +1,7 @@
+import {parseCaptionMenuRequest} from './caption-menu-contract.mjs';
 import {parseDesktopMenuState} from './menu-commands.mjs';
 const notificationEvents=new Set(['changed','completed','failed','needs_confirmation']);
-const channels=new Set(['menu.state.set','notification.show','notification.dismiss','notification.state.read','notification.state.initialize','notification.permission.read','preferences.read','preferences.write','window.openTask',
+const channels=new Set(['menu.caption.show','menu.caption.close','menu.state.set','notification.show','notification.dismiss','notification.state.read','notification.state.initialize','notification.permission.read','preferences.read','preferences.write','window.openTask',
  'update.status','update.check','update.download','update.pause','update.resume','update.cancel','update.activate','dialog.selectFile']);
 const hasOwn=(value,key)=>Object.prototype.hasOwnProperty.call(value,key);
 
@@ -24,6 +25,8 @@ function taskIdentity(value,code){
 
 export function parseDesktopCommand(channel,value){
  if(typeof channel!=='string'||!channels.has(channel))fail('desktop_ipc_channel_denied');
+ if(channel==='menu.caption.show')return Object.freeze({channel,payload:parseCaptionMenuRequest(value)});
+ if(channel==='menu.caption.close'){if(value!==undefined)fail('desktop_caption_request_invalid');return Object.freeze({channel,payload:null});}
  if(channel==='menu.state.set')return Object.freeze({channel,payload:parseDesktopMenuState(value)});
  if(channel==='notification.show'){
   const code='desktop_notification_invalid';record(value,code);
