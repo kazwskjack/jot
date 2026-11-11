@@ -1,0 +1,2 @@
+/* Adapts PilotDeck 783499ff reduced-motion runtime; AGPL-3.0. */
+html[data-jot-reduced-motion="on"],html[data-jot-reduced-motion="on"] *,html[data-jot-reduced-motion="on"] *::before,html[data-jot-reduced-motion="on"] *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}

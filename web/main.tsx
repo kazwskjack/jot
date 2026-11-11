@@ -1,3 +1,4 @@
+import {prefersReducedMotion} from './jot/useInterfaceAppearance';
 import {useThemePreference,ThemeSelector} from './jot/theme-preference';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -76,7 +77,7 @@ function App(){
       }
     };void follow();return()=>controller.abort();
   },[selected]);
-  useEffect(()=>{bottom.current?.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});},[snapshot.messages.length,stream,approval]);
+  useEffect(()=>{bottom.current?.scrollIntoView({behavior:prefersReducedMotion()?'auto':'smooth'});},[snapshot.messages.length,stream,approval]);
   const running=snapshot.runs.find(active);
   const modes=standaloneModes(caps),mode=snapshot.conversation?.mode??'work',unavailable=mode==='chat'&&!modes.chatReady;
   const switchMode=()=>{if(settingsPending||running||busy||uploading||requests.current[selected]||!modes.aware||!snapshot.conversation?.version||mode==='work'&&!modes.chatReady)return;void setting('/conversations/'+encodeURIComponent(selected),'PATCH',{mode:mode==='chat'?'work':'chat',expected_version:snapshot.conversation.version});};

@@ -1,5 +1,6 @@
 // Adapts PilotDeck 783499ff ThemeContext/appearanceRuntime; AGPL-3.0.
 import {useCallback,useEffect,useLayoutEffect,useState} from 'react';
+import {useInterfaceAppearance} from './useInterfaceAppearance';
 import type {useAppearancePreferences} from './useAppearancePreferences';
 import {loadBackgroundImage} from './appearance-images';
 import {deriveLightColors,deriveLightBackgrounds,isCustomizedLightAppearance,withoutMissingImage} from '../../packages/desktop/src/light-appearance.mjs';
@@ -7,6 +8,7 @@ import './light-appearance.css';
 const names=['canvas','surface','sidebar','sidebar-ink','sidebar-accent','ink','muted','border','accent','sidebar-fill','content-fill','wallpaper','image-fit','image-position','image-blur','image-brightness','image-saturation'] as const;
 type ImageState={id:string;url:string|null;missing:boolean};
 export function useLightAppearance(theme:'light'|'dark',preferences:ReturnType<typeof useAppearancePreferences>){
+ const interfaceSettings=useInterfaceAppearance(preferences);
  const value=preferences.value.lightAppearance,id=theme==='light'&&value.background.type==='image'?value.background.imageId:null;
  const [image,setImage]=useState<ImageState|null>(null),[retry,setRetry]=useState(0);
  const imageUrl=id&&image?.id===id?image.url:null,imageMissing=!!id&&image?.id===id&&image.missing;
@@ -31,5 +33,5 @@ export function useLightAppearance(theme:'light'|'dark',preferences:ReturnType<t
   }
   return()=>{root.removeAttribute('data-jot-light-appearance');root.removeAttribute('data-jot-light-image');root.removeAttribute('data-jot-window-appearance');names.forEach(name=>root.style.removeProperty('--jot-light-'+name));};
  },[value,theme,imageUrl]);
- return {value,update:preferences.updateLight,commit:preferences.commitLight,saveFailed:!!preferences.error,retrySave:preferences.retrySave,unavailable:preferences.unavailable,pending:preferences.pending,imageUrl,imageMissing,imageLoading:!!id&&!imageUrl&&!imageMissing,imageFailed,retryImage:()=>setRetry(n=>n+1),discardImage:preferences.discardImage,cleanupFailed:preferences.cleanupFailed,cleanupPending:preferences.cleanupPending,retryCleanup:preferences.retryCleanup,recoverUnusedImages:preferences.recoverUnusedImages,recoveryPending:preferences.recoveryPending,recovery:preferences.recovery,recoveryError:preferences.recoveryError};
+ return {value,interfaceSettings,update:preferences.updateLight,commit:preferences.commitLight,saveFailed:!!preferences.error,retrySave:preferences.retrySave,unavailable:preferences.unavailable,pending:preferences.pending,imageUrl,imageMissing,imageLoading:!!id&&!imageUrl&&!imageMissing,imageFailed,retryImage:()=>setRetry(n=>n+1),discardImage:preferences.discardImage,cleanupFailed:preferences.cleanupFailed,cleanupPending:preferences.cleanupPending,retryCleanup:preferences.retryCleanup,recoverUnusedImages:preferences.recoverUnusedImages,recoveryPending:preferences.recoveryPending,recovery:preferences.recovery,recoveryError:preferences.recoveryError};
 }

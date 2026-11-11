@@ -79,6 +79,7 @@ const invoke=(channel,payload)=>ipcRenderer.invoke(channel,payload);
 const bridge=Object.freeze({
  platform:process.platform,
  getAppearance:()=>ipcRenderer.sendSync('appearance.read'),
+ getAppearanceCapabilities:()=>invoke('appearance.capabilities'),
  setAppearance:value=>invoke('appearance.write',value),
  saveAppearanceImage:bytes=>invoke('appearance.image.save',bytes),
  readAppearanceImage:id=>invoke('appearance.image.read',{id}),

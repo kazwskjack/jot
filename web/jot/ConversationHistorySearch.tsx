@@ -1,3 +1,4 @@
+import {prefersReducedMotion} from './useInterfaceAppearance';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 // Search interaction and IME handling adapted from PilotDeck 783499ff,
 // ChatHistorySearchBar.tsx/useChatHistorySearch.ts. Adapted portions are AGPL-3.0.
@@ -246,7 +247,7 @@ export default function ConversationHistorySearch(props:Props){
      container=container.parentElement;
     }
     const rect=targetRect();
-    const behavior=window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth';
+    const behavior=prefersReducedMotion()?'auto':'smooth';
     window.scrollBy({top:rect.top-window.innerHeight/2,behavior});
    }
   };

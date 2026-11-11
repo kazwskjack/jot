@@ -44,7 +44,7 @@
 .jot-voice-meter{display:flex;align-items:center;gap:8px;font-size:12px;font-variant-numeric:tabular-nums}
 .jot-voice-wave{display:flex;align-items:center;justify-content:center;gap:2px;height:28px;width:36px}
 .jot-voice-wave i{display:block;flex:0 0 3px;background:currentColor;border-radius:3px;transition:height .08s linear}
-@media(prefers-reduced-motion:reduce){.jot-voice-wave i{transition:none}}
+@media(prefers-reduced-motion:reduce){:root:not([data-jot-reduced-motion="off"]) .jot-voice-wave i{transition:none}}
 .jot-prompt-voice .jot-voice-input{position:relative;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
 .jot-prompt-voice .jot-voice-input>span[role="status"]{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .jot-prompt-voice .jot-voice-input>button{margin:0;padding:6px;border-radius:50%;font-size:12px;min-height:32px}
@@ -54,7 +54,7 @@
 .jot-prompt-drop-hint{position:absolute;inset:0;z-index:30;display:grid;place-items:center;border:2px dashed var(--accent,currentColor);border-radius:inherit;pointer-events:none;background:var(--composer-drop-bg,var(--panel,#fff))}
 @keyframes jot-prompt-menu-in{from{opacity:0;transform:translateY(6px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
 @media(max-width:540px){.jot-prompt-composer,.jot-prompt-composer[data-expanded="true"]{max-width:100%}.jot-prompt-composer[data-expanded="true"]{padding-left:12px;padding-right:8px}.jot-prompt-settings,.jot-prompt-actions{gap:2px}.jot-prompt-model-anchor{max-width:60%}.jot-prompt-setting span{max-width:120px}.jot-prompt-menu{max-width:calc(100vw - 40px)}}
-@media(prefers-reduced-motion:reduce){.jot-prompt-composer{transition:none}.jot-prompt-menu{animation:none}}
+@media(prefers-reduced-motion:reduce){:root:not([data-jot-reduced-motion="off"]) .jot-prompt-composer{transition:none}:root:not([data-jot-reduced-motion="off"]) .jot-prompt-menu{animation:none}}
 
 .jot-goal-stop-dialog{box-sizing:border-box;width:min(28rem,calc(100vw - 32px));max-width:calc(100vw - 32px);padding:18px;border:1px solid var(--line,#8885);border-radius:16px;background:var(--panel,#fff);color:var(--ink,#202020);box-shadow:0 16px 48px #0003}
 .jot-goal-stop-dialog::backdrop{background:#0006;backdrop-filter:blur(2px)}

@@ -1,4 +1,4 @@
-import {createDesktopAppearanceStore} from './appearance-storage.mjs';
+import {createDesktopAppearanceStore,configureDesktopHardware} from './appearance-storage.mjs';
 import {withoutMissingImage} from '../../packages/desktop/src/light-appearance.mjs';
 import {createDesktopDiagnosticLog} from './diagnostic-log.mjs';
 import {createDesktopHelp} from './desktop-help.mjs';
@@ -57,9 +57,14 @@ function trustedUpdateVerifier(verifier,policy,allowTestOnly){
   allowTestOnly===true&&verifier?.identity==='test-only'&&verifier.testOnly===true&&typeof verifier.verify==='function';
 }
 
+export function prepareDesktopHardware(app){
+ const paths=resolveDesktopPaths({appDataPath:app.getPath('appData'),appDirectory,projectRoot});
+ return configureDesktopHardware(app,paths.userDataPath);
+}
+
 export async function startDesktop(electron,{startLocalBackendImpl=startLocalBackend,loadJotServer=()=>import('../../src/server.mjs'),updateHostConfig=null,
  createDesktopLifecycleImpl=createDesktopLifecycle,createUpdateLifecycleImpl=createDesktopUpdateLifecycle,allowTestOnlyUpdateVerifier=false,showWindow=true,
- restoredStartupNonce=process.env.JOT_DESKTOP_RESTORED_STARTUP_NONCE??null,supervisorBootstrap=null}={}){
+ restoredStartupNonce=process.env.JOT_DESKTOP_RESTORED_STARTUP_NONCE??null,supervisorBootstrap=null,startupAppearance=null}={}){
  const {app,BrowserWindow,Menu,Tray,ipcMain,nativeImage,session,dialog}=electron??{};
  if(!app||!BrowserWindow||!Menu||!Tray||!ipcMain||!nativeImage||!session||typeof electron?.Notification!=='function')throw new Error('electron_runtime_invalid');
  app.setName('Jot');
@@ -67,6 +72,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
  const paths=resolveDesktopPaths({appDataPath:app.getPath('appData'),appDirectory,projectRoot});
  const userDataPath=paths.userDataPath;
  app.setPath('userData',userDataPath);
+ const hardwareCapabilities=startupAppearance??configureDesktopHardware(app,userDataPath);
  let hostBackend=null,supervisorProducer=null,supervisorPeer=null,supervisorDraining=false,lifecycle=null;
  let supervisorInstallRoot=null,supervisorJournal=null,supervisorProcessContext=null;
  if(supervisorBootstrap){
@@ -309,7 +315,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
     if(reset)linuxCaptionMenu?.invalidate();else linuxCaptionMenu?.refresh();
    },
    appearanceImages:{recover:()=>{const current=appearanceContext();return appearanceStore.recoverImages(current);},save:bytes=>{const current=appearanceContext();return appearanceStore.saveImage(bytes,current);},read:id=>{const current=appearanceContext();return appearanceStore.readImage(id,current);},delete:id=>{const current=appearanceContext();return appearanceStore.deleteImage(id,current);}},
-   readAppearance:()=>appearanceStore?.read()??null,writeAppearance:async request=>{
+   readAppearanceCapabilities:()=>hardwareCapabilities,readAppearance:()=>appearanceStore?.read()??null,writeAppearance:async request=>{
     if(shuttingDown||!appearanceStore)throw Error('desktop_appearance_unavailable');
     const current=appearanceContext();
     const saved=await appearanceStore.write(request,current);applySavedAppearance();return saved;

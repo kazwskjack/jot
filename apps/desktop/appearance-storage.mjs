@@ -1,5 +1,6 @@
 // Adapts PilotDeck 783499ff appearanceStorage/native preferences; AGPL-3.0.
-import {constants} from 'node:fs';
+import {constants,openSync,readSync,fstatSync,lstatSync,realpathSync,closeSync} from 'node:fs';
+import {normalizeInterfacePreferences} from '../../packages/desktop/src/interface-preferences.mjs';
 import {open,lstat,realpath,rename,unlink,mkdir,opendir} from 'node:fs/promises';
 import {isAbsolute,join} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
@@ -10,10 +11,37 @@ const mode=value=>['system','light','dark'].includes(value);
 const exact=(value,keys)=>!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===keys.slice().sort().join(',');
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const same=(a,b)=>process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
+function parseAppearance(value){
+ const keys=['version','revision','themeMode','lightAppearance'];
+ if(value?.version===2)keys.push('interfacePreferences');
+ if(!exact(value,keys)||![1,2].includes(value.version)||!Number.isSafeInteger(value.revision)||value.revision<1||!mode(value.themeMode)||
+  !value.lightAppearance||typeof value.lightAppearance!=='object'||Array.isArray(value.lightAppearance)||![1,2].includes(value.lightAppearance.version))throw Error('desktop_appearance_corrupt');
+ const interfacePreferences=normalizeInterfacePreferences(value.interfacePreferences);
+ if(value.version===2&&JSON.stringify(interfacePreferences)!==JSON.stringify(value.interfacePreferences))throw Error('desktop_appearance_corrupt');
+ return {version:2,revision:value.revision,themeMode:value.themeMode,lightAppearance:normalizeLightAppearance(value.lightAppearance),interfacePreferences};
+}
+// Electron consumes this read-only snapshot before the first startup await; all writes still require the instance owner.
+export function configureDesktopHardware(app,userDataPath){
+ if(app.isReady()||typeof app.disableHardwareAcceleration!=='function')return Object.freeze({protocol:1,hardwareAcceleration:null});
+ let hardwareAcceleration=true,handle;
+ try{
+  if(typeof userDataPath!=='string'||!isAbsolute(userDataPath))throw Error('desktop_appearance_path_invalid');
+  const directory=realpathSync(userDataPath),directoryInfo=lstatSync(directory),file=join(directory,'desktop-appearance.json');
+  if(!directoryInfo.isDirectory()||directoryInfo.isSymbolicLink())throw Error('desktop_appearance_path_unsafe');
+  const entry=lstatSync(file);if(!entry.isFile()||entry.isSymbolicLink()||entry.nlink!==1||entry.size>maxBytes)throw Error('desktop_appearance_file_unsafe');
+  handle=openSync(file,constants.O_RDONLY|noFollow|(constants.O_NONBLOCK??0));const info=fstatSync(handle);
+  if(!info.isFile()||info.nlink!==1||entry.isSymbolicLink()||info.ino!==entry.ino||info.dev!==entry.dev||info.size>maxBytes||!same(realpathSync(file),file))throw Error('desktop_appearance_file_unsafe');
+  const bytes=Buffer.alloc(maxBytes+1),length=readSync(handle,bytes,0,bytes.length,0),after=fstatSync(handle),last=lstatSync(file),dir=lstatSync(directory);
+  if(length!==info.size||after.size!==info.size||after.mtimeMs!==info.mtimeMs||last.isSymbolicLink()||last.ino!==info.ino||last.dev!==info.dev||last.size!==info.size||last.mtimeMs!==info.mtimeMs||last.nlink!==1||dir.ino!==directoryInfo.ino||dir.dev!==directoryInfo.dev||!same(realpathSync(directory),directory))throw Error('desktop_appearance_file_changed');
+  hardwareAcceleration=parseAppearance(JSON.parse(bytes.subarray(0,length).toString('utf8'))).interfacePreferences.hardwareAcceleration;
+ }catch{}finally{if(handle!==undefined)try{closeSync(handle);}catch{}}
+ if(!hardwareAcceleration)app.disableHardwareAcceleration();
+ return Object.freeze({protocol:1,hardwareAcceleration});
+}
 export async function createDesktopAppearanceStore({userDataPath,decodeImage}={}){
  if(typeof userDataPath!=='string'||!isAbsolute(userDataPath))throw Error('desktop_appearance_path_invalid');
  const directory=await realpath(userDataPath),directoryInfo=await lstat(directory),file=join(directory,'desktop-appearance.json');
- let state={version:1,revision:0,themeMode:'system',lightAppearance:normalizeLightAppearance()},stored=false,writable=true,error=null,fingerprint=null,writing=null;
+ let state={version:2,revision:0,themeMode:'system',lightAppearance:normalizeLightAppearance(),interfacePreferences:normalizeInterfacePreferences()},stored=false,writable=true,error=null,fingerprint=null,writing=null;
  const checkDirectory=async()=>{
   const info=await lstat(directory);
   if(!info.isDirectory()||info.isSymbolicLink()||info.dev!==directoryInfo.dev||info.ino!==directoryInfo.ino||!same(await realpath(directory),directory))throw Error('desktop_appearance_path_unsafe');
@@ -32,13 +60,10 @@ export async function createDesktopAppearanceStore({userDataPath,decodeImage}={}
  try{
   const bytes=await readFile();
   if(bytes){
-   const value=JSON.parse(bytes.toString('utf8'));
-   if(!exact(value,['version','revision','themeMode','lightAppearance'])||value.version!==1||!Number.isSafeInteger(value.revision)||value.revision<1||!mode(value.themeMode)||
-    !value.lightAppearance||typeof value.lightAppearance!=='object'||Array.isArray(value.lightAppearance)||![1,2].includes(value.lightAppearance.version))throw Error('desktop_appearance_corrupt');
-   state={version:1,revision:value.revision,themeMode:value.themeMode,lightAppearance:normalizeLightAppearance(value.lightAppearance)};stored=true;fingerprint=hash(bytes);
+   state=parseAppearance(JSON.parse(bytes.toString('utf8')));stored=true;fingerprint=hash(bytes);
   }
  }catch{writable=false;error='desktop_appearance_unavailable';}
- const read=()=>Object.freeze({protocol:1,revision:state.revision,stored,writable,error,themeMode:state.themeMode,lightAppearance:normalizeLightAppearance(state.lightAppearance)});
+ const read=()=>Object.freeze({protocol:2,revision:state.revision,stored,writable,error,themeMode:state.themeMode,lightAppearance:normalizeLightAppearance(state.lightAppearance),interfacePreferences:normalizeInterfacePreferences(state.interfacePreferences)});
  const unchanged=async()=>{
   const bytes=await readFile();
   if((bytes?hash(bytes):null)!==fingerprint){writable=false;error='desktop_appearance_conflict';throw Error(error);}
@@ -50,7 +75,7 @@ export async function createDesktopAppearanceStore({userDataPath,decodeImage}={}
  const write=async(request,canCommit=()=>true)=>{
   if(!writable||writing)throw Error(writable?'desktop_appearance_busy':error);
   if(request.expectedRevision!==state.revision||state.revision>=Number.MAX_SAFE_INTEGER)throw Error('desktop_appearance_conflict');
-  const next={version:1,revision:state.revision+1,themeMode:request.themeMode,lightAppearance:normalizeLightAppearance(request.lightAppearance)};
+  const next={version:2,revision:state.revision+1,themeMode:request.themeMode,lightAppearance:normalizeLightAppearance(request.lightAppearance),interfacePreferences:normalizeInterfacePreferences(request.interfacePreferences??state.interfacePreferences)};
   if(!mode(next.themeMode))throw Error('desktop_appearance_invalid');
   if(deleting.has(imageKey(next.lightAppearance.background.imageId)))throw Error('desktop_appearance_busy');
   // Initial legacy restoration may retain a missing identity; later new references must exist.
