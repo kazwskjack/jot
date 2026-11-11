@@ -1,3 +1,4 @@
+import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import React,{useEffect,useRef,useState} from 'react';
 import {ApiError,abortableDelay,request,taskDraftScope} from './client';
 import ActivityToolResult from './ActivityToolResult';
@@ -112,8 +113,8 @@ export default function ToolResultSearch({conversationId,runId,asOfSeq:latestSeq
    {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重新搜索本批</button></p>}
    {hit&&<button type="button" onClick={()=>setSelected(undefined)}>关闭命中正文</button>}
   </div>
-  {hit&&<ActivityToolResult key={JSON.stringify([identity,hit])} conversationId={conversationId}
+  {hit&&<ConversationDisplayBoundary key={JSON.stringify([identity,hit])} label="命中工具正文"><ActivityToolResult conversationId={conversationId}
    target={{...(hit.native_source?{nativeSource:true,asOfSeq}:{}),runId:hit.run_id,activityId:hit.activity_id,toolName:hit.tool_name,offset:hit.offset_chars,resultSha:hit.result_sha256,textSha:hit.text_sha256,
-    match:{offset:hit.match_offset_chars,text:hit.match_text}}}/>}
+    match:{offset:hit.match_offset_chars,text:hit.match_text}}}/></ConversationDisplayBoundary>}
  </section>;
 }

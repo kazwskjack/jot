@@ -1,3 +1,4 @@
+import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import ArtifactEditedDiff,{validEditedDiffSource} from './ArtifactEditedDiff';
 import React,{useEffect,useState} from 'react';
 import {ApiError,abortableDelay,request,taskDraftScope} from './client';
@@ -107,8 +108,8 @@ export default function ArtifactTextSearch({conversationId,runId,query}:{convers
    {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重新搜索本批</button></p>}
    {hit&&<button type="button" onClick={()=>{setSelected(undefined);setFileTarget(undefined);}}>关闭命中文件</button>}
   </div>
-  {hit&&(fileTarget?<ActivityArtifactDetails key={JSON.stringify([batchIdentity,fileTarget])} conversationId={conversationId} target={fileTarget} onOpen={setFileTarget}/>
+  {hit&&<ConversationDisplayBoundary key={JSON.stringify([batchIdentity,hit,fileTarget])} label="命中文件详情">{fileTarget?<ActivityArtifactDetails key={JSON.stringify([batchIdentity,fileTarget])} conversationId={conversationId} target={fileTarget} onOpen={setFileTarget}/>
    :hit.edited_diff?<ArtifactEditedDiff key={JSON.stringify([batchIdentity,hit])} conversationId={conversationId} file={hit} runId={runId} expected={hit.edited_diff} match={{offset:hit.match_offset_chars,text:hit.match_text}} startOffset={hit.offset_chars}/>
-   :<ArtifactTextResult key={JSON.stringify([batchIdentity,hit])} conversationId={conversationId} runId={runId} target={hit}/>)}
+   :<ArtifactTextResult key={JSON.stringify([batchIdentity,hit])} conversationId={conversationId} runId={runId} target={hit}/>}</ConversationDisplayBoundary>}
  </section>;
 }

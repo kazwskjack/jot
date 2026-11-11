@@ -1,7 +1,8 @@
+import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 // Search interaction and IME handling adapted from PilotDeck 783499ff,
 // ChatHistorySearchBar.tsx/useChatHistorySearch.ts. Adapted portions are AGPL-3.0.
 import React,{useEffect,useId,useMemo,useRef,useState,type RefObject} from 'react';
-import {request} from './client';
+import {request,taskDraftScope} from './client';
 import type {Message,MessagePage,Activity} from './types';
 import {activitySearchText,type ActivityReveal,type ActivityRun,type ToolActivity} from './activity-presentation';
 import ToolResultSearch from './ToolResultSearch';
@@ -282,12 +283,12 @@ export default function ConversationHistorySearch(props:Props){
    <button type="button" onClick={close}>关闭搜索</button>
    {active&&<p className="jot-history-search-excerpt">{sourceLabels[active.source.kind]} · {active.source.text.slice(Math.max(0,active.offset-60),active.offset+active.length+60)}</p>}
    <small>{activityOnly?'搜索范围为已加载的公开记录。步骤历史的加载进度和保留缺口显示在时间线上方。':'公开步骤历史的加载进度和保留缺口显示在时间线上方。'} 已打开内容参与当前页搜索，未打开的工具正文、交互记录和文本文件原版本另列检索结果。</small>
-   {(props.resultSearchSeq??activityHistorySeq)&&ready&&needle&&<ToolResultSearch conversationId={props.conversationId} asOfSeq={(props.resultSearchSeq??activityHistorySeq)!}
-    {...(props.scope==='activities'?{runId:props.runId}:{})} query={needle} onRevealActivity={onRevealActivity}/>}
-   {ready&&needle&&<InteractionSearch conversationId={props.conversationId}
-    {...(props.scope==='activities'?{runId:props.runId}:{})} query={needle}/>}
-   {ready&&needle&&<ArtifactTextSearch conversationId={props.conversationId}
-    {...(props.scope==='activities'?{runId:props.runId}:{})} query={needle}/>}
+   {(props.resultSearchSeq??activityHistorySeq)&&ready&&needle&&<ConversationDisplayBoundary key={JSON.stringify(['tools',taskDraftScope(),props.conversationId,props.scope==='activities'?props.runId:null,needle.trim()])} label="工具正文检索"><ToolResultSearch conversationId={props.conversationId} asOfSeq={(props.resultSearchSeq??activityHistorySeq)!}
+    {...(props.scope==='activities'?{runId:props.runId}:{})} query={needle} onRevealActivity={onRevealActivity}/></ConversationDisplayBoundary>}
+   {ready&&needle&&<ConversationDisplayBoundary key={JSON.stringify(['interactions',taskDraftScope(),props.conversationId,props.scope==='activities'?props.runId:null,needle.trim()])} label="交互记录检索"><InteractionSearch conversationId={props.conversationId}
+    {...(props.scope==='activities'?{runId:props.runId}:{})} query={needle}/></ConversationDisplayBoundary>}
+   {ready&&needle&&<ConversationDisplayBoundary key={JSON.stringify(['files',taskDraftScope(),props.conversationId,props.scope==='activities'?props.runId:null,needle.trim()])} label="文件正文检索"><ArtifactTextSearch conversationId={props.conversationId}
+    {...(props.scope==='activities'?{runId:props.runId}:{})} query={needle}/></ConversationDisplayBoundary>}
    {error&&<p role="alert">完整历史尚未加载，当前结果来自已加载的公开记录。{error} <button type="button" disabled={loading} onClick={()=>setRetry(value=>value+1)}>继续加载历史</button></p>}
   </div>}
  </div>;

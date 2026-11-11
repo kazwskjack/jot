@@ -1,3 +1,4 @@
+import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 // Phase grouping and expandable nested tool history adapt PilotDeck 783499ff,
 // AgentTimeline.tsx/SubagentContainer.tsx. Adapted portions retain AGPL-3.0 terms.
 import React,{useEffect,useMemo,useRef,useState} from 'react';
@@ -112,14 +113,14 @@ export default function ActivityTimeline({conversationId,activities,runs,reveal,
   <h3>工具与子任务</h3>
   <label>运行记录 <select value={selected} onChange={event=>selectRun(event.currentTarget.value)}>{runIds.map(id=><option key={id} value={id}>{runs[id]?.created_at??id} · {runs[id]?.status??'历史运行'}</option>)}</select></label>
   <small>当前已加载的公开步骤。父步骤缺失或终态未确认时会保留提示。</small>
-  {groups.map(group=><ActivityGroup key={`${selected}:${group.id}`} group={group} {...(run?{run}:{})} onSelectRun={selectRun} onOpenArtifact={(activity,target)=>{setToolResult(undefined);setArtifact({conversationId,runId:activity.run_id,activityId:activity.activity_id,target});}} onOpenToolResult={(activity,nativeSource)=>{setArtifact(undefined);setToolResult({conversationId,runId:activity.run_id,activityId:activity.activity_id,toolName:activity.detail.tool_name!,...(nativeSource?{nativeSource:true}:{})});}} availableRuns={availableRuns} {...(onOpenMember?{onOpenMember}:{})} {...(reveal?{reveal}:{})}/>)}
+  {groups.map(group=><ConversationDisplayBoundary key={`${selected}:${group.id}`} label="步骤分组"><ActivityGroup group={group} {...(run?{run}:{})} onSelectRun={selectRun} onOpenArtifact={(activity,target)=>{setToolResult(undefined);setArtifact({conversationId,runId:activity.run_id,activityId:activity.activity_id,target});}} onOpenToolResult={(activity,nativeSource)=>{setArtifact(undefined);setToolResult({conversationId,runId:activity.run_id,activityId:activity.activity_id,toolName:activity.detail.tool_name!,...(nativeSource?{nativeSource:true}:{})});}} availableRuns={availableRuns} {...(onOpenMember?{onOpenMember}:{})} {...(reveal?{reveal}:{})}/></ConversationDisplayBoundary>)}
   {toolResult&&toolResult.conversationId===conversationId&&toolResult.runId===selected&&<section aria-label="已选步骤工具结果">
    <button type="button" data-chat-search-ignore onClick={()=>setToolResult(undefined)}>关闭工具结果正文</button>
-   <ActivityToolResult key={JSON.stringify(toolResult)} conversationId={conversationId} target={toolResult}/>
+   <ConversationDisplayBoundary key={JSON.stringify(toolResult)} label="步骤工具结果"><ActivityToolResult conversationId={conversationId} target={toolResult}/></ConversationDisplayBoundary>
   </section>}
   {artifact&&artifact.conversationId===conversationId&&artifact.runId===selected&&<section aria-label="已选步骤文件">
    <button type="button" data-chat-search-ignore onClick={()=>setArtifact(undefined)}>关闭步骤文件</button>
-   <ActivityArtifactDetails key={JSON.stringify([conversationId,artifact.runId,artifact.activityId,artifact.target.artifactId])} conversationId={conversationId} target={artifact.target} onOpen={target=>setArtifact(prior=>prior&&prior.conversationId===conversationId&&prior.target.artifactId===target.artifactId?{...prior,target}:prior)}/>
+   <ConversationDisplayBoundary key={JSON.stringify([conversationId,artifact.runId,artifact.activityId,artifact.target])} label="步骤文件详情"><ActivityArtifactDetails conversationId={conversationId} target={artifact.target} onOpen={target=>setArtifact(prior=>prior&&prior.conversationId===conversationId&&prior.target.artifactId===target.artifactId?{...prior,target}:prior)}/></ConversationDisplayBoundary>
   </section>}
  </section>;
 }

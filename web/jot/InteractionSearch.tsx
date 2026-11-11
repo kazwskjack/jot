@@ -1,3 +1,4 @@
+import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import React,{useEffect,useState} from 'react';
 import {abortableDelay,request,taskDraftScope} from './client';
 import {InteractionHistorySelection} from './InteractionHistory';
@@ -83,7 +84,7 @@ export default function InteractionSearch({conversationId,runId,query}:{conversa
    {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重新搜索本批</button></p>}
    {hit&&<button type="button" onClick={()=>setSelected(undefined)}>关闭命中交互</button>}
   </div>
-  {hit&&<InteractionHistorySelection key={JSON.stringify([batchIdentity,hit.interaction_id,hit.version])}
-   conversationId={conversationId} interactionId={hit.interaction_id} runId={hit.run_id} version={hit.version} highlight={q}/>}
+  {hit&&<ConversationDisplayBoundary key={JSON.stringify([batchIdentity,hit.interaction_id,hit.version])} label="命中交互详情"><InteractionHistorySelection
+   conversationId={conversationId} interactionId={hit.interaction_id} runId={hit.run_id} version={hit.version} highlight={q}/></ConversationDisplayBoundary>}
  </section>;
 }
