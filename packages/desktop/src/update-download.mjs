@@ -227,7 +227,15 @@ async function inspectExistingFile(fs,root,filePath){
  }
  return cursor;
 }
-async function loadExistingPackage({fs,root,operationId,envelope,signal}){
+function transferReporter(files,onProgress){
+ const total=files.reduce((sum,file)=>sum+file.bytes,0);
+ if(!Number.isSafeInteger(total)||total<0)fail('desktop_update_manifest_size_invalid');
+ return transferred=>{
+  if(!Number.isSafeInteger(transferred)||transferred<0||transferred>total)fail('desktop_update_transfer_invalid');
+  if(typeof onProgress==='function')try{onProgress(Object.freeze({transferred,total}));}catch{}
+ };
+}
+async function loadExistingPackage({fs,root,operationId,envelope,signal,onProgress}){
  if(signal?.aborted)fail('desktop_update_cancelled');
  const profile=envelope.profile??'standalone',manifestName=profile==='desktop-electron'?'portable-package-manifest.json':'release-manifest.json';
  const operationRoot=await ensureOperationRoot(fs,root,operationId),manifestPath=join(operationRoot,manifestName),manifestInfo=await lstatIfExists(fs,manifestPath);
@@ -235,6 +243,7 @@ async function loadExistingPackage({fs,root,operationId,envelope,signal}){
  const manifestRaw=Buffer.from(await fs.readFile(manifestPath));
  if(manifestRaw.length!==envelope.manifestBytes)fail('desktop_update_manifest_file_mismatch');
  const manifest=verifyUpdateManifest({rawBytes:manifestRaw,envelope}),files=validateManifestPaths(manifest,profile),verifiedFiles=[];
+ const reportTransfer=transferReporter(files,onProgress);let completedBytes=0;reportTransfer(0);
  if(profile==='desktop-electron'){
   const sidecar=await lstatIfExists(fs,join(operationRoot,'portable-package-manifest.sha256'));
   if(!sidecar||sidecar.isSymbolicLink()||!sidecar.isFile()||await fs.readFile(join(operationRoot,'portable-package-manifest.sha256'),'utf8')!==envelope.manifestSha256+'  '+manifestName+'\n')
@@ -245,6 +254,7 @@ async function loadExistingPackage({fs,root,operationId,envelope,signal}){
   const path=await inspectExistingFile(fs,operationRoot,file.path),actual=await hashFile(fs,path);
   if(actual.bytes!==file.bytes||actual.sha256!==file.sha256)fail('desktop_update_file_digest_mismatch');
   verifiedFiles.push(Object.freeze({path:file.path,bytes:file.bytes,sha256:file.sha256}));
+  completedBytes+=file.bytes;reportTransfer(completedBytes);
  }
  await verifyPackageInventory(fs,operationRoot,files,profile);
  return Object.freeze({packageRoot:operationRoot,manifestSha256:envelope.manifestSha256,envelopeDigest:envelope.envelopeDigest,manifest,
@@ -262,14 +272,14 @@ export function createUpdateDownloader({policy,transport={request:requestHttps},
  if(!transport||typeof transport.request!=='function'||!fs||typeof fs.open!=='function'||typeof fs.lstat!=='function'||!isAbsolute(root??''))
   fail('desktop_update_downloader_invalid');
 
- async function execute({operationId,verifiedEnvelope,signal,allowStart}){
+ async function execute({operationId,verifiedEnvelope,signal,allowStart,onProgress}){
   if(typeof operationId!=='string'||!/^([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.test(operationId))fail('desktop_update_operation_invalid');
   let state=await readStore(stateStore),operation=state.operation;
   if(!operation||operation.id!==operationId)fail('desktop_update_operation_mismatch');
   if(!verifiedEnvelope&&typeof loadVerifiedEnvelope==='function')verifiedEnvelope=await loadVerifiedEnvelope({operationId,operation});
   verifyOperationBinding(operation,operationId,verifiedEnvelope,policy);
   if(operation.phase==='available'&&allowStart){await stateStore.setPhase(operationId,'downloading');state=await readStore(stateStore);operation=state.operation;}
-  if(operation.phase==='downloaded'&&!allowStart)return loadExistingPackage({fs,root,operationId,envelope:verifiedEnvelope,signal});
+  if(operation.phase==='downloaded'&&!allowStart)return loadExistingPackage({fs,root,operationId,envelope:verifiedEnvelope,signal,onProgress});
   if(operation.phase!=='downloading')fail('desktop_update_phase_invalid');
   if(signal?.aborted)fail('desktop_update_cancelled');
 
@@ -280,6 +290,7 @@ export function createUpdateDownloader({policy,transport={request:requestHttps},
   const manifest=verifyUpdateManifest({rawBytes:manifestRaw,envelope:verifiedEnvelope});
   const profile=verifiedEnvelope.profile??'standalone',manifestName=profile==='desktop-electron'?'portable-package-manifest.json':'release-manifest.json';
   const files=validateManifestPaths(manifest,profile),operationRoot=await ensureOperationRoot(fs,root,operationId);
+  const reportTransfer=transferReporter(files,onProgress);let completedBytes=0;reportTransfer(0);
 
   for(const file of files){
    if(signal?.aborted)fail('desktop_update_cancelled');
@@ -291,7 +302,7 @@ export function createUpdateDownloader({policy,transport={request:requestHttps},
     if(stalePart)fail('desktop_update_path_unsafe');
     const actual=await hashFile(fs,finalPath);
     if(actual.bytes!==file.bytes||actual.sha256!==file.sha256)fail('desktop_update_existing_file_mismatch');
-    continue;
+    completedBytes+=file.bytes;reportTransfer(completedBytes);continue;
    }
    const checkpoint=operation.downloads[file.path],partInfo=await lstatIfExists(fs,partPath);
    if(partInfo&&(partInfo.isSymbolicLink()||!partInfo.isFile()))fail('desktop_update_path_unsafe');
@@ -300,10 +311,12 @@ export function createUpdateDownloader({policy,transport={request:requestHttps},
     if(partInfo.size!==offset)fail('desktop_update_resume_state_mismatch');
    }else if(offset!==0)fail('desktop_update_resume_state_mismatch');
    if(offset>file.bytes)fail('desktop_update_resume_state_mismatch');
+   reportTransfer(completedBytes+offset);
    if(offset===file.bytes&&partInfo){
     const actual=await hashFile(fs,partPath);
     if(actual.bytes!==file.bytes||actual.sha256!==file.sha256)fail('desktop_update_file_digest_mismatch');
-    await fs.rename(partPath,finalPath);await syncDirectory(fs,dirname(finalPath));continue;
+    await fs.rename(partPath,finalPath);await syncDirectory(fs,dirname(finalPath));
+    completedBytes+=file.bytes;reportTransfer(completedBytes);continue;
    }
 
    const url=trustedUrl(file.transportPath??file.path,policy),headers={'accept-encoding':'identity'};
@@ -336,11 +349,12 @@ export function createUpdateDownloader({policy,transport={request:requestHttps},
     for await(const raw of responseBody(response)){
      if(signal?.aborted)fail('desktop_update_cancelled');
      const chunk=Buffer.from(raw);
-     if(received+chunk.length>file.bytes-offset)fail('desktop_update_body_too_long');
+     if(chunk.length>file.bytes-offset)fail('desktop_update_body_too_long');
      if(chunk.length){
       await writeChunk(handle,chunk);received+=chunk.length;offset+=chunk.length;
       await handle.sync();
       await stateStore.recordDownloadProgress(operationId,file.path,offset,etag);
+      reportTransfer(completedBytes+offset);
      }
     }
     if(received!==file.bytes-(checkpoint?.offset??0))fail('desktop_update_body_length_mismatch');
@@ -348,6 +362,7 @@ export function createUpdateDownloader({policy,transport={request:requestHttps},
    const actual=await hashFile(fs,partPath);
    if(actual.bytes!==file.bytes||actual.sha256!==file.sha256)fail('desktop_update_file_digest_mismatch');
    await fs.rename(partPath,finalPath);await syncDirectory(fs,dirname(finalPath));
+   completedBytes+=file.bytes;reportTransfer(completedBytes);
   }
 
   const manifestPath=join(operationRoot,manifestName),manifestInfo=await lstatIfExists(fs,manifestPath);
@@ -387,11 +402,11 @@ export function createUpdateDownloader({policy,transport={request:requestHttps},
    throw error;
   }
  }
- async function download({operationId,verifiedEnvelope,signal}={}){
-  return withFailureState(operationId,signal,()=>execute({operationId,verifiedEnvelope,signal,allowStart:true}));
+ async function download({operationId,verifiedEnvelope,signal,onProgress}={}){
+  return withFailureState(operationId,signal,()=>execute({operationId,verifiedEnvelope,signal,allowStart:true,onProgress}));
  }
- async function resume({operationId,verifiedEnvelope,signal}={}){
-  return withFailureState(operationId,signal,()=>execute({operationId,verifiedEnvelope,signal,allowStart:false}));
+ async function resume({operationId,verifiedEnvelope,signal,onProgress}={}){
+  return withFailureState(operationId,signal,()=>execute({operationId,verifiedEnvelope,signal,allowStart:false,onProgress}));
  }
  return Object.freeze({download,resume});
 }

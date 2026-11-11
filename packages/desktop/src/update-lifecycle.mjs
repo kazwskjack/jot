@@ -86,9 +86,9 @@ function validateReceipt(staged,envelope){
 export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle,downloader,stateStore,platformSignatureVerifier,candidateProbe,hostLifecycle,
  desktopLifecycle,getHealthUrl,exitForHandoff,fetchEnvelope,relaunch,confirmActivation,probeRestoredRelease,getHostProcessContext}={}){
  const currentHostProcessContext=getHostProcessContext??(({releaseRoot})=>({pid:process.pid,execPath:process.execPath,releaseRoot}));
- let checked=null,checking=false,activeAction=null,cancelPending=false;
+ let checked=null,checking=false,activeAction=null,cancelPending=false,transfer=null;
  const contexts=new Map(),controllers=new Map(),progressListeners=new Set();
- const commandStatus=()=>({checking,actionPending:activeAction!==null||cancelPending,operationCommands:1,activeCommand:activeAction?.kind??null,cancelPending});
+ const commandStatus=(operationId=null)=>({checking,actionPending:activeAction!==null||cancelPending,operationCommands:1,activeCommand:activeAction?.kind??null,cancelPending,transfer:transfer?.operationId===operationId?transfer:null});
  const emitProgress=(operationId,phase)=>{
   const event=Object.freeze({operation_id:operationId,phase});
   for(const listener of progressListeners)try{listener(event);}catch{}
@@ -149,7 +149,7 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
   if(error)return Object.freeze({enabled:false,reason:error,phase:null,...commandStatus()});
   const state=await stateStore.read();
   if(!state?.enabled)return Object.freeze({enabled:false,reason:state?.reason??'desktop_update_state_unavailable',phase:state?.state?.operation?.phase??null,...commandStatus()});
-  return Object.freeze({enabled:true,reason:null,phase:state.state?.operation?.phase??'available',operationId:state.state?.operation?.id??null,...commandStatus()});
+  return Object.freeze({enabled:true,reason:null,phase:state.state?.operation?.phase??'available',operationId:state.state?.operation?.id??null,...commandStatus(state.state?.operation?.id??null)});
  }
 
  async function prepareStartup({restoredStartupNonce=null}={}){
@@ -413,9 +413,14 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
    const state=await stateStore.read(),operation=state.state?.operation;
    if(!state.enabled||operation?.id!==operationId)fail('desktop_update_phase_invalid');
    if(['staged','awaiting-activation'].includes(operation.phase))return Object.freeze({operationId,phase:'awaiting-activation',...safeSummary(envelope)});
+   const onProgress=value=>{
+    if(activeAction?.kind!=='download'||activeAction.operationId!==operationId||contexts.get(operationId)!==context)return;
+    if(!value||!Number.isSafeInteger(value.transferred)||!Number.isSafeInteger(value.total)||value.transferred<0||value.total<value.transferred)return;
+    transfer=Object.freeze({operationId,transferred:value.transferred,total:value.total});
+   };
    let downloaded;
-   if(operation.phase==='available')downloaded=await downloader.download({operationId,verifiedEnvelope:envelope,signal:controller.signal});
-   else if(['downloading','downloaded'].includes(operation.phase))downloaded=await downloader.resume({operationId,verifiedEnvelope:envelope,signal:controller.signal});
+   if(operation.phase==='available')downloaded=await downloader.download({operationId,verifiedEnvelope:envelope,signal:controller.signal,onProgress});
+   else if(['downloading','downloaded'].includes(operation.phase))downloaded=await downloader.resume({operationId,verifiedEnvelope:envelope,signal:controller.signal,onProgress});
    else fail('desktop_update_phase_invalid');
    if(controller.signal.aborted)fail('desktop_update_cancelled');
    if(!downloaded||downloaded.manifestSha256!==envelope.manifestSha256||downloaded.envelopeDigest!==envelope.envelopeDigest||typeof downloaded.packageRoot!=='string')

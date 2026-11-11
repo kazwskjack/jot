@@ -92,6 +92,11 @@ export default function DesktopUpdatesPanel({scopeKey,onPendingChange,canBeginAc
   {candidate&&<p>签名候选：{candidate.version} · 序列 {candidate.sequence} · {candidate.channel} / {candidate.platform} / {candidate.arch}</p>}
   {receipt&&!receipt.available&&<p>本次检查未取得新的签名候选（源版本 {receipt.version}，序列 {receipt.sequence}）。安装与启动状态请以宿主回执为准。</p>}
   {status?.operationId&&!candidate&&['available','downloading','downloaded','staged','awaiting-activation'].includes(status.phase??'')&&<p className="wb-settings-note">先检查并恢复原候选，再选择下载或激活。</p>}
+  {status?.transfer&&<div>
+   <p>文件数据进度：{status.transfer.transferred.toLocaleString()} / {status.transfer.total.toLocaleString()} 字节</p>
+   {status.transfer.total>0&&<progress max={status.transfer.total} value={status.transfer.transferred} aria-label="更新文件数据进度"/>}
+   <p className="wb-settings-note">仅统计已写入或重新核对的文件数据，不表示签名校验、准备或安装已完成。</p>
+  </div>}
   {error&&<p role="alert">{error}</p>}
   <div className="wb-actions">
    <button type="button" data-desktop-target="check-updates" disabled={otherPending||loading||busy||!canCheckDesktopUpdate(status)} onClick={()=>actions.current?.check()}>检查更新／恢复候选</button>

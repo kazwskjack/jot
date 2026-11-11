@@ -1,7 +1,8 @@
 // Adapts PilotDeck 783499ff desktopUpdates; AGPL-3.0. Native Jot receipts remain authoritative.
 export const updatePhases=['available','downloading','downloaded','verified','staged','awaiting-activation','activating','active','cancelled','failed','unknown'] as const;
 export type UpdatePhase=typeof updatePhases[number];
-export type DesktopUpdateStatus={enabled:boolean;reason:string|null;phase:UpdatePhase|null;operationId:string|null;checking:boolean|null;actionPending:boolean|null;operationCommands:1|null;activeCommand:'download'|'activate'|null;cancelPending:boolean|null};
+export type DesktopUpdateTransfer={operationId:string;transferred:number;total:number};
+export type DesktopUpdateStatus={enabled:boolean;reason:string|null;phase:UpdatePhase|null;operationId:string|null;checking:boolean|null;actionPending:boolean|null;operationCommands:1|null;activeCommand:'download'|'activate'|null;cancelPending:boolean|null;transfer:DesktopUpdateTransfer|null};
 export type DesktopUpdateCheck={available:boolean;operationId:string|null;phase:UpdatePhase|null;version:string;sequence:string;channel:string;platform:string;arch:string};
 export type DesktopUpdateAction='download'|'cancel'|'activate';
 export type DesktopUpdatesBridge={getUpdateStatus:()=>Promise<unknown>;checkForUpdate:()=>Promise<unknown>;downloadUpdate?:(operationId:string)=>Promise<unknown>;cancelUpdate?:(operationId:string)=>Promise<unknown>;activateUpdate?:(operationId:string)=>Promise<unknown>;onUpdateProgress?:(listener:(event:unknown)=>void)=>()=>void};
@@ -15,9 +16,16 @@ export function desktopUpdatesBridge():DesktopUpdatesBridge|null{
  const bridge=(window as Window&{jotDesktop?:Partial<DesktopUpdatesBridge>}).jotDesktop;
  return typeof bridge?.getUpdateStatus==='function'&&typeof bridge.checkForUpdate==='function'?bridge as DesktopUpdatesBridge:null;
 }
+function desktopUpdateTransfer(value:unknown,operationId:unknown):DesktopUpdateTransfer|null{
+ if(value===undefined||value===null)return null;
+ const r=row(value);
+ if(!r||!keys(r,['operationId','transferred','total'])||!uuid(r.operationId)||r.operationId!==operationId||
+  typeof r.transferred!=='number'||!Number.isSafeInteger(r.transferred)||r.transferred<0||typeof r.total!=='number'||!Number.isSafeInteger(r.total)||r.total<r.transferred)throw Error('desktop_update_transfer_invalid');
+ return {operationId:r.operationId,transferred:r.transferred,total:r.total};
+}
 export function desktopUpdateStatus(value:unknown):DesktopUpdateStatus{
  const r=row(value);
- if(!r||!keys(r,['enabled','reason','phase','operationId','checking','actionPending','operationCommands','activeCommand','cancelPending'])||typeof r.enabled!=='boolean'||
+ if(!r||!keys(r,['enabled','reason','phase','operationId','checking','actionPending','operationCommands','activeCommand','cancelPending','transfer'])||typeof r.enabled!=='boolean'||
   (r.enabled?r.reason!==null:!code(r.reason))||(r.phase!==null&&!phase(r.phase))||
   (r.operationId!==undefined&&r.operationId!==null&&!uuid(r.operationId))||
   (r.checking!==undefined&&typeof r.checking!=='boolean')||(r.actionPending!==undefined&&typeof r.actionPending!=='boolean')||
@@ -27,7 +35,7 @@ export function desktopUpdateStatus(value:unknown):DesktopUpdateStatus{
    r.actionPending!==(r.activeCommand!==null||r.cancelPending===true)||(r.checking===true&&r.actionPending===true))))throw Error('desktop_update_status_invalid');
  return {enabled:r.enabled,reason:r.reason as string|null,phase:r.phase as UpdatePhase|null,operationId:uuid(r.operationId)?r.operationId:null,
   checking:typeof r.checking==='boolean'?r.checking:null,actionPending:typeof r.actionPending==='boolean'?r.actionPending:null,operationCommands:r.operationCommands===1?1:null,
-  activeCommand:r.activeCommand==='download'||r.activeCommand==='activate'?r.activeCommand:null,cancelPending:typeof r.cancelPending==='boolean'?r.cancelPending:null};
+  activeCommand:r.activeCommand==='download'||r.activeCommand==='activate'?r.activeCommand:null,cancelPending:typeof r.cancelPending==='boolean'?r.cancelPending:null,transfer:desktopUpdateTransfer(r.transfer,r.operationId)};
 }
 export function desktopUpdateCheck(value:unknown):DesktopUpdateCheck{
  const r=row(value);
