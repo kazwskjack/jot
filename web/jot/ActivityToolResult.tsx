@@ -118,7 +118,7 @@ export default function ActivityToolResult({conversationId,target}:{conversation
   {current?.error&&<p role="alert">{conversationUiError(current.error,language)} <button type="button" onClick={()=>setRevision(value=>value+1)}>{t('重试读取','Retry Reading')}</button></p>}
   {selected?.identity===identity&&<>
    <button type="button" data-chat-search-ignore onClick={()=>setSelected(undefined)}>{t('关闭原列表文件','Close Original List File')}</button>
-   <div lang="zh-CN"><ActivityToolFile key={JSON.stringify(selected)} conversationId={conversationId} runId={target.runId} activityId={target.activityId} resultSha={selected.resultSha} file={selected.file}/></div>
+   <div lang={language}><ActivityToolFile key={JSON.stringify(selected)} conversationId={conversationId} runId={target.runId} activityId={target.activityId} resultSha={selected.resultSha} file={selected.file}/></div>
   </>}
  </div>;
 }

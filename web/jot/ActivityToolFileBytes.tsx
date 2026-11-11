@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import React,{useEffect,useRef,useState} from 'react';
 import {base,request,taskDraftScope} from './client';
 import type {ActivityToolFileBytes as BytePage} from './types';
@@ -6,6 +8,7 @@ import type {ListedFilePreviewSource} from './activity-file-preview-client';
 type WritableFile={write:(bytes:Uint8Array)=>Promise<void>;close:()=>Promise<void>;abort:()=>Promise<void>};
 type FilePicker={showSaveFilePicker?:(options:{suggestedName:string})=>Promise<{createWritable:()=>Promise<WritableFile>}>};
 export default function ActivityToolFileBytes({conversationId,runId,activityId,resultSha,file}:ListedFilePreviewSource){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file]);
  const [cursor,setCursor]=useState<{identity:string;offset:number}>(),[page,setPage]=useState<{identity:string;offset:number;hex:string;next?:number}>();
  const [revision,setRevision]=useState(0);
@@ -107,16 +110,16 @@ export default function ActivityToolFileBytes({conversationId,runId,activityId,r
    if(download.current===controller){download.current=null;setBusy(false);}
   }
  };
- return <section aria-label="原文件字节和下载" data-chat-search-ignore>
-  <button type="button" disabled={busy} onClick={()=>{setPage(undefined);setCursor({identity,offset:0});setRevision(value=>value+1);}}>查看原始字节</button>
-  <button type="button" disabled={busy} onClick={()=>void save()}>下载固定版本</button>
-  {busy&&<><span role="status">已核对下载 {received} / {file.size} 字节</span><button type="button" onClick={()=>download.current?.abort()}>取消下载</button></>}
-  {offset!==undefined&&!current&&!error&&<p role="status">正在核对原文件字节…</p>}
-  {current&&<><pre aria-label="原文件十六进制内容">{current.hex||'空文件'}</pre><nav aria-label="原文件字节翻页">
-   <button type="button" disabled={busy||current.offset===0} onClick={()=>setCursor({identity,offset:Math.max(0,current.offset-256)})}>上一页字节</button>
-   <span>{current.offset} / {file.size} 字节</span>
-   <button type="button" disabled={busy||current.next===undefined} onClick={()=>{if(current.next!==undefined)setCursor({identity,offset:current.next});}}>下一页字节</button>
+ return <section lang={language} aria-label={t("原文件字节和下载","Original File Bytes and Download")} data-chat-search-ignore>
+  <button type="button" disabled={busy} onClick={()=>{setPage(undefined);setCursor({identity,offset:0});setRevision(value=>value+1);}}>{t('查看原始字节','View Raw Bytes')}</button>
+  <button type="button" disabled={busy} onClick={()=>void save()}>{t('下载固定版本','Download Pinned Version')}</button>
+  {busy&&<><span role="status">{t(`已核对下载 ${received} / ${file.size} 字节`,`Verified download: ${received} / ${file.size} bytes`)}</span><button type="button" onClick={()=>download.current?.abort()}>{t('取消下载','Cancel Download')}</button></>}
+  {offset!==undefined&&!current&&!error&&<p role="status">{t('正在核对原文件字节…','Verifying original file bytes…')}</p>}
+  {current&&<><pre aria-label={t('原文件十六进制内容','Original File Hexadecimal Content')}>{current.hex||t('空文件','Empty file')}</pre><nav aria-label={t('原文件字节翻页','Original File Byte Pages')}>
+   <button type="button" disabled={busy||current.offset===0} onClick={()=>setCursor({identity,offset:Math.max(0,current.offset-256)})}>{t('上一页字节','Previous Byte Page')}</button>
+   <span>{current.offset} / {file.size} {t('字节','bytes')}</span>
+   <button type="button" disabled={busy||current.next===undefined} onClick={()=>{if(current.next!==undefined)setCursor({identity,offset:current.next});}}>{t('下一页字节','Next Byte Page')}</button>
   </nav></>}
-  {error&&<p role="alert">{error}</p>}
+  {error&&<p role="alert">{conversationUiError(error,language)}</p>}
  </section>;
 }

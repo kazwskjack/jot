@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import type {OfficeCellFocus,OfficeTextFocus,OfficeRegionFocus} from './FileTextReferences';
 import {officePreviewFormat} from '../../packages/gateway/src/artifacts/document-preview-content';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
@@ -14,6 +16,7 @@ const ActivityToolFilePdf=lazy(()=>import('./ActivityToolFilePdf'));
 const ActivityToolFileOffice=lazy(()=>import('./ActivityToolFileOffice'));
 const sha=/^[a-f0-9]{64}$/;
 function ActivityToolFileText({conversationId,runId,activityId,resultSha,file}:ListedFilePreviewSource){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file]);
  const region=useRef<HTMLElement>(null);
  const [cursor,setCursor]=useState<{identity:string;offset:number;previous:number[];textSha?:string}>({identity,offset:0,previous:[]});
@@ -44,32 +47,33 @@ function ActivityToolFileText({conversationId,runId,activityId,resultSha,file}:L
   return()=>controller.abort();
  },[identity,offset,textSha,revision]);
  const current=state?.identity===identity&&state.offset===offset?state:undefined,page=current?.page;
- return <section ref={region} tabIndex={-1} className="jot-activity-content" aria-label="原列表固定文件版本">
-  <h4>{file.path} · 版本 {file.version}</h4>
+ return <section lang={language} ref={region} tabIndex={-1} className="jot-activity-content" aria-label={t('原列表固定文件版本','Original List Pinned File Version')}>
+  <h4>{file.path} · {t('版本','Version')} {file.version}</h4>
   <ActivityToolFileBytes key={identity} conversationId={conversationId} runId={runId} activityId={activityId} resultSha={resultSha} file={file}/>
-  {(!current||!page&&!current.error)&&<p role="status">正在读取并核对原文件版本…</p>}
+  {(!current||!page&&!current.error)&&<p role="status">{t('正在读取并核对原文件版本…','Reading and verifying the original file version…')}</p>}
   {page&&<>
    <section data-chat-search-content={JSON.stringify(['listed-file',identity,page.text_sha256,offset])}><pre>{page.text}</pre></section>
-   <nav aria-label="原列表文件正文翻页" data-chat-search-ignore>
-    <button type="button" disabled={!currentCursor.previous.length} onClick={()=>setCursor({identity,offset:currentCursor.previous.at(-1)!,previous:currentCursor.previous.slice(0,-1),textSha:page.text_sha256})}>上一页正文</button>
-    <span>{Math.min(offset+1,page.total_chars)}–{offset+page.text.length} / {page.total_chars}（UTF-16 位置）</span>
-    <button type="button" disabled={page.next_offset_chars===undefined} onClick={()=>{if(page.next_offset_chars!==undefined)setCursor({identity,offset:page.next_offset_chars,previous:[...currentCursor.previous,offset],textSha:page.text_sha256});}}>下一页正文</button>
+   <nav aria-label={t('原列表文件正文翻页','Original List File Body Pages')} data-chat-search-ignore>
+    <button type="button" disabled={!currentCursor.previous.length} onClick={()=>setCursor({identity,offset:currentCursor.previous.at(-1)!,previous:currentCursor.previous.slice(0,-1),textSha:page.text_sha256})}>{t('上一页正文','Previous Body Page')}</button>
+    <span>{Math.min(offset+1,page.total_chars)}–{offset+page.text.length} / {page.total_chars}{t('（UTF-16 位置）',' (UTF-16 positions)')}</span>
+    <button type="button" disabled={page.next_offset_chars===undefined} onClick={()=>{if(page.next_offset_chars!==undefined)setCursor({identity,offset:page.next_offset_chars,previous:[...currentCursor.previous,offset],textSha:page.text_sha256});}}>{t('下一页正文','Next Body Page')}</button>
    </nav>
   </>}
-  {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试读取</button></p>}
+  {current?.error&&<p role="alert">{conversationUiError(current.error,language)} <button type="button" onClick={()=>setRevision(value=>value+1)}>{t('重试读取','Retry Reading')}</button></p>}
  </section>;
 }
 
 export default function ActivityToolFile(props:ListedFilePreviewSource&{focus?:PdfReferenceFocus;printFocus?:OfficePrintFocus;officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const identity=JSON.stringify([taskDraftScope(),props.conversationId,props.runId,props.activityId,props.resultSha,props.file,props.focus?.key,props.officeFocus?.key,props.officeTextFocus?.key,props.officeRegionFocus?.key,props.printFocus?.key]),[textView,setTextView]=useState<string>();
  const pdf=props.file.path.toLowerCase().endsWith('.pdf'),office=officePreviewFormat(props.file.path);
- if(office)return <ConversationDisplayBoundary key={identity} label="Office查看器"><Suspense fallback={<p role="status">正在载入Office查看器…</p>}><ActivityToolFileOffice {...props}/></Suspense></ConversationDisplayBoundary>;
+ if(office)return <ConversationDisplayBoundary key={identity} label={t('Office查看器','Office Viewer')}><Suspense fallback={<p lang={language} role="status">{t('正在载入Office查看器…','Loading Office viewer…')}</p>}><div lang="zh-CN"><ActivityToolFileOffice {...props}/></div></Suspense></ConversationDisplayBoundary>;
  if(!pdf&&!listedFileImageType(props.file.path))return <ActivityToolFileText {...props}/>;
  return <>
-  <nav aria-label="原列表文件查看方式" data-chat-search-ignore>
-   <button type="button" disabled={textView!==identity} onClick={()=>setTextView(undefined)}>{pdf?'查看PDF':'查看图片'}</button>
-   <button type="button" disabled={textView===identity} onClick={()=>setTextView(identity)}>查看正文</button>
+  <nav lang={language} aria-label={t("原列表文件查看方式","Original List File View Mode")} data-chat-search-ignore>
+   <button type="button" disabled={textView!==identity} onClick={()=>setTextView(undefined)}>{pdf?t('查看PDF','View PDF'):t('查看图片','View Image')}</button>
+   <button type="button" disabled={textView===identity} onClick={()=>setTextView(identity)}>{t('查看正文','View Body')}</button>
   </nav>
-  {textView===identity?<ActivityToolFileText {...props}/>:pdf?<ConversationDisplayBoundary key={identity} label="PDF查看器"><Suspense fallback={<p role="status">正在载入PDF查看器…</p>}><ActivityToolFilePdf {...props}/></Suspense></ConversationDisplayBoundary>:<ActivityToolFileImage {...props}/>}
+  {textView===identity?<ActivityToolFileText {...props}/>:pdf?<ConversationDisplayBoundary key={identity} label={t('PDF查看器','PDF Viewer')}><Suspense fallback={<p lang={language} role="status">{t('正在载入PDF查看器…','Loading PDF viewer…')}</p>}><div lang="zh-CN"><ActivityToolFilePdf {...props}/></div></Suspense></ConversationDisplayBoundary>:<ActivityToolFileImage {...props}/>}
  </>;
 }

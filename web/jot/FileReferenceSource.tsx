@@ -24,7 +24,7 @@ export default function FileReferenceSource({value,requestId,onClose}:{value:Fil
   {value.print_view&&<p>{t('原转换PDF','Original Converted PDF')} · {t(`${value.print_view.pageCount}页`,`${value.print_view.pageCount} pages`)} · SHA-256 <code>{value.print_view.sha256}</code></p>}
   {!isFileRegion(value)&&!isFileCells(value)&&<details><summary>{t('原引用文字','Original Quoted Text')}</summary><blockquote>{value.reference.selectedText}</blockquote></details>}
   {isFileCells(value)&&<details><summary>{t('原单元格引用快照','Original Cell Reference Snapshot')}</summary><pre>{JSON.stringify(value.reference.cells,null,2)}</pre></details>}
-  <div lang="zh-CN">{value.native_source?<NativeSearchFile key={requestId} source={{conversationId:value.conversationId,runId:value.runId,activityId:value.activityId,
+  <div lang={language}>{value.native_source?<NativeSearchFile key={requestId} source={{conversationId:value.conversationId,runId:value.runId,activityId:value.activityId,
    resultSha:value.resultSha,membersSha:value.native_source.membersSha,member:{index:value.native_source.memberIndex,path:value.file.path},
    ...(value.native_source.asOfSeq!==undefined?{asOfSeq:value.native_source.asOfSeq}:{})}}
    expected={{openSha:value.native_source.openSha,proof:value.native_source.proof,sha256:value.file.sha256,size:value.file.size}}
