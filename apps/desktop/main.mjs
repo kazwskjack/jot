@@ -222,6 +222,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   return startLocalBackendImpl({buildServer,diagnostics,userDataPath,publicRoot:paths.publicRoot});
  };
  const backendFactory=async()=>{hostBackend=await createBackend();return hostBackend;};
+ const getLanguage=()=>appearanceStore?.read().language??desktopLanguage(app);
  const windowAppearance=()=>{
   const nativeTheme=electron.nativeTheme,persistedAppearance=appearanceStore?.read(),initialMode=persistedAppearance?.stored?persistedAppearance.themeMode:'system';
   if(nativeTheme&&nativeTheme.themeSource!==initialMode)nativeTheme.themeSource=initialMode;
@@ -238,7 +239,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   mainWindow=window;
   let prepared;
   try{
-  prepared=createDesktopStartupView({owner:window,getWindow:()=>mainWindow,getAppearance:windowAppearance,language:()=>desktopLanguage(app),isQuitting:()=>shuttingDown,
+  prepared=createDesktopStartupView({owner:window,getWindow:()=>mainWindow,getAppearance:windowAppearance,language:getLanguage,isQuitting:()=>shuttingDown,
    onQuit:()=>app.quit(),onRetry:()=>runStartup(true),getLogFile:()=>diagnostics?.getFile()??null,shell:electron.shell,showWindow,onError:report,
    onClosed:()=>{if(mainWindow===window)mainWindow=null;}});
   startupView=prepared;await prepared.render({phase:'loading'});return prepared;
@@ -321,32 +322,37 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   window.webContents.on('did-finish-load',didFinishLoadHandler);
   window.webContents.on('render-process-gone',renderProcessGoneHandler);
   closeHandler=event=>{if(!shuttingDown&&tray&&!tray.isDestroyed()){event.preventDefault();window.hide();}};window.on('close',closeHandler);
-  desktopHelp=createDesktopHelp({app,owner:window,getWindow:()=>mainWindow,appOrigin,dialog,clipboard:electron.clipboard,shell:electron.shell,getReleaseId:()=>supervisorBootstrap?.scope?.releaseId??null,getLogFile:()=>diagnostics?.getFile()??null,
+  desktopHelp=createDesktopHelp({app,owner:window,getWindow:()=>mainWindow,appOrigin,dialog,clipboard:electron.clipboard,shell:electron.shell,getReleaseId:()=>supervisorBootstrap?.scope?.releaseId??null,getLogFile:()=>diagnostics?.getFile()??null,language:getLanguage,
    getBuildInfo:()=>{
     if(!supervisorProducer)return null;
     const context=supervisorProducer.identity();
     if(!samePath(context.process.execPath,process.execPath)||!samePath(context.process.releaseRoot,dirname(process.execPath)))return null;
     return readPinnedDesktopBuildMetadata({packageRoot:context.process.releaseRoot,releaseId:context.scope.releaseId,expectedManifestSha256:context.scope.manifestSha256,expectedTarget:context.target});
    },onError:report});
-  commandMenu=createDesktopCommandMenu({Menu,getWindow:()=>mainWindow,appOrigin,restoreWindow,openNotificationSettings,requestQuit:()=>app.quit(),help:action=>desktopHelp.run(action),isUnavailable:()=>rendererRecovery?.isUnresponsive()===true});
+  commandMenu=createDesktopCommandMenu({Menu,getWindow:()=>mainWindow,appOrigin,restoreWindow,openNotificationSettings,requestQuit:()=>app.quit(),help:action=>desktopHelp.run(action),isUnavailable:()=>rendererRecovery?.isUnresponsive()===true,language:getLanguage});
   if(process.platform==='win32'||process.platform==='linux')window.setMenuBarVisibility(false);
   if(process.platform==='win32'||process.platform==='linux')captionMenu=createDesktopCaptionMenu({owner:window,getWindow:()=>mainWindow,appOrigin,Menu,getTemplate:()=>commandMenu.template(true),getCursor:typeof electron.screen?.getCursorScreenPoint==='function'?()=>electron.screen.getCursorScreenPoint():null});
   if(['win32','linux','darwin'].includes(process.platform))windowChrome=createDesktopWindowChrome({owner:window,getWindow:()=>mainWindow,appOrigin,initialTheme,initialAppearance,getMenus:()=>commandMenu.template().map(item=>item.id).filter(id=>typeof id==='string')});
+  const refreshTray=()=>{
+   if(!tray||tray.isDestroyed())return;const zh=getLanguage()==='zh-CN';
+   tray.setContextMenu(Menu.buildFromTemplate([{label:zh?'显示 Jot':'Show Jot',click:restoreWindow},{label:zh?'任务通知设置':'Task Notification Settings',click:openNotificationSettings},{type:'separator'},{label:zh?'退出':'Quit Jot',click:()=>app.quit()}]));
+  };
   applySavedAppearance=()=>{
    if(shuttingDown||mainWindow!==window||window.isDestroyed()||window.webContents.isDestroyed?.())return;
    const value=appearanceStore?.read();if(!value?.stored)return;
    try{if(nativeTheme&&nativeTheme.themeSource!==value.themeMode)nativeTheme.themeSource=value.themeMode;
     windowChrome?.syncPreferences({theme:resolvedTheme(value.themeMode),appearance:value.lightAppearance});
+    if(commandMenu?.refresh()){captionMenu?.close();linuxCaptionMenu?.invalidate();refreshTray();}
    }catch(error){report(error);}
   };
   nativeTheme?.on?.('updated',applySavedAppearance);
-  rendererRecovery=createDesktopRendererRecovery({owner:window,getWindow:()=>mainWindow,appOrigin,dialog,isQuitting:()=>shuttingDown,language:()=>desktopLanguage(app),
+  rendererRecovery=createDesktopRendererRecovery({owner:window,getWindow:()=>mainWindow,appOrigin,dialog,isQuitting:()=>shuttingDown,language:getLanguage,
    onUnavailable:resetCommandMenu,onResponsive:()=>{if(!window.isDestroyed())window.webContents.send('desktop:menu-refresh');},onDiagnostic:kind=>diagnostics?.record(kind),onError:report});
   if(process.platform==='linux')linuxCaptionMenu=createLinuxCaptionMenu({owner:window,getWindow:()=>mainWindow,appOrigin,getTemplate:()=>commandMenu.template(true),getEpoch:()=>commandMenu.getEpoch()});
   try{
    tray=new Tray(nativeImage.createFromBuffer(buildTrayIconPng()));
    tray.setToolTip('Jot');
-   tray.setContextMenu(Menu.buildFromTemplate([{label:'显示 Jot',click:restoreWindow},{label:'任务通知设置',click:openNotificationSettings},{type:'separator'},{label:'退出',click:()=>app.quit()}]));
+   refreshTray();
    tray.on('click',restoreWindow);
   }catch(error){report(new Error('system_tray_unavailable:'+String(error?.message??error)));}
   const appearanceContext=()=>{if(shuttingDown||!appearanceStore)throw Error('desktop_appearance_unavailable');const frame=window.webContents.mainFrame,admittedDocument=appearanceDocument;return()=>appearanceDocument===admittedDocument&&mainWindow===window&&!window.isDestroyed()&&!window.webContents.isDestroyed?.()&&window.webContents.mainFrame===frame&&!(window.webContents.isLoadingMainFrame?.()??window.webContents.isLoading())&&!window.webContents.isCrashed?.()&&isDesktopAppUrl(window.webContents.getURL(),appOrigin);};
@@ -423,7 +429,8 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   startupRestoredStartup=preparation?.restoredStartup??null;
   if(startupRestoredStartup&&process.env.JOT_DESKTOP_RESTORED_STARTUP_NONCE===restoredStartupNonce)
    delete process.env.JOT_DESKTOP_RESTORED_STARTUP_NONCE;
-  if(!appearanceStore)try{appearanceStore=await createDesktopAppearanceStore({userDataPath,decodeImage:bytes=>nativeImage.createFromBuffer(bytes).getSize()});}catch{report(Error('desktop_appearance_unavailable'));}
+  await app.whenReady();
+  if(!appearanceStore)try{appearanceStore=await createDesktopAppearanceStore({userDataPath,language:desktopLanguage(app),decodeImage:bytes=>nativeImage.createFromBuffer(bytes).getSize()});}catch{report(Error('desktop_appearance_unavailable'));}
   return true;
  }});
  app.on('second-instance',restoreWindow);
@@ -487,7 +494,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   if(lifecycle.phase==='failed'&&startupView&&!startupView.window.isDestroyed()&&mainWindow===startupView.window){
    try{await startupView.render({phase:'failed',canRetry:retryEligible()&&lifecycle.canRetry});return;}catch(presentationError){report(presentationError);}
   }
-  try{if(!shuttingDown){await app.whenReady();if(!shuttingDown){const language=desktopLanguage(app);dialog?.showErrorBox(desktopText('startupTitle',language),desktopText('startupFailure',language));}}}
+  try{if(!shuttingDown){await app.whenReady();if(!shuttingDown){const language=getLanguage();dialog?.showErrorBox(desktopText('startupTitle',language),desktopText('startupFailure',language));}}}
   catch(presentationError){report(presentationError);}
   finally{app.quit();}
  }).finally(()=>{startupRun=null;});

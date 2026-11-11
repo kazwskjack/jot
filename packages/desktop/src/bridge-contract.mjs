@@ -1,3 +1,4 @@
+import {isApplicationLanguage} from './application-language.mjs';
 import {normalizeInterfacePreferences} from './interface-preferences.mjs';
 import {normalizeLightAppearance,isImageId,MAX_BACKGROUND_BYTES} from './light-appearance.mjs';
 import {parseCaptionMenuRequest,parseCaptionProjectionCommand} from './caption-menu-contract.mjs';
@@ -37,17 +38,18 @@ export function parseDesktopCommand(channel,value){
   return Object.freeze({channel,payload:Object.freeze({id:value.id})});
  }
  if(channel==='appearance.write'){
-  const code='desktop_appearance_invalid';record(value,code);exactKeys(value,['expected_revision','themeMode','lightAppearance','interfacePreferences'],code);
+  const code='desktop_appearance_invalid';record(value,code);exactKeys(value,['expected_revision','themeMode','lightAppearance','interfacePreferences','language'],code);
   if(!Number.isSafeInteger(value.expected_revision)||value.expected_revision<0||!['system','light','dark'].includes(value.themeMode)||typeof value.lightAppearance!=='string'||value.lightAppearance.length>4096)fail(code);
   let lightAppearance;try{lightAppearance=normalizeLightAppearance(JSON.parse(value.lightAppearance));}catch{fail(code);}
   if(JSON.stringify(lightAppearance)!==value.lightAppearance)fail(code);
+  if(hasOwn(value,'language')&&!isApplicationLanguage(value.language))fail(code);
   let interfacePreferences;
   if(hasOwn(value,'interfacePreferences')){
    if(typeof value.interfacePreferences!=='string'||value.interfacePreferences.length>256)fail(code);
    try{interfacePreferences=normalizeInterfacePreferences(JSON.parse(value.interfacePreferences));}catch{fail(code);}
    if(JSON.stringify(interfacePreferences)!==value.interfacePreferences)fail(code);
   }
-  return Object.freeze({channel,payload:Object.freeze({expectedRevision:value.expected_revision,themeMode:value.themeMode,lightAppearance,...(interfacePreferences?{interfacePreferences}:{})})});
+  return Object.freeze({channel,payload:Object.freeze({expectedRevision:value.expected_revision,themeMode:value.themeMode,lightAppearance,...(hasOwn(value,'language')?{language:value.language}:{}),...(interfacePreferences?{interfacePreferences}:{})})});
  }
  if(channel==='window.chrome.appearance'){
   const code='desktop_window_appearance_invalid';record(value,code);exactKeys(value,['theme','appearance'],code);

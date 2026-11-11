@@ -1,4 +1,5 @@
 // Native help/about adapts PilotDeck 783499ff desktopAbout/applicationMenu; AGPL-3.0.
+import {desktopLanguage} from './desktop-text.mjs';
 import {mkdir} from 'node:fs/promises';
 import {dirname,isAbsolute} from 'node:path';
 import {release} from 'node:os';
@@ -6,8 +7,9 @@ import {isDesktopAppUrl} from './desktop-security.mjs';
 const projectWebsite='https://github.com/kazwskjack/jot';
 const links=Object.freeze({docs:projectWebsite+'#readme',issues:projectWebsite+'/issues',website:projectWebsite});
 const safe=value=>typeof value==='string'&&value.length>0&&value.length<=160&&!/[\x00-\x1f\x7f]/.test(value)?value:null;
-export function createDesktopHelp({app,owner,getWindow,appOrigin,dialog,clipboard,shell,getReleaseId,getBuildInfo,getLogFile,onError=()=>{}}){
+export function createDesktopHelp({app,owner,getWindow,appOrigin,dialog,clipboard,shell,getReleaseId,getBuildInfo,getLogFile,language=()=>desktopLanguage(app),onError=()=>{}}){
  let disposed=false,pending=false;
+ const text=(zh,en)=>language()==='zh-CN'?zh:en;
  const valid=()=>!disposed&&getWindow()===owner&&!owner.isDestroyed()&&!owner.webContents.isDestroyed?.()&&!owner.webContents.isCrashed?.()&&isDesktopAppUrl(owner.webContents.getURL(),appOrigin);
  const read=()=>{
   if(!valid())throw Error('desktop_help_window_unavailable');
@@ -18,10 +20,11 @@ export function createDesktopHelp({app,owner,getWindow,appOrigin,dialog,clipboar
    build_time:null,source_commit:build?.source_commit??null,package_version:build?.package_version??null,package_manifest_sha256:build?.manifest_sha256??null,
    build_source:build?'running-release-manifest':'unavailable',launcher_release_id:releaseId,versions,project_website:projectWebsite,
    license:'Project package declaration: Apache-2.0; included PilotDeck components: AGPL-3.0; see THIRD_PARTY_NOTICES.md'};
-  const versionInformation=['Jot: '+(info.version??'not provided'),'OS: '+info.platform+' '+(info.os_release??'unknown')+' ('+info.arch+')',
+  const missing=text('未提供','not provided'),unknown=text('未知','unknown');
+  const versionInformation=['Jot: '+(info.version??missing),text('操作系统：','OS: ')+info.platform+' '+(info.os_release??unknown)+' ('+info.arch+')',
    ...Object.entries(versions).filter(([,value])=>value).map(([name,value])=>name+': '+value),
-   'Package version: '+(info.package_version??'not provided'),'Build time: not provided','Source commit: '+(info.source_commit??'not provided'),
-   'Build source: '+info.build_source,...(info.package_manifest_sha256?['Package manifest SHA-256: '+info.package_manifest_sha256]:[]),...(releaseId?['Launcher release: '+releaseId]:[]),info.license,'PilotDeck components: Copyright © OpenBMB',projectWebsite].join('\n');
+   text('发行包版本：','Package version: ')+(info.package_version??missing),text('构建时间：未提供','Build time: not provided'),text('源码提交：','Source commit: ')+(info.source_commit??missing),
+   text('构建来源：','Build source: ')+info.build_source,...(info.package_manifest_sha256?[text('发行包清单 SHA-256：','Package manifest SHA-256: ')+info.package_manifest_sha256]:[]),...(releaseId?[text('启动器发行版：','Launcher release: ')+releaseId]:[]),info.license,'PilotDeck components: Copyright © OpenBMB',projectWebsite].join('\n');
   return Object.freeze({...info,version_information:versionInformation});
  };
  const copy=info=>{if(!valid()||typeof clipboard?.writeText!=='function')throw Error('desktop_help_clipboard_unavailable');clipboard.writeText(info.version_information);};
@@ -31,9 +34,9 @@ export function createDesktopHelp({app,owner,getWindow,appOrigin,dialog,clipboar
  };
  const about=async()=>{
   const info=read();if(typeof dialog?.showMessageBox!=='function')throw Error('desktop_help_dialog_unavailable');
-  const result=await dialog.showMessageBox(owner,{type:'info',title:'关于 Jot',message:'Jot',
-   detail:['AI 工作台：对话、共同文件、技能与持续任务。','',info.version_information,'','吸收组件：PilotDeck（OpenBMB）。第三方许可见 THIRD_PARTY_NOTICES.md。'].join('\n'),
-   buttons:['确定','复制版本信息','项目主页'],defaultId:0,cancelId:0,noLink:true});
+  const result=await dialog.showMessageBox(owner,{type:'info',title:text('关于 Jot','About Jot'),message:'Jot',
+   detail:[text('AI 工作台：对话、共同文件、技能与持续任务。','AI workbench: conversations, shared files, skills and persistent tasks.'),'',info.version_information,'',text('吸收组件：PilotDeck（OpenBMB）。第三方许可见 THIRD_PARTY_NOTICES.md。','Adapted components: PilotDeck (OpenBMB). See THIRD_PARTY_NOTICES.md for third-party licenses.')].join('\n'),
+   buttons:[text('确定','OK'),text('复制版本信息','Copy Version Information'),text('项目主页','Project Website')],defaultId:0,cancelId:0,noLink:true});
   if(!valid())return;
   if(result?.response===1)copy(info);else if(result?.response===2)await openWebsite('website');
  };
@@ -54,7 +57,7 @@ export function createDesktopHelp({app,owner,getWindow,appOrigin,dialog,clipboar
    return Object.freeze({accepted:true});
   }catch(error){
    try{onError(error);}catch{}
-   if(valid()&&typeof dialog?.showMessageBox==='function')try{await dialog.showMessageBox(owner,{type:'error',title:'Jot',message:'暂时无法打开此帮助入口，请稍后重试。',buttons:['确定'],noLink:true});}catch{}
+   if(valid()&&typeof dialog?.showMessageBox==='function')try{await dialog.showMessageBox(owner,{type:'error',title:'Jot',message:text('暂时无法打开此帮助入口，请稍后重试。','This help action is currently unavailable. Please try again.'),buttons:[text('确定','OK')],noLink:true});}catch{}
    return Object.freeze({accepted:false});
   }finally{pending=false;}
  };

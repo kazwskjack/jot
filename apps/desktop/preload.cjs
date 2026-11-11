@@ -151,7 +151,8 @@ function installWindowChrome(){
     }catch{}}
    }catch{}
    try{const saved=bridge.getAppearance();
-    if(saved?.protocol===1&&saved.stored===true&&['system','light','dark'].includes(saved.themeMode)){
+    if([1,2,3].includes(saved?.protocol)&&saved.stored===true&&['system','light','dark'].includes(saved.themeMode)){
+     if(saved.protocol===3&&(saved.language==='en'||saved.language==='zh-CN'))root.lang=saved.language;
      mode=saved.themeMode;const light=saved.lightAppearance;
      if(light?.version===2&&light.background&&typeof light.background==='object'&&!Array.isArray(light.background)){
       const raw=JSON.stringify({...light,background:{...light.background,imageId:null}});if(raw.length<=4096)root.dataset.jotWindowAppearance=raw;

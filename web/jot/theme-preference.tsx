@@ -1,4 +1,5 @@
 // Adapts PilotDeck 783499ff ThemeContext theme-mode semantics; AGPL-3.0.
+import {isApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
 import {useAppearancePreferences} from './useAppearancePreferences';
 import {useLightAppearance} from './useLightAppearance';
 import LightAppearanceControls from './LightAppearanceControls';
@@ -27,11 +28,13 @@ export function useThemePreference(){
   }
   return()=>{root.removeAttribute('data-jot-theme-ready');};
  },[mode,theme,preferences.native]);
- return {mode,theme,changeMode:preferences.changeMode,saveFailed:!!preferences.error,pending:preferences.pending,unavailable:preferences.unavailable,light};
+ useLayoutEffect(()=>{const root=document.documentElement,previous=root.lang;root.lang=preferences.value.language;return()=>{if(root.lang===preferences.value.language)root.lang=previous;};},[preferences.value.language]);
+ return {language:preferences.value.language,changeLanguage:preferences.changeLanguage,languageAvailable:preferences.languageAvailable,mode,theme,changeMode:preferences.changeMode,saveFailed:!!preferences.error,pending:preferences.pending,unavailable:preferences.unavailable,light};
 }
 
-export function ThemeSelector({preference,zh=false}:{preference:ThemePreference;zh?:boolean}){
- return <div className="jot-theme-control"><select className="jot-theme-select" aria-label={zh?'外观主题':'Appearance theme'} value={preference.mode} disabled={preference.unavailable||preference.light.cleanupPending||preference.light.recoveryPending} onChange={event=>{if(validMode(event.target.value))preference.changeMode(event.target.value);}}>
+export function ThemeSelector({preference}:{preference:ThemePreference}){
+ const zh=preference.language==='zh-CN';
+ return <div className="jot-theme-control" lang={preference.language}><select className="jot-theme-select" aria-label={zh?'界面语言':'Interface language'} value={preference.language} disabled={preference.unavailable||!preference.languageAvailable||preference.light.cleanupPending||preference.light.recoveryPending} onChange={event=>{if(isApplicationLanguage(event.target.value))preference.changeLanguage(event.target.value);}}><option value="en">English</option><option value="zh-CN">简体中文</option></select><select className="jot-theme-select" aria-label={zh?'外观主题':'Appearance theme'} value={preference.mode} disabled={preference.unavailable||preference.light.cleanupPending||preference.light.recoveryPending} onChange={event=>{if(validMode(event.target.value))preference.changeMode(event.target.value);}}>
   <option value="system">{zh?'跟随系统':'System'}</option><option value="light">{zh?'浅色':'Light'}</option><option value="dark">{zh?'深色':'Dark'}</option>
  </select><details className="jot-appearance-popover" onKeyDown={event=>{if(event.key==='Escape'&&!event.defaultPrevented&&!event.nativeEvent.isComposing&&event.currentTarget.open){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>{zh?'配色':'Palette'}</summary><LightAppearanceControls light={preference.light} dark={preference.theme==='dark'} onLight={()=>preference.changeMode('light')} zh={zh}/></details>{preference.unavailable?<span role="status">{zh?'桌面外观设置暂不可用。':'Desktop appearance settings are unavailable.'}</span>:preference.pending?<span role="status">{zh?'正在保存外观…':'Saving appearance…'}</span>:preference.saveFailed&&<span role="status">{zh?'外观暂未保存，请重试。':'Appearance could not be saved. Please try again.'}</span>}</div>;
 }

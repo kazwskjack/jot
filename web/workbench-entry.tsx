@@ -19,6 +19,7 @@ type DesktopBridgeWindow=Window&{jotDesktop?:{onOpenTask?:(listener:(identity:De
 
 function WorkbenchApplication(){
  const appearance=useThemePreference();
+ useEffect(()=>{const previous=document.title,title=appearance.language==='zh-CN'?'Jot · 工作台':'Jot · Workbench';document.title=title;return()=>{if(document.title===title)document.title=previous;};},[appearance.language]);
  useEffect(registerUiDiagnostics,[]);
  const owner=useSyncExternalStore(subscribeTaskDraftScope,taskDraftScope),[revision,setRevision]=useState(0),[loading,setLoading]=useState(true),[error,setError]=useState('');
  useEffect(()=>{
@@ -28,7 +29,7 @@ function WorkbenchApplication(){
    .finally(()=>{if(!controller.signal.aborted)setLoading(false);});
   return()=>controller.abort();
  },[revision]);
- if(!owner)return <section aria-label="工作台账户恢复"><p role={loading?'status':'alert'}>{loading?'正在确认账户并恢复工作台…':error||'账户身份已变化，请重新确认连接。'}</p><button type="button" disabled={loading} onClick={()=>setRevision(value=>value+1)}>重新确认账户</button></section>;
+ if(!owner)return <section lang="zh-CN" aria-label="工作台账户恢复"><p role={loading?'status':'alert'}>{loading?'正在确认账户并恢复工作台…':error||'账户身份已变化，请重新确认连接。'}</p><button type="button" disabled={loading} onClick={()=>setRevision(value=>value+1)}>重新确认账户</button></section>;
  return <WorkbenchSession key={owner} owner={owner} appearance={appearance}/>;
 }
 function WorkbenchSession({owner,appearance}:{owner:string;appearance:ThemePreference}){
@@ -141,6 +142,6 @@ function WorkbenchSession({owner,appearance}:{owner:string;appearance:ThemePrefe
   return()=>{disposed=true;cancelAnimationFrame(frame);clearTimeout(timer);observer.disconnect();};
  },[desktopFocus,owner,view,conversation,showConversations,managementPending,taskSource,desktopOpenTask]);
  useDesktopCommands({owner,surface,sidebarVisible:layoutDisplay.value.sidebarVisible,enabled:commandEnabled,execute:executeDesktop});
-  return <div ref={surface} className="workbench-application"><header data-desktop-toolbar><a href="/">Jot</a><strong>工作台</strong><button disabled={!!conversation||managementPending} onClick={()=>setShowConversations(value=>!value)}>{showConversations?'返回工作台':'我的对话'}</button><ThemeSelector preference={appearance} zh/></header>{reloadError&&<p role="alert">{reloadError}</p>}{desktopError&&<p role="status">{desktopError}</p>}{conversation?<RoleConversation onReload={reloadConversation} ordinary={showConversations} onTaskSource={source=>{setTaskSource(source);setConversation('');setShowConversations(false);setView('persistent-tasks');}} id={conversation} onForkConversation={target=>setConversation(target)} onClose={()=>setConversation('')}/>:showConversations?<ConversationPicker onOpen={setConversation} onPendingChange={setManagementPending}/>:<Workbench onPendingChange={setManagementPending} taskSource={taskSource} onTaskSourceConsumed={()=>setTaskSource(null)} desktopOpenTask={managementPending?null:desktopOpenTask} onDesktopOpenTaskConsumed={consumeDesktopOpenTask} view={view} onOpen={setView} onConversation={setConversation}/>}</div>;
+  return <div ref={surface} className="workbench-application" lang="zh-CN"><header data-desktop-toolbar lang={appearance.language}><a href="/">Jot</a><strong>{appearance.language==='zh-CN'?'工作台':'Workbench'}</strong><button disabled={!!conversation||managementPending} onClick={()=>setShowConversations(value=>!value)}>{appearance.language==='zh-CN'?(showConversations?'返回工作台':'我的对话'):(showConversations?'Back to Workbench':'Conversations')}</button><ThemeSelector preference={appearance}/></header>{reloadError&&<p role="alert">{reloadError}</p>}{desktopError&&<p role="status">{desktopError}</p>}{conversation?<RoleConversation onReload={reloadConversation} ordinary={showConversations} onTaskSource={source=>{setTaskSource(source);setConversation('');setShowConversations(false);setView('persistent-tasks');}} id={conversation} onForkConversation={target=>setConversation(target)} onClose={()=>setConversation('')}/>:showConversations?<ConversationPicker onOpen={setConversation} onPendingChange={setManagementPending}/>:<Workbench onPendingChange={setManagementPending} taskSource={taskSource} onTaskSourceConsumed={()=>setTaskSource(null)} desktopOpenTask={managementPending?null:desktopOpenTask} onDesktopOpenTaskConsumed={consumeDesktopOpenTask} view={view} onOpen={setView} onConversation={setConversation}/>}</div>;
 }
 createRoot(document.getElementById('root')!).render(<WorkbenchApplication/>);
