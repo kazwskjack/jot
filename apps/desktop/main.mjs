@@ -14,7 +14,7 @@ import {desktopWebPreferences,isDesktopAppUrl,mayGrantNotificationPermission} fr
 import {buildTrayIconPng} from './tray-icon.mjs';
 import {resolveDesktopPaths} from './package-layout.mjs';
 import {createDesktopLifecycle} from '../../packages/desktop/src/desktop-lifecycle.mjs';
-import {createDesktopPackageLifecycle} from '../../packages/desktop/src/portable-package.mjs';
+import {createDesktopPackageLifecycle,readPinnedDesktopBuildMetadata} from '../../packages/desktop/src/portable-package.mjs';
 import {registerDesktopIpcHandlers} from '../../packages/desktop/src/ipc-handlers.mjs';
 import {createDesktopNotificationRuntime} from '../../packages/desktop/src/notification-runtime.mjs';
 import {loadDesktopNotificationState,saveDesktopNotificationState} from '../../packages/desktop/src/notification-state.mjs';
@@ -266,7 +266,13 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   window.webContents.on('did-finish-load',didFinishLoadHandler);
   window.webContents.on('render-process-gone',renderProcessGoneHandler);
   window.on('close',event=>{if(!shuttingDown&&tray&&!tray.isDestroyed()){event.preventDefault();window.hide();}});
-  desktopHelp=createDesktopHelp({app,owner:window,getWindow:()=>mainWindow,appOrigin,dialog,clipboard:electron.clipboard,shell:electron.shell,getReleaseId:()=>supervisorBootstrap?.scope?.releaseId??null,onError:report});
+  desktopHelp=createDesktopHelp({app,owner:window,getWindow:()=>mainWindow,appOrigin,dialog,clipboard:electron.clipboard,shell:electron.shell,getReleaseId:()=>supervisorBootstrap?.scope?.releaseId??null,
+   getBuildInfo:()=>{
+    if(!supervisorProducer)return null;
+    const context=supervisorProducer.identity();
+    if(!samePath(context.process.execPath,process.execPath)||!samePath(context.process.releaseRoot,dirname(process.execPath)))return null;
+    return readPinnedDesktopBuildMetadata({packageRoot:context.process.releaseRoot,releaseId:context.scope.releaseId,expectedManifestSha256:context.scope.manifestSha256,expectedTarget:context.target});
+   },onError:report});
   commandMenu=createDesktopCommandMenu({Menu,getWindow:()=>mainWindow,appOrigin,restoreWindow,openNotificationSettings,requestQuit:()=>app.quit(),help:action=>desktopHelp.run(action)});
   if(process.platform==='win32'||process.platform==='linux')window.setMenuBarVisibility(false);
   if(process.platform==='win32'||process.platform==='linux')captionMenu=createDesktopCaptionMenu({owner:window,getWindow:()=>mainWindow,appOrigin,Menu,getTemplate:()=>commandMenu.template(true),getCursor:typeof electron.screen?.getCursorScreenPoint==='function'?()=>electron.screen.getCursorScreenPoint():null});

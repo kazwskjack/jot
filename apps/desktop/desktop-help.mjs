@@ -6,19 +6,22 @@ import {isDesktopAppUrl} from './desktop-security.mjs';
 const projectWebsite='https://github.com/kazwskjack/jot';
 const links=Object.freeze({docs:projectWebsite+'#readme',issues:projectWebsite+'/issues',website:projectWebsite});
 const safe=value=>typeof value==='string'&&value.length>0&&value.length<=160&&!/[\x00-\x1f\x7f]/.test(value)?value:null;
-export function createDesktopHelp({app,owner,getWindow,appOrigin,dialog,clipboard,shell,getReleaseId,onError=()=>{}}){
+export function createDesktopHelp({app,owner,getWindow,appOrigin,dialog,clipboard,shell,getReleaseId,getBuildInfo,onError=()=>{}}){
  let disposed=false,pending=false;
  const valid=()=>!disposed&&getWindow()===owner&&!owner.isDestroyed()&&!owner.webContents.isDestroyed?.()&&!owner.webContents.isCrashed?.()&&isDesktopAppUrl(owner.webContents.getURL(),appOrigin);
  const read=()=>{
   if(!valid())throw Error('desktop_help_window_unavailable');
   const versions=Object.freeze({electron:safe(process.versions.electron),chrome:safe(process.versions.chrome),node:safe(process.versions.node)});
   const releaseId=safe(getReleaseId?.());
+  let build=null;try{const value=getBuildInfo?.();if(value&&value.release_id===releaseId&&safe(value.package_version)&&/^[a-f0-9]{40}$/.test(value.source_commit??'')&&/^[a-f0-9]{64}$/.test(value.manifest_sha256??''))build=value;}catch{}
   const info={protocol:1,name:'Jot',version:safe(app.getVersion?.()),platform:process.platform,arch:process.arch,os_release:safe(release()),
-   build_time:null,source_commit:null,launcher_release_id:releaseId,versions,project_website:projectWebsite,
+   build_time:null,source_commit:build?.source_commit??null,package_version:build?.package_version??null,package_manifest_sha256:build?.manifest_sha256??null,
+   build_source:build?'running-release-manifest':'unavailable',launcher_release_id:releaseId,versions,project_website:projectWebsite,
    license:'Project package declaration: Apache-2.0; included PilotDeck components: AGPL-3.0; see THIRD_PARTY_NOTICES.md'};
   const versionInformation=['Jot: '+(info.version??'not provided'),'OS: '+info.platform+' '+(info.os_release??'unknown')+' ('+info.arch+')',
    ...Object.entries(versions).filter(([,value])=>value).map(([name,value])=>name+': '+value),
-   'Build time: not provided','Source commit: not provided',...(releaseId?['Launcher release: '+releaseId]:[]),info.license,'PilotDeck components: Copyright © OpenBMB',projectWebsite].join('\n');
+   'Package version: '+(info.package_version??'not provided'),'Build time: not provided','Source commit: '+(info.source_commit??'not provided'),
+   'Build source: '+info.build_source,...(info.package_manifest_sha256?['Package manifest SHA-256: '+info.package_manifest_sha256]:[]),...(releaseId?['Launcher release: '+releaseId]:[]),info.license,'PilotDeck components: Copyright © OpenBMB',projectWebsite].join('\n');
   return Object.freeze({...info,version_information:versionInformation});
  };
  const copy=info=>{if(!valid()||typeof clipboard?.writeText!=='function')throw Error('desktop_help_clipboard_unavailable');clipboard.writeText(info.version_information);};

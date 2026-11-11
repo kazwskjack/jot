@@ -102,6 +102,18 @@ function stable(value){
  return '{'+keys.map(key=>JSON.stringify(key)+':'+stable(value[key])).join(',')+'}';
 }
 
+// Read metadata using the authenticated running launcher's original manifest pin.
+export function readPinnedDesktopBuildMetadata({packageRoot,expectedManifestSha256,releaseId,expectedTarget}={}){
+ if(typeof packageRoot!=='string'||!isAbsolute(packageRoot))throw Error('desktop_build_context_invalid');
+ const root=resolve(packageRoot),realRoot=canonicalPath(root);
+ if((process.platform==='win32'?realRoot.toLowerCase()!==root.toLowerCase():realRoot!==root))throw Error('desktop_build_context_invalid');
+ const id=validateReleaseId(releaseId),expected=validateManifestHash(expectedManifestSha256),binding=readDesktopManifest(realRoot,expected),manifest=binding.manifest;
+ if(id!==manifest.sourceCommit+'-'+expected.slice(0,12)+'-desktop-electron'||stable(verifiedTargetFromBinding(binding))!==stable(expectedTarget)||
+  manifest.target.platform!==process.platform||manifest.target.arch!==process.arch||typeof manifest.appVersion!=='string'||manifest.appVersion.length<1||manifest.appVersion.length>160||/[\x00-\x1f\x7f]/.test(manifest.appVersion))throw Error('desktop_build_context_invalid');
+ // The existing manifest producer records tool versions, with no build timestamp.
+ return Object.freeze({package_version:manifest.appVersion,source_commit:manifest.sourceCommit,build_time:null,manifest_sha256:expected,release_id:id});
+}
+
 function validateManifestHash(value){
  if(typeof value!=='string'||!sha256Pattern.test(value))throw new Error('desktop_package_manifest_hash_invalid');
  return value;
