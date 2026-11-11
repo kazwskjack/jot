@@ -1,3 +1,4 @@
+import {installStandaloneTerminalAdmissions} from '../terminal/standalone-schema.ts';
 import {installMessageReferenceSnapshots} from '../messages/reference-snapshots.ts';
 import {installChatCheckpoints} from '../conversations/chat-checkpoint-store.ts';
 import { readFileSync } from 'node:fs';
@@ -23,6 +24,7 @@ export function openProductDatabase(path: string): DatabaseSync {
   try {
     db.exec('PRAGMA busy_timeout=75; PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
     db.exec(readFileSync(schemaUrl, 'utf8'));
+    installStandaloneTerminalAdmissions(db);
     installMessageReferenceSnapshots(db);
     installOrdinarySteeringReconciliations(db);
     installOrdinarySteeringCustody(db);
