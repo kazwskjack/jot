@@ -10,7 +10,7 @@ export interface TerminalStreamClient {
   terminalInput(owner:string,session:string,terminal:string,attachment:string,packet:TerminalInputPacket,signal?:AbortSignal):Promise<TerminalQueued>;
 }
 
-function connectionLifetime(request:FastifyRequest,reply:FastifyReply) {
+export function connectionLifetime(request:FastifyRequest,reply:FastifyReply) {
   const controller=new AbortController(),abort=()=>controller.abort();
   request.raw.once('aborted',abort);reply.raw.once('close',abort);
   if(request.raw.aborted||reply.raw.destroyed)abort();

@@ -1,6 +1,6 @@
 # 独立原生 Session 接入
 
-当前源码已连接 Gateway 的准备、读取、派发、取消、观察流程与原生 Host 的身份、创建、只读观察实现。已确认独立 Session 的终端清单也已接入源码；独立终端的 shell/尺寸选项和显式恢复已接入源码；创建/关闭及回执已接入源码；PTY stream 和产品界面尚未接通；`ready` 只表示观察到原持久 Session，不表示终端进程已启动或 CLI 已登录。
+当前源码已连接 Gateway 的准备、读取、派发、取消、观察流程与原生 Host 的身份、创建、只读观察实现。已确认独立 Session 的终端清单也已接入源码；独立终端的 shell/尺寸选项和显式恢复已接入源码；创建/关闭及回执已接入源码；PTY 输入/输出已接入源码，产品界面尚未接通；`ready` 只表示观察到原持久 Session，不表示终端进程已启动或 CLI 已登录。
 
 ## 显式配置
 
@@ -33,7 +33,7 @@ Linux Host 使用它本机的绝对目录。工作区 ID 必须同时在 Gateway
 
 `GET /v1/standalone-terminals/admissions/:requestId/terminals` 只读取当前账户、当前配置工作区内已达到 ready 的独立 Session。Host 在读取原生终端 controller 前后核对持久 Session 身份及原确认摘要，Gateway 返回前复核 admission 状态。响应沿用既有 TerminalInventory 公共字段，不含终端输出或私有日志。
 
-此读取不会恢复 Agent、创建 Session 或终端，也不表示 CLI 已登录。独立终端操作已接入源码，尚未完成 PTY 数据流及界面；原生能力缺失会返回不可用，不伪造空清单。
+此读取不会恢复 Agent、创建 Session 或终端，也不表示 CLI 已登录。独立终端操作已接入源码，PTY 数据流已接入源码，尚未完成产品界面；原生能力缺失会返回不可用，不伪造空清单。
 
 ## 终端选项与显式恢复
 
@@ -41,7 +41,7 @@ Linux Host 使用它本机的绝对目录。工作区 ID 必须同时在 Gateway
 
 `POST /v1/standalone-terminals/admissions/:requestId/terminals/recover` 接受空对象和请求键，由用户显式调用原终端恢复路径。它只解析已确认的持久 Session，不创建缺失 Session、终端或提交提示词/CLI 命令；沿用原 SDK 的 Agent 恢复行为。缺失、忙碌或无法核对身份时返回不可用，不创建替代 Session。恢复期间断开或超时不会触发自动重试；后续可先重读选项。
 
-两条路径都需要当前账户、已配置工作区和 ready admission，Host 在操作前后验证 profile、目录、Session header、注册表及终端 controller，Gateway 返回前重读 admission。创建/关闭及命令回执已接入源码，PTY 输入/输出及界面仍待接入。
+两条路径都需要当前账户、已配置工作区和 ready admission，Host 在操作前后验证 profile、目录、Session header、注册表及终端 controller，Gateway 返回前重读 admission。创建/关闭及命令回执已接入源码，PTY 输入/输出已接入源码，产品界面仍待接入。
 
 ## 创建、关闭与原操作回执
 
@@ -53,4 +53,14 @@ Gateway 在发送前持久保存 owner、admission、原命令及状态摘要；
 
 `POST .../:requestId/terminals/commands/:commandId/end-wait` 接收原命令，保存不可改写的等待结束结果。它阻止同一请求以后派发，不取消已经获准或正在执行的命令，也不关闭终端；结束等待后可读取清单了解实际终端状态。已保存的最终结果优先，后到结果不覆盖它。
 
-上述路径仍须账户、工作区、ready admission、CSRF 和匹配的请求键。数据库安装源码已补齐，本次没有实际执行 SQL、原生终端或测试；PTY 接入与产品界面仍未完成。
+上述路径仍须账户、工作区、ready admission、CSRF 和匹配的请求键。数据库安装源码已补齐，本次没有实际执行 SQL、原生终端或测试；PTY 接入已连接源码，产品界面仍未完成。
+
+## 原生输出与输入
+
+`POST .../:requestId/terminals/:terminalId/attach` 使用既有 TerminalAttachment，沿用真实 Remote Peer、retention hold、队列、背压和断连清理。请求键必须等于 attachment_id；首帧固定原 Session、终端、host_instance 和 attachment_id，之后发送原 snapshot/output/state/ack 帧。本地代理直接转发 NDJSON，不把整条无限输出读入内存。
+
+Host 在接入前后核对持久 Session 身份，并在持续输出时核对原 profile、物理目录、Agent/Session 注册表、header 及终端 controller；连接结束或身份不符时释放原资源。没有自动恢复 Agent、创建终端或发送命令。
+
+`POST .../:requestId/terminals/:terminalId/attachments/:attachmentId/input` 沿用原 host_instance、attachment、窗口限制及严格递增 sequence；write/resize 进入原有有界队列。queued 只表示已入队，执行结果须等待原生 ack/refusal。输入不保存到命令回执，不自动重放；入队后响应或身份不确定时保留未知。
+
+Gateway 返回前复核原 admission，输入有 10 秒请求界限，接入首帧沿用 30 秒界限。两条路径均使用原账户/CSRF 与 transient route 权限；终端故障日志只保留错误码。产品界面仍待接入，实际运行行为尚未验证。

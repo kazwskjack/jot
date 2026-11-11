@@ -1,4 +1,5 @@
 import {timingSafeEqual} from 'node:crypto';
+import {registerStandaloneTerminalStreamRoutes} from './standalone-stream-routes.ts';
 import {claimStandaloneNativeAttempt} from './standalone-admissions.ts';
 import type {FastifyInstance,FastifyRequest,FastifyReply} from 'fastify';
 import {claimStandaloneTerminalCommandAttempt} from './standalone-commands.ts';
@@ -50,6 +51,7 @@ export function registerStandaloneTerminalAdmissionRoutes(app:FastifyInstance,op
   }catch(error){const result=failure(error);return reply.code(result.status).send({error:{code:result.code}});}
  });
  const service=new StandaloneTerminalAdmissions(options.db,options.workspaces,options.client),path='/v1/standalone-terminals/admissions';
+ registerStandaloneTerminalStreamRoutes(app,{admissions:service,actor:options.actor,client:options.client});
  app.get(path+'/:requestId',async(request,reply)=>{
   reply.header('cache-control','private, no-store');
   try{

@@ -5,6 +5,7 @@ import {createOrResumeSession} from './session-admission.js';
 import {sessionHeaderIdentity} from './session-header-identity.js';
 import {projectTerminalInventory,validateTerminalInventory} from '../gateway/src/terminal/inventory.js';
 import {validateTerminalOptions,validateTerminalCommand,validateTerminalReceipt} from '../gateway/src/terminal/control.js';
+import {validateTerminalAttachment,validateTerminalInputPacket,validateTerminalQueued} from '../gateway/src/terminal/stream.js';
 const id=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(value);
 const uuid=value=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
 const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
@@ -117,6 +118,34 @@ export function createStandaloneTerminalHost({bindings,allowedPresets,readIdenti
    await createOrResumeSession({controller,request:{sessionId:admission.session_id,cwd:scope.row.cwd,agentPreset:scope.row.agent_preset},agents,sessions,sessionNotFoundError,signal:active,
     beforeAdmission:async()=>{check(admission,active);if(await inspection(admission,active))throw Error('standalone_terminal_session_already_present');check(admission,active);}});
    check(admission,active);return observe(admission,active);
+  },
+  async attachTerminal(admission,terminal,input,signal){
+   if(typeof terminal!=='string'||!/^[_A-Za-z0-9-]{1,128}$/.test(terminal))throw Error('terminal_attachment_invalid');
+   const packet=validateTerminalAttachment(input),abort=new AbortController();let iterator;
+   try{return await confirmed(admission,AbortSignal.any([signal,abort.signal]),async(active,_scope,assertCurrent)=>{
+    if(typeof terminalControl?.attach!=='function')throw Error('terminal_attachment_unavailable');
+    const agent=agents.get(admission.session_id),session=sessions.get(admission.session_id),terminals=terminalController();
+    const assertLive=()=>{
+     check(admission,active,true);
+     if(!agent||agent.id!==admission.session_id||session?.id!==admission.session_id||agent.session!==session
+      ||agents.get(admission.session_id)!==agent||sessions.get(admission.session_id)!==session
+      ||digest(sessionHeaderIdentity(session?.header))!==admission.native_identity_sha256||terminalController()!==terminals)return fail();
+    };
+    assertLive();const stream=await terminalControl.attach(admission.owner_id,admission.session_id,terminal,packet,active);
+    iterator=stream[Symbol.asyncIterator]();await assertCurrent();assertLive();
+    return(async function*(){
+     try{for(;;){assertLive();const next=await iterator.next();assertLive();if(next.done)return;yield next.value;}}
+     finally{abort.abort();await iterator.return?.();}
+    })();
+   });}catch(error){abort.abort();try{await iterator?.return?.();}catch{}throw error;}
+  },
+  terminalInput(admission,terminal,attachment,input,signal){
+   if(typeof terminal!=='string'||!/^[_A-Za-z0-9-]{1,128}$/.test(terminal))throw Error('terminal_input_invalid');
+   const packet=validateTerminalInputPacket(input);validateTerminalAttachment({host_instance:packet.host_instance,attachment_id:attachment});
+   return confirmed(admission,signal,async(active)=>{
+    if(typeof terminalControl?.input!=='function')throw Error('terminal_attachment_unavailable');
+    return validateTerminalQueued(terminalControl.input(admission.owner_id,admission.session_id,terminal,attachment,packet,active),attachment,packet.command.sequence);
+   });
   },
   terminalCommand(admission,input,signal){
    const command=validateTerminalCommand(input);

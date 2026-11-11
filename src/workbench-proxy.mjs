@@ -192,7 +192,8 @@ export function registerWorkbenchProxy(app,config,localCsrf){
   }
   const terminalSessionCatalog=req.method==='GET'&&suffix==='/v1/terminal-sessions';
   const standaloneId='[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}';
-  const standaloneTerminalAdmission=req.method==='GET'&&new RegExp('^/v1/standalone-terminals/admissions/'+standaloneId+'(?:/terminals(?:/options)?)?$').test(suffix)
+  const standaloneTerminalStream=req.method==='POST'&&new RegExp('^/v1/standalone-terminals/admissions/'+standaloneId+'/terminals/[_A-Za-z0-9-]{1,128}/(?:attach|attachments/'+standaloneId+'/input)$').test(suffix);
+  const standaloneTerminalAdmission=standaloneTerminalStream||req.method==='GET'&&new RegExp('^/v1/standalone-terminals/admissions/'+standaloneId+'(?:/terminals(?:/options)?)?$').test(suffix)
    ||req.method==='POST'&&(suffix==='/v1/standalone-terminals/admissions'||new RegExp('^/v1/standalone-terminals/admissions/'+standaloneId+'/(?:control|terminals/(?:recover|commands(?:/'+standaloneId+'/(?:reconcile|end-wait))?))$').test(suffix));
   const officePreviewRead=req.method==='GET'&&['/v1/office-preview/status','/v1/office-preview/candidates','/v1/office-preview/configuration'].includes(suffix);
   const officePreviewWrite=req.method==='PATCH'&&suffix==='/v1/office-preview/configuration';
@@ -232,7 +233,7 @@ export function registerWorkbenchProxy(app,config,localCsrf){
      const value=response.headers.get(name);if(value)reply.header(name,value);
     }
    }
-   const terminalAttachment=req.method==='POST'&&/^\/v1\/conversations\/[^/]+\/runs\/[^/]+\/terminals\/[^/]+\/attach$/.test(suffix)&&type.startsWith('application/x-ndjson');
+   const terminalAttachment=(standaloneTerminalStream&&suffix.endsWith('/attach')||req.method==='POST'&&/^\/v1\/conversations\/[^/]+\/runs\/[^/]+\/terminals\/[^/]+\/attach$/.test(suffix))&&type.startsWith('application/x-ndjson');
    const reviewDownload=req.method==='GET'&&/^\/v1\/interactions\/[^/]+\/outputs\/(?:0|[1-9][0-9]{0,3})$/.test(suffix)&&type.startsWith('application/octet-stream');
     if((type.startsWith('text/event-stream')||terminalAttachment||reviewDownload||binaryDownload&&type.startsWith('application/octet-stream'))&&response.body){clearTimeout(timer);return reply.send(Readable.fromWeb(response.body));}
    if(response.status===204)return reply.send();

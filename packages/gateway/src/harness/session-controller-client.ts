@@ -277,6 +277,16 @@ export class SessionControllerClient {
   createSession(admission:StandaloneTerminalAdmission,signal:AbortSignal){
     return this.standaloneTerminalPost('/v1/standalone-terminals/create',admission,signal);
   }
+  attachStandaloneTerminal(admission:StandaloneTerminalAdmission,terminal:string,input:TerminalAttachment,signal:AbortSignal){
+    if(!/^[_A-Za-z0-9-]{1,128}$/.test(terminal))throw Error('terminal_attachment_invalid');
+    const packet=validateTerminalAttachment(input);
+    return this.attachTerminalSource('/v1/standalone-terminals/attach',{admission,terminal_id:terminal,packet},admission.session_id,terminal,packet,signal,'error');
+  }
+  standaloneTerminalInput(admission:StandaloneTerminalAdmission,terminal:string,attachment:string,input:TerminalInputPacket,signal:AbortSignal){
+    if(!/^[_A-Za-z0-9-]{1,128}$/.test(terminal))throw Error('terminal_input_invalid');
+    const packet=validateTerminalInputPacket(input);validateTerminalAttachment({host_instance:packet.host_instance,attachment_id:attachment});
+    return this.standaloneTerminalPost('/v1/standalone-terminals/input',{admission,terminal_id:terminal,attachment_id:attachment,packet},signal);
+  }
   standaloneTerminalCommand(admission:StandaloneTerminalAdmission,command:TerminalCommand,signal:AbortSignal){
     return this.standaloneTerminalPost('/v1/standalone-terminals/commands',{admission,command},signal);
   }
@@ -455,7 +465,12 @@ export class SessionControllerClient {
 
   async attachTerminal(ownerId:string,sessionId:string,terminalId:string,input:TerminalAttachment,signal?:AbortSignal):Promise<Readable>{
     if(![ownerId,sessionId].every(value=>typeof value==='string'&&DRIVER_ID.test(value))||!/^[_A-Za-z0-9-]{1,128}$/.test(terminalId))throw Error('terminal_attachment_invalid');
-    const packet=validateTerminalAttachment(input),controller=new AbortController();
+    const packet=validateTerminalAttachment(input);
+    return this.attachTerminalSource(`/v1/sessions/${encodeURIComponent(sessionId)}/terminals/${encodeURIComponent(terminalId)}/attach`,{owner_id:ownerId,packet},sessionId,terminalId,packet,signal);
+  }
+
+  private async attachTerminalSource(path:string,body:Record<string,unknown>,sessionId:string,terminalId:string,packet:TerminalAttachment,signal?:AbortSignal,redirect?:'error'):Promise<Readable>{
+    const controller=new AbortController();
     let reader:ReadableStreamDefaultReader<Uint8Array>|undefined,stream:Readable|undefined,cleanupPromise:Promise<void>|undefined;
     const abort=()=>{controller.abort();stream?.destroy();};
     const timer=setTimeout(abort,30000);
@@ -465,9 +480,9 @@ export class SessionControllerClient {
       if(reader){try{await reader.cancel();}catch{}finally{reader.releaseLock();}}
     });
     try {
-      const response=await this.fetchImpl(`${this.baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/terminals/${encodeURIComponent(terminalId)}/attach`,{
-        method:'POST',headers:{authorization:`Bearer ${this.token}`,'content-type':'application/json'},
-        body:JSON.stringify({owner_id:ownerId,packet}),signal:controller.signal});
+      const response=await this.fetchImpl(this.baseUrl+path,{
+        ...(redirect?{redirect}:{}),method:'POST',headers:{authorization:`Bearer ${this.token}`,'content-type':'application/json'},
+        body:JSON.stringify(body),signal:controller.signal});
       controller.signal.throwIfAborted();
       if(response.body)reader=response.body.getReader();
       if(!response.ok||!reader||!response.headers.get('content-type')?.startsWith('application/x-ndjson'))throw Error('terminal_attachment_unavailable');

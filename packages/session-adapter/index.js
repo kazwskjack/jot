@@ -261,7 +261,7 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
 
   const dispatch=async ({ method, url, headers, body, signal = new AbortController().signal },activityAdmissionId) => {
     if (!authorized(headers.authorization, token)) return json(401, { error: 'unauthorized' })
-    if(['/v1/standalone-terminals/authority','/v1/standalone-terminals/create','/v1/standalone-terminals/observe','/v1/standalone-terminals/inventory','/v1/standalone-terminals/options','/v1/standalone-terminals/recover','/v1/standalone-terminals/commands','/v1/standalone-terminals/receipts'].includes(url.pathname)){
+    if(['/v1/standalone-terminals/authority','/v1/standalone-terminals/create','/v1/standalone-terminals/observe','/v1/standalone-terminals/inventory','/v1/standalone-terminals/options','/v1/standalone-terminals/recover','/v1/standalone-terminals/commands','/v1/standalone-terminals/receipts','/v1/standalone-terminals/attach','/v1/standalone-terminals/input'].includes(url.pathname)){
       if(method!=='POST')return json(405,{error:'method_not_allowed'});
       if(url.search||!body||typeof body!=='object'||Array.isArray(body))return json(422,{error:'standalone_terminal_input_invalid'});
       if(!standaloneTerminalHost)return json(503,{error:'standalone_terminal_host_unavailable'});
@@ -269,6 +269,12 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
         if(url.pathname.endsWith('/authority')){
           if(Object.keys(body).sort().join(',')!=='owner_id,workspace_id')return json(422,{error:'standalone_terminal_input_invalid'});
           return json(200,await standaloneTerminalHost.readAuthority(body.owner_id,body.workspace_id,signal));
+        }
+        if(url.pathname.endsWith('/attach')||url.pathname.endsWith('/input')){
+          const attach=url.pathname.endsWith('/attach');
+          if(Object.keys(body).sort().join(',')!==(attach?'admission,packet,terminal_id':'admission,attachment_id,packet,terminal_id'))return json(422,{error:'terminal_attachment_invalid'});
+          if(attach)return{status:200,stream:await standaloneTerminalHost.attachTerminal(body.admission,body.terminal_id,body.packet,signal)};
+          return json(200,await standaloneTerminalHost.terminalInput(body.admission,body.terminal_id,body.attachment_id,body.packet,signal));
         }
         if(url.pathname.endsWith('/commands')||url.pathname.endsWith('/receipts')){
           if(Object.keys(body).sort().join(',')!=='admission,command')return json(422,{error:'standalone_terminal_input_invalid'});
@@ -1385,7 +1391,7 @@ export function apply(ctx, config = {}) {
         res.writeHead(result.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
         res.end(JSON.stringify(result.value))
       } catch (error) {
-        const terminalTransport=/^\/v1\/sessions\/[^/]+\/terminals\/[^/]+\/(?:attach|attachments\/[^/]+\/input)$/.test(String(req.url??'').split('?')[0]);
+        const terminalTransport=/^\/v1\/sessions\/[^/]+\/terminals\/[^/]+\/(?:attach|attachments\/[^/]+\/input)$/.test(String(req.url??'').split('?')[0])||['/v1/standalone-terminals/attach','/v1/standalone-terminals/input'].includes(String(req.url??'').split('?')[0]);
         console.error('[jot-jot-session-adapter] request failed', JSON.stringify(terminalTransport?{code:'terminal_transport_failed'}:adapterErrorSummary(error)))
         if (res.headersSent) return res.destroy()
         res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })

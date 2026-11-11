@@ -1,4 +1,6 @@
 import type {DatabaseSync} from 'node:sqlite';
+import type {Readable} from 'node:stream';
+import type {TerminalAttachment,TerminalInputPacket} from './stream.js';
 import {validateTerminalInventory} from './inventory.js';
 import {validateTerminalOptions,validateTerminalCommand,validateTerminalReceipt,type TerminalCommand} from './control.js';
 import {reserveStandaloneTerminalCommand,readStandaloneTerminalCommandReceipt,settleStandaloneTerminalCommand} from './standalone-commands.ts';
@@ -17,6 +19,8 @@ export interface StandaloneTerminalClient{
  recoverStandaloneTerminal?(admission:StandaloneTerminalAdmission,signal:AbortSignal):Promise<unknown>;
  standaloneTerminalCommand?(admission:StandaloneTerminalAdmission,command:TerminalCommand,signal:AbortSignal):Promise<unknown>;
  standaloneTerminalReceipt?(admission:StandaloneTerminalAdmission,command:TerminalCommand,signal:AbortSignal):Promise<unknown>;
+ attachStandaloneTerminal?(admission:StandaloneTerminalAdmission,terminal:string,packet:TerminalAttachment,signal:AbortSignal):Promise<Readable>;
+ standaloneTerminalInput?(admission:StandaloneTerminalAdmission,terminal:string,attachment:string,packet:TerminalInputPacket,signal:AbortSignal):Promise<unknown>;
 }
 export type StandaloneTerminalExpected={request_id:string;expected_version:number;expected_state_sha256:string};
 const hash=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
