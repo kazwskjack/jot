@@ -6,7 +6,7 @@ import {projectTerminalInventory} from '../gateway/src/terminal/inventory.js';
 import {validateTerminalCommand,validateTerminalOptions,validateTerminalReceipt} from '../gateway/src/terminal/control.js';
 
 /** Explicit user-terminal operations borrow the exact existing native Agent. */
-export function createTerminalControl({readIdentity,terminalController,sessionController,sessionNotFoundError,agents,sessions,createPeer,gateway}) {
+export function createTerminalControl({readIdentity,terminalController,sessionController,sessionNotFoundError,agents,sessions,createPeer,gateway,assertWorkspaceAvailable}) {
   const instances=new WeakMap();
   const receipts=new Map();
   const recoveries=new Map(),lifetime=new AbortController();
@@ -25,6 +25,7 @@ export function createTerminalControl({readIdentity,terminalController,sessionCo
     const agent=agents.get(sessionId),session=sessions.get(sessionId);
     const check=(cancellable=true)=>{
       if(cancellable)signal.throwIfAborted();
+      assertWorkspaceAvailable?.(sessionId);
       if(!agent||agent.id!==sessionId||agent.session!==session||session?.id!==sessionId
         ||agents.get(sessionId)!==agent||sessions.get(sessionId)!==session||terminalController()!==controller)
         throw Error('terminal_session_changed');
@@ -46,6 +47,7 @@ export function createTerminalControl({readIdentity,terminalController,sessionCo
     return validateTerminalOptions({protocol:1,session_id:sessionId,host_instance:hostInstance,inventory,environment,shells,execution_authorized:false},sessionId);
   }
   return Object.freeze({
+    isBusy(sessionId){return [...receipts.values()].some(record=>record.session_id===sessionId&&record.state==='pending');},
     attach:attachments.attach,
     input:attachments.input,
     async dispose(){lifetime.abort();await attachments.close();},
@@ -123,7 +125,7 @@ export function createTerminalControl({readIdentity,terminalController,sessionCo
       const {controller,agent,check}=source(ownerId,sessionId,signal,command.host_instance);
       if(typeof controller?.create!=='function'||typeof controller.close!=='function'||typeof controller.list!=='function')throw Error('terminal_control_unavailable');
       if([...receipts.values()].filter(record=>record.state==='pending').length>=32)throw Error('terminal_receipt_capacity');
-      const record={command,state:'pending',inventory:null,promise:null};
+      const record={command,session_id:sessionId,state:'pending',inventory:null,promise:null};
       receipts.set(key,record);
       record.promise=Promise.resolve().then(async()=>{
         try {

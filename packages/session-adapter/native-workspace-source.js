@@ -3,7 +3,7 @@ import {withNativeWorkspaceBarrier} from './native-workspace-barrier.js';
 import {assertNativeWorkspaceAdmissionGate} from './native-workspace-factory.js';
 import {verifyHeldSessionCheckpoint} from './checkpoint.js';
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/,SHA=/^[a-f0-9]{64}$/;
-const KINDS=new Set(['work_binding','mode_binding','runtime','run_native','checkpoint','goal_control','native_parent','native_child']);
+const KINDS=new Set(['work_binding','mode_binding','runtime','run_native','checkpoint','goal_control','native_parent','native_child','standalone_terminal']);
 const fields=(value,keys)=>!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===[...keys].sort().join(',');
 const id=value=>typeof value==='string'&&ID.test(value);
 const contexts=new WeakMap();
@@ -42,10 +42,11 @@ function verified(value,scope){
  const ids=new Set();let count=0,previous;
  const members=value.members.map(member=>{
   if(!fields(member,['session_ref','scopes','source_kinds'])||!id(member.session_ref)||ids.has(member.session_ref)
-   ||previous!==undefined&&previous.localeCompare(member.session_ref,'en')>=0||!Array.isArray(member.scopes)||!member.scopes.length||member.scopes.length>30000
+   ||previous!==undefined&&previous.localeCompare(member.session_ref,'en')>=0||!Array.isArray(member.scopes)||member.scopes.length>30000
    ||!Array.isArray(member.source_kinds)||!member.source_kinds.length||member.source_kinds.length>KINDS.size
    ||member.source_kinds.some(kind=>!KINDS.has(kind))||new Set(member.source_kinds).size!==member.source_kinds.length
    ||JSON.stringify([...member.source_kinds].sort())!==JSON.stringify(member.source_kinds))fail();
+  if(member.source_kinds.includes('standalone_terminal')?(member.source_kinds.length!==1||member.scopes.length!==0):member.scopes.length===0)fail();
   previous=member.session_ref;ids.add(member.session_ref);let prior;
   const scopes=member.scopes.map(item=>{
    if(!fields(item,['conversation_id','workspace_id'])||!id(item.conversation_id)||!id(item.workspace_id)||++count>30000)fail();
@@ -83,7 +84,7 @@ export async function readNativeWorkspaceFamily(bridge,input,signal){
  * effect grant, root association or cross-process admission lock is added.
  */
 export function createNativeWorkspaceSourceHost(options={}){
- const {registry,sessions,persistence,currentPersistence,backendClass,validateLog,projections,factoryGate,admissionGate,reconcileOperations}=options;
+ const {registry,sessions,persistence,currentPersistence,backendClass,validateLog,projections,factoryGate,admissionGate,reconcileOperations,terminalController,terminalControl}=options;
  if(typeof registry?.get!=='function'||typeof sessions?.get!=='function'||typeof persistence?.open!=='function'||typeof persistence?.stat!=='function'
   ||typeof currentPersistence!=='function'||typeof backendClass!=='function'||!(persistence instanceof backendClass)
   ||!(options.allowedPresets instanceof Set)||!options.allowedPresets.size||typeof validateLog!=='function'||!projections||!factoryGate
@@ -91,6 +92,8 @@ export function createNativeWorkspaceSourceHost(options={}){
  // Snapshot dependency selectors and transport, never retain a mutable caller
  // descriptor that could substitute another registry/store/identity mid-await.
  const bridge=Object.freeze({origin:options.bridge.origin,token:options.bridge.token,fetch:options.bridge.fetch.bind(options.bridge)});
+ const terminalSelectors=terminalController!==undefined||terminalControl!==undefined;
+ if(terminalSelectors&&(typeof terminalController!=='function'||typeof terminalControl!=='function'))throw Error('native_workspace_terminal_unavailable');
  const allowedPresets=new Set(options.allowedPresets);
  const dependencies={registry,sessions,persistence,currentPersistence,backendClass,allowedPresets,validateLog,projections,reconcileOperations};
  return Object.freeze({async withReservedFamily(input,controls,operation){
@@ -98,17 +101,29 @@ export function createNativeWorkspaceSourceHost(options={}){
   if(!controls||typeof controls!=='object'||Array.isArray(controls)||Object.keys(controls).some(key=>!['assertReservation','signal'].includes(key))
    ||typeof controls.assertReservation!=='function'||controls.signal!==undefined&&!(controls.signal instanceof AbortSignal)
    ||typeof operation!=='function')throw Error('native_workspace_host_controls_invalid');
-  const reservation=controls.assertReservation,signal=controls.signal;let residents=[];
+  const reservation=controls.assertReservation,signal=controls.signal;let residents=[],terminalSessions=[],terminalSource,terminalCommands;
   const check=()=>{
    signal?.throwIfAborted();const value=reservation();
    if(value!==undefined){if(value&&typeof value.then==='function')Promise.resolve(value).catch(()=>{});throw Error('native_workspace_reservation_invalid');}
    for(const {agent,session,preset} of residents)if(registry.get(agent.id)!==agent||sessions.get(agent.id)!==session||agent.session!==session
     ||session.header?.agentPreset!==preset)throw Error('native_workspace_source_member_changed');
+   if(terminalSource){
+    if(terminalController()!==terminalSource||terminalControl()!==terminalCommands)throw Error('native_workspace_terminal_changed');
+    for(const id of terminalSessions){const retained=terminalSource.list(id);
+     if(!Array.isArray(retained)||retained.length||terminalCommands.isBusy(id)!==false)throw Error('native_workspace_terminal_active');
+    }
+   }
   };
   const read=async(nativeCheck=check,nativeSignal=signal)=>{
    check();nativeCheck();const result=await readNativeWorkspaceFamily(bridge,scope,nativeSignal);check();nativeCheck();return result;
   };
   const source=await read();
+  if(source.members.some(member=>member.source_kinds.includes('standalone_terminal'))&&!terminalSelectors)throw Error('native_workspace_terminal_unavailable');
+  if(terminalSelectors&&source.members.length){
+   terminalSource=terminalController();terminalCommands=terminalControl();
+   if(typeof terminalSource?.list!=='function'||typeof terminalCommands?.isBusy!=='function')throw Error('native_workspace_terminal_unavailable');
+   terminalSessions=source.members.map(member=>member.session_ref);
+  }
   const members=source.members.map(member=>{
    const sessionRef=member.session_ref,agent=registry.get(sessionRef),session=sessions.get(sessionRef);
    if(agent!==undefined&&(agent?.id!==sessionRef||agent.session?.id!==sessionRef||agent.session!==session||!allowedPresets.has(session?.header?.agentPreset))

@@ -252,6 +252,14 @@ function nativeReferenceQueries(){return [
  `SELECT 'checkpoint',b.session_ref,c.owner_id,c.id,c.owner_id,c.workspace_id,c.project_id,r.conversation_id FROM ga_session_checkpoints b JOIN ga_runs r ON r.id=b.run_id JOIN ga_conversations c ON c.id=b.conversation_id`,
  `SELECT 'goal_control',b.session_id,b.owner_id,c.id,c.owner_id,c.workspace_id,c.project_id,c.id FROM ga_conversation_goal_controls b JOIN ga_conversations c ON c.id=b.conversation_id`,
  ];}
+function standaloneReferenceQuery(db:DatabaseSync,attempted:boolean){
+ if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ga_standalone_terminal_projects'").get())return null;
+ for(const table of ['ga_standalone_terminal_admissions','ga_standalone_terminal_native_attempts'])if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))throw Error('workspace_family_unconfirmed');
+ return `SELECT a.session_id session_ref,a.owner_id,p.owner_id record_owner,a.workspace_id,p.project_id,a.authority_sha256
+  ${attempted?',n.session_id attempted_session_ref,n.authority_sha256 attempted_authority_sha256':''}
+  FROM ga_standalone_terminal_projects p JOIN ga_standalone_terminal_admissions a ON a.owner_id=p.owner_id AND a.request_id=p.request_id
+  ${attempted?'JOIN ga_standalone_terminal_native_attempts n ON n.owner_id=a.owner_id AND n.request_id=a.request_id':''}`;
+}
 /** Trusted original-family inventory under the held reservation. It includes
  * archived and historical references, never resolves an Agent, and does not
  * certify native quiescence, a physical root or permission to execute. */
@@ -287,12 +295,33 @@ export function readReservedWorkspaceFamily(db:DatabaseSync,source:Source){
     conversation_id:child.conversation_id,bound_conversation:child.conversation_id,owner_id:child.scope_owner,workspace_id:child.scope_workspace,project_id:child.scope_project});
   }
  }
+ // Independent terminals have no conversation scope. Only an original durable
+ // native attempt can have activated this Session; prepared/cancelled ids stay fenced by project admission.
+ const standalone=standaloneReferenceQuery(db,true),standaloneAll=standaloneReferenceQuery(db,false);
+ if(standalone){
+  const rows=db.prepare('SELECT * FROM ('+standalone+') WHERE project_id=? LIMIT 257').all(source.project_id);
+  if(rows.length>256)throw Error('workspace_family_too_large');
+  for(const row of rows){
+   if(typeof row.session_ref!=='string'||!ID.test(row.session_ref)||typeof row.workspace_id!=='string'||!row.workspace_id||row.workspace_id.length>4096||row.workspace_id.includes('\0')
+    ||row.owner_id!==source.owner_id||row.record_owner!==source.owner_id||row.project_id!==source.project_id
+    ||row.attempted_session_ref!==row.session_ref||row.attempted_authority_sha256!==row.authority_sha256||members.has(row.session_ref))throw Error('workspace_family_ambiguous');
+   if(members.size>=256)throw Error('workspace_family_too_large');
+   members.set(row.session_ref,{scopes:new Map(),kinds:new Set(['standalone_terminal'])});
+  }
+ }
  // Detect cross-table collisions too: individual binding tables have their own
  // unique indexes, but another project's alias must not borrow this live Agent.
  const ids=[...members.keys()];if(ids.length){
   const ambiguous=db.prepare(`SELECT 1 FROM (${union}) WHERE session_ref IN(${ids.map(()=>'?').join(',')})
    AND(owner_id IS NOT ? OR record_owner IS NOT ? OR project_id IS NOT ? OR bound_conversation IS NOT conversation_id) LIMIT 1`).get(...ids,source.owner_id,source.owner_id,source.project_id);
   if(ambiguous)throw Error('workspace_family_ambiguous');
+  if(standaloneAll){
+   const aliases=db.prepare('SELECT * FROM ('+standaloneAll+') WHERE session_ref IN('+ids.map(()=>'?').join(',')+') LIMIT 257').all(...ids);
+   if(aliases.length>256)throw Error('workspace_family_too_large');
+   for(const alias of aliases){const member=members.get(String(alias.session_ref));
+    if(alias.owner_id!==source.owner_id||alias.record_owner!==source.owner_id||alias.project_id!==source.project_id||!member||member.kinds.size!==1||!member.kinds.has('standalone_terminal'))throw Error('workspace_family_ambiguous');
+   }
+  }
   if(nativeTable){
    const slots=ids.map(()=>'?').join(','),parent=`CASE WHEN json_valid(b.snapshot_json) THEN json_extract(b.snapshot_json,'$.parent_session_ref') END`;
    const collision=db.prepare(`SELECT 1 FROM wb_native_child_reservations b JOIN ga_runs r ON r.id=b.root_run_id
@@ -347,6 +376,8 @@ export function assertNativeWorkspaceAdmission(db:DatabaseSync,sessionRef:string
   for(const ref of ['b.child_session_ref',"CASE WHEN json_valid(b.snapshot_json) THEN json_extract(b.snapshot_json,'$.parent_session_ref') END"])
    queries.push(`SELECT 'native_child',${ref},b.owner_id,c.id,c.owner_id,c.workspace_id,c.project_id,c.id FROM wb_native_child_reservations b JOIN ga_runs r ON r.id=b.root_run_id JOIN ga_conversations c ON c.id=r.conversation_id`);
  }
+ const standalone=standaloneReferenceQuery(db,false);
+ if(standalone)queries.push(`SELECT 'standalone_terminal',session_ref,record_owner,NULL,owner_id,workspace_id,project_id,NULL FROM (${standalone})`);
  const known=db.prepare(`SELECT DISTINCT * FROM (${queries.join(' UNION ALL ')}) WHERE session_ref=? LIMIT 257`).all(sessionRef);
  if(!known.length||known.length>256)throw Error('workspace_namespace_unconfirmed');
  const scopes=new Set<string>();

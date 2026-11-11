@@ -2,7 +2,7 @@ import type {DatabaseSync} from 'node:sqlite';
 import {createHash} from 'node:crypto';
 import {canonicalJson} from '../db/canonical-json.ts';
 import {withImmediateTransaction,withReadTransaction} from '../db/database.ts';
-import {readStandaloneTerminalAdmission,type StandaloneTerminalAdmission} from './standalone-admissions.ts';
+import {assertStandaloneTerminalProject,readStandaloneTerminalAdmission,type StandaloneTerminalAdmission} from './standalone-admissions.ts';
 import {validateTerminalCommand,validateTerminalReceipt,type TerminalCommand,type TerminalReceipt} from './control.js';
 
 type Row={owner_id:string;admission_id:string;request_id:string;command_sha256:string;command_json:string;
@@ -95,8 +95,11 @@ export function claimStandaloneTerminalCommandAttempt(db:DatabaseSync,input:Stan
    .get(input.owner_id,input.admission_id,input.request_id) as Row|undefined;
   if(!saved||saved.command_sha256!==input.command_sha256||saved.admission_state_sha256!==input.admission_state_sha256)throw Error('standalone_terminal_command_conflict');
   const allowed=saved.native_attempted_at===null&&saved.receipt_json===null;
-  if(allowed)db.prepare('UPDATE ga_standalone_terminal_commands SET native_attempted_at=? WHERE owner_id=? AND admission_id=? AND request_id=?')
-   .run(new Date().toISOString(),input.owner_id,input.admission_id,input.request_id);
+  if(allowed){
+   assertStandaloneTerminalProject(db,admission);
+   db.prepare('UPDATE ga_standalone_terminal_commands SET native_attempted_at=? WHERE owner_id=? AND admission_id=? AND request_id=?')
+    .run(new Date().toISOString(),input.owner_id,input.admission_id,input.request_id);
+  }
   return{...input,protocol:1 as const,attempt_allowed:allowed,execution_authorized:false as const};
  });
 }

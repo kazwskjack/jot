@@ -271,8 +271,8 @@ export class SessionControllerClient {
     if(!response.ok)throw Error('standalone_terminal_source_unconfirmed');
     return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
   }
-  readAuthority(owner:string,workspace:string,signal:AbortSignal){
-    return this.standaloneTerminalPost('/v1/standalone-terminals/authority',{owner_id:owner,workspace_id:workspace},signal);
+  readAuthority(owner:string,workspace:string,signal:AbortSignal,project?:string){
+    return this.standaloneTerminalPost('/v1/standalone-terminals/authority',{owner_id:owner,workspace_id:workspace,...(project===undefined?{}:{project_id:project})},signal);
   }
   createSession(admission:StandaloneTerminalAdmission,signal:AbortSignal){
     return this.standaloneTerminalPost('/v1/standalone-terminals/create',admission,signal);

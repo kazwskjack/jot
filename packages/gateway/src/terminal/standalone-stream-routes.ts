@@ -20,7 +20,7 @@ export function registerStandaloneTerminalStreamRoutes(app:FastifyInstance,optio
  function scope(request:FastifyRequest){
   const owner=options.actor(request),params=request.params as {requestId:string;terminalId:string;attachmentId?:string};
   if(!uuid(params.requestId)||!/^[_A-Za-z0-9-]{1,128}$/.test(params.terminalId)||Object.keys(request.query as object).length)throw Error('terminal_attachment_invalid');
-  const binding=()=>options.admissions.read(owner,params.requestId),source=binding();
+  const binding=()=>options.admissions.readNative(owner,params.requestId),source=binding();
   if(!source)throw Error('standalone_terminal_admission_missing');
   if(source.state!=='ready')throw Error('standalone_terminal_transition_invalid');
   return{params,binding,source};

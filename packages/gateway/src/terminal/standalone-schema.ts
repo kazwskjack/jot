@@ -10,6 +10,13 @@ export function installStandaloneTerminalAdmissions(db:DatabaseSync){
   created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
   PRIMARY KEY(owner_id,request_id),
   CHECK((state='ready' AND native_identity_sha256 IS NOT NULL) OR (state<>'ready' AND native_identity_sha256 IS NULL)));
+  CREATE TABLE IF NOT EXISTS ga_standalone_terminal_projects(
+   owner_id TEXT NOT NULL,request_id TEXT NOT NULL,project_id TEXT NOT NULL REFERENCES ga_projects(id),
+   PRIMARY KEY(owner_id,request_id),FOREIGN KEY(owner_id,request_id) REFERENCES ga_standalone_terminal_admissions(owner_id,request_id));
+  CREATE TRIGGER IF NOT EXISTS ga_standalone_terminal_project_immutable BEFORE UPDATE ON ga_standalone_terminal_projects
+   BEGIN SELECT RAISE(ABORT,'standalone_terminal_project_immutable'); END;
+  CREATE TRIGGER IF NOT EXISTS ga_standalone_terminal_project_retained BEFORE DELETE ON ga_standalone_terminal_projects
+   BEGIN SELECT RAISE(ABORT,'standalone_terminal_project_immutable'); END;
   CREATE TABLE IF NOT EXISTS ga_standalone_terminal_native_attempts(
    owner_id TEXT NOT NULL,request_id TEXT NOT NULL,session_id TEXT NOT NULL,authority_sha256 TEXT NOT NULL,attempted_at TEXT NOT NULL,
    PRIMARY KEY(owner_id,request_id),FOREIGN KEY(owner_id,request_id) REFERENCES ga_standalone_terminal_admissions(owner_id,request_id));

@@ -12,6 +12,8 @@ const uuid=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{
 const hash=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 function failure(error:unknown){
  const code=(error as Error)?.message;
+ if(code==='project_not_found')return{status:404,code:'PROJECT_NOT_FOUND'};
+ if(code==='project_deleted')return{status:409,code:'PROJECT_DELETED'};
  if(code==='unauthorized')return{status:401,code:'UNAUTHORIZED'};
  if(code==='standalone_terminal_catalog_cursor_invalid')return{status:422,code:'STANDALONE_TERMINAL_CATALOG_CURSOR_INVALID'};
  if(code==='terminal_command_invalid')return{status:422,code:'TERMINAL_INPUT_INVALID'};
@@ -124,8 +126,8 @@ export function registerStandaloneTerminalAdmissionRoutes(app:FastifyInstance,op
    const owner=options.actor(request),body=request.body;
    if(Object.keys(request.query as object).length||!object(body))throw Error('standalone_terminal_input_invalid');
    if(!control){
-    if(!exact(body,'request_id,workspace_id')||!uuid(body.request_id)||typeof body.workspace_id!=='string'||request.headers['idempotency-key']!==body.request_id)throw Error('standalone_terminal_input_invalid');
-    return await service.prepare(owner,{request_id:body.request_id,workspace_id:body.workspace_id},abort.signal);
+    if(!(exact(body,'request_id,workspace_id')||exact(body,'project_id,request_id,workspace_id'))||!uuid(body.request_id)||typeof body.workspace_id!=='string'||body.project_id!==undefined&&(typeof body.project_id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(body.project_id))||request.headers['idempotency-key']!==body.request_id)throw Error('standalone_terminal_input_invalid');
+    return await service.prepare(owner,{request_id:body.request_id,workspace_id:body.workspace_id,...(body.project_id===undefined?{}:{project_id:String(body.project_id)})},abort.signal);
    }
    const id=(request.params as {requestId:string}).requestId;
    if(!uuid(id)||!exact(body,'action,expected_state_sha256,expected_version')||!['dispatch','cancel','observe'].includes(String(body.action))

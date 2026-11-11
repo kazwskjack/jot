@@ -21,11 +21,11 @@ function directory(path){
 export function normalizeStandaloneTerminalBindings(bindings,allowedPresets){
  if(!Array.isArray(bindings)||bindings.length>64||!(allowedPresets instanceof Set))throw Error('standalone_terminal_config_invalid');
  const seen=new Set();return Object.freeze(bindings.map(row=>{
-  if(!plain(row)||Object.keys(row).sort().join(',')!=='agent_preset,cwd,workspace_id'
+  if(!plain(row)||!['agent_preset,cwd,workspace_id','agent_preset,cwd,project_id,workspace_id'].includes(Object.keys(row).sort().join(','))
    ||typeof row.workspace_id!=='string'||!row.workspace_id.trim()||row.workspace_id.length>4096||row.workspace_id.includes('\0')
    ||typeof row.cwd!=='string'||!isAbsolute(row.cwd)||row.cwd.includes('\0')||!allowedPresets.has(row.agent_preset)
-   ||row.agent_preset==='jot-workbench-budgeted'||seen.has(row.workspace_id))throw Error('standalone_terminal_config_invalid');
-  seen.add(row.workspace_id);return Object.freeze({...row});
+   ||row.project_id!==undefined&&!id(row.project_id)||row.agent_preset==='jot-workbench-budgeted'||seen.has(JSON.stringify([row.workspace_id,row.project_id??null])))throw Error('standalone_terminal_config_invalid');
+  seen.add(JSON.stringify([row.workspace_id,row.project_id??null]));return Object.freeze({...row});
  }));
 }
 /** Native owner profile and operator-provisioned paths supply all creation authority. */
@@ -35,28 +35,28 @@ export function createStandaloneTerminalHost({bindings,allowedPresets,readIdenti
  if(!id(origin?.ownerId)||!id(origin?.profileId)||typeof origin.profileDirectory!=='string'||!isAbsolute(origin.profileDirectory)
   ||['inspect','resolveAgent','create'].some(method=>typeof controller?.[method]!=='function'))throw Error('standalone_terminal_host_unavailable');
  const profileDirectory=directory(origin.profileDirectory),rows=new Map(normalizeStandaloneTerminalBindings(bindings,allowedPresets).map(row=>{
-  const root=directory(row.cwd);return[row.workspace_id,Object.freeze({...row,cwd:root.path,directory:root})];
+  const root=directory(row.cwd);return[JSON.stringify([row.workspace_id,row.project_id??null]),Object.freeze({...row,cwd:root.path,directory:root})];
  }));
- const current=(owner,workspace,signal)=>{
+ const current=(owner,workspace,signal,project)=>{
   signal.throwIfAborted();lifetime.signal.throwIfAborted();
-  const identity=readIdentity(),row=rows.get(workspace);
+  const identity=readIdentity(),row=rows.get(JSON.stringify([workspace,project??null]));
   if(!row||owner!==origin.ownerId||identity.ownerId!==origin.ownerId||identity.profileId!==origin.profileId
    ||identity.profileDirectory!==origin.profileDirectory||sessionController()!==controller
    ||canonical(directory(profileDirectory.path))!==canonical(profileDirectory)||canonical(directory(row.cwd))!==canonical(row.directory))return fail();
-  return{row,authority: Object.freeze({protocol:1,owner_id:owner,workspace_id:workspace,profile_id:identity.profileId,
+  return{row,authority: Object.freeze({protocol:1,owner_id:owner,workspace_id:workspace,profile_id:identity.profileId,...(row.project_id===undefined?{}:{project_id:row.project_id}),
    authority_sha256:digest({protocol:1,purpose:'standalone_terminal_session',owner_id:owner,profile_id:identity.profileId,
-    profile_directory:profileDirectory,workspace_id:workspace,directory:row.directory,agent_preset:row.agent_preset}),execution_authorized:false})};
+    profile_directory:profileDirectory,workspace_id:workspace,...(row.project_id===undefined?{}:{project_id:row.project_id}),directory:row.directory,agent_preset:row.agent_preset}),execution_authorized:false})};
  };
  const check=(admission,signal,allowReady=false)=>{
-  if(!plain(admission)||Object.keys(admission).sort().join(',')!=='authority_sha256,created_at,execution_authorized,native_identity_sha256,owner_id,protocol,request_id,session_id,state,state_sha256,updated_at,version,workspace_id'
-   ||admission.protocol!==1||admission.execution_authorized!==false||!id(admission.owner_id)||!uuid(admission.request_id)
+  if(!plain(admission)||Object.keys(admission).sort().join(',')!==(admission.project_id===undefined?'authority_sha256,created_at,execution_authorized,native_identity_sha256,owner_id,protocol,request_id,session_id,state,state_sha256,updated_at,version,workspace_id':'authority_sha256,created_at,execution_authorized,native_identity_sha256,owner_id,project_id,protocol,request_id,session_id,state,state_sha256,updated_at,version,workspace_id')
+   ||admission.protocol!==1||admission.execution_authorized!==false||!id(admission.owner_id)||admission.project_id!==undefined&&!id(admission.project_id)||!uuid(admission.request_id)
    ||typeof admission.session_id!=='string'||!admission.session_id.startsWith('jot-standalone-')||!uuid(admission.session_id.slice('jot-standalone-'.length))
    ||(allowReady?admission.state!=='ready'||!hash(admission.native_identity_sha256):!['dispatched','unknown'].includes(admission.state)||admission.native_identity_sha256!==null)
    ||!hash(admission.state_sha256)||!hash(admission.authority_sha256)||!Number.isSafeInteger(admission.version)||admission.version<1
    ||typeof admission.created_at!=='string'||typeof admission.updated_at!=='string')return fail();
   const original=Object.fromEntries(Object.entries(admission).filter(([key])=>!['protocol','state_sha256','execution_authorized'].includes(key)));
   if(digest(original)!==admission.state_sha256)return fail();
-  const scope=current(admission.owner_id,admission.workspace_id,signal);
+  const scope=current(admission.owner_id,admission.workspace_id,signal,admission.project_id);
   if(scope.authority.authority_sha256!==admission.authority_sha256)return fail();
   return scope;
  };
@@ -101,7 +101,7 @@ export function createStandaloneTerminalHost({bindings,allowedPresets,readIdenti
   return value;
  });
  return Object.freeze({
-  readAuthority(owner,workspace,signal){return current(owner,workspace,signal).authority;},
+  readAuthority(owner,workspace,signal,project){return current(owner,workspace,signal,project).authority;},
   async observeSession(admission,signal){return observe(admission,AbortSignal.any([signal,lifetime.signal]));},
   async createSession(admission,signal){
    const active=AbortSignal.any([signal,lifetime.signal]),scope=check(admission,active);

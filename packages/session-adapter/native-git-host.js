@@ -65,7 +65,7 @@ export async function createNativeGitHost({ctx,bridge,admissionGate,allowedPrese
   const require=createRequire(ctx.get('profileContext').installAnchor),{SessionPersistence,SessionPersistenceNotFoundError}=require('@deepseek-ai/dsh-session-persistence'),{Session}=require('@deepseek-ai/dsh-session');
   const registry=ctx.agents,sessions=ctx.sessions,persistence=ctx.sessionPersistence;
   factoryGate=createNativeWorkspaceFactoryGate({ctx,registry,sessions,persistence,currentPersistence:()=>ctx.sessionPersistence,notFoundError:SessionPersistenceNotFoundError});
-  const source=createNativeWorkspaceSourceHost({bridge,registry,sessions,persistence,currentPersistence:()=>ctx.sessionPersistence,backendClass:SessionPersistence,allowedPresets:new Set(allowedPresets),validateLog:createNativeInvariantReplay({Session}),projections:ctx.sessionProjections,factoryGate,admissionGate});
+  const source=createNativeWorkspaceSourceHost({bridge,registry,sessions,persistence,currentPersistence:()=>ctx.sessionPersistence,backendClass:SessionPersistence,allowedPresets:new Set(allowedPresets),terminalController:()=>ctx.get('terminalController',false),terminalControl:()=>ctx.get('jotTerminalControl',false),validateLog:createNativeInvariantReplay({Session}),projections:ctx.sessionProjections,factoryGate,admissionGate});
   const nativeWorkspaceHost={
    withReservedFamily(scope,controls,operation){check();return source.withReservedFamily(scope,{...controls,assertReservation(){check();return controls.assertReservation();}},operation);},
    inspect(context){check();return inspectNativeWorkspaceSource(context);},assertAdmission(context){check();return assertNativeWorkspaceSourceAdmission(context);},

@@ -2,6 +2,11 @@
 // hooks. This is not an upstream API, a persistence lock or an execution grant.
 const holds=new WeakMap(),gates=new WeakMap(),trustedGates=new WeakSet(),admissionGates=new WeakMap();
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/;
+/** Trusted native controls only: a held namespace cannot start or feed a user terminal. */
+export function assertNativeWorkspaceFactoryAvailable(ctx,sessionRef){
+ if(typeof sessionRef!=='string'||!ID.test(sessionRef))throw Error('native_workspace_factory_hold_invalid');
+ gates.get(ctx)?.assertAvailable(sessionRef);
+}
 export function claimNativeWorkspaceFactory(gate,ids){
  if(!gate||!trustedGates.has(gate))throw Error('native_workspace_factory_unavailable');
  return gate.claim(ids);
@@ -30,6 +35,9 @@ export function createNativeWorkspaceFactoryGate({ctx,registry,sessions,persiste
  try{for(const event of ['agent/before-setup','agent/after-setup','agent/created'])removers.push(ctx.on(event,fence,{prepend:true}));}
  catch(error){for(const remove of removers.reverse())remove();throw error;}
  const gate={
+  assertAvailable(sessionRef){
+   if(stopped||owners.has(sessionRef)||currentPersistence()?.identity!==persistence.identity)throw Error('native_workspace_factory_fenced');
+  },
   claim(ids){
    if(stopped)throw Error('native_workspace_factory_inactive');
    if(currentPersistence()?.identity!==persistence.identity)throw Error('native_workspace_factory_unavailable');

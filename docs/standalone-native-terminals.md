@@ -92,3 +92,17 @@ Gateway 返回前复核原 admission，输入有 10 秒请求界限，接入首�
 恢复标记在重载、保存和结束等待中保留。原回执读取若返回 not_admitted，恢复请求仍保留并停止，不进入原先用于新请求的首次执行分支。原生重启、回执淘汰或服务端记录不可用都不能授权重放；用户可显式核对或保留未知并结束等待。已完成、拒绝或等待结束的最终回执沿用原不可改写结果。
 
 本次补充命令目录索引安装源码及 API/type/proxy 声明，未执行 SQL、原生终端、浏览器或测试。下一步继续对照原 StandaloneShell 与 ProviderLoginModal 的项目绑定、提供方关联和过程完成范围；整体吸收仍未完成。
+
+## 选择已有项目
+
+设置使用既有账户项目目录选择可选 project_id；不接收浏览器目录或 preset。项目关联与 admission 在同一事务中保存，关联不可改写或删除；同一请求不能切换项目。项目 ID 进入新记录的状态摘要与原生配置摘要。旧工作区记录不增加空项目字段，保留原摘要和恢复路径。
+
+Host 的 standaloneTerminalWorkspaces 可额外包含 project_id，例如 `{ "workspace_id": "default", "project_id": "project-<原项目ID>", "cwd": "E:/codex/project", "agent_preset": "jot-general" }`。同一工作区可配置不同项目，各自绑定 Host 本机已存在的真实目录。项目路径来自操作方映射，不使用 Gateway 的项目 blob 存储目录，也不回退到工作区默认目录。项目绑定要求原 nativeWorkspaceAdmission 配置为 true，沿用原启动前存储/Agent admission hooks。
+
+准备、Session/终端派发资格及原生操作前会重新核对原项目归属和现有工作区预留；删除项目或原预留持有时不取得新执行资格。原历史 admission/命令记录仍可读取，未知结果和结束等待不会因项目状态变化被丢弃。归档策略沿用原 ProjectRepository.assertOwned，不另授目录访问权。
+
+有原生尝试记录的独立 Session 会作为 standalone_terminal 成员进入原项目维护清单，不创建虚构对话或 run；它没有 conversation scopes。未取得原生资格的准备/取消身份不会伪装成活跃 Session，之后的创建仍受项目预留与原 SDK admission hooks 阻挡。跨 owner/project 或双重用途别名保持拒绝。
+
+原工厂持有 Session namespace 时，Jot 终端的借用、输入和操作检查会拒绝该身份。原生维护屏障还会核对同一终端 controller/control、在途调用以及 SDK 保留资源清单；清理失败、保留屏幕或正在创建/关闭的终端均不视为静止。正常维护前应通过原控件关闭相关终端；已有维护预留先通过原操作控制处理。该边界覆盖已登记的 Jot Session/终端，不表示操作系统其他程序被隔离。
+
+上述实现依据本地固定版本 SDK 源码中 create/close 等待分配和清理、list 包含未清理 allocations 的行为。本次仅阅读源码并修改开发分支，没有执行 SDK、数据库安装、终端、浏览器或测试。提供方关联和过程完成接口仍需继续对照原实现。

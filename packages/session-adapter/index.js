@@ -48,7 +48,7 @@ import { createSkillContentCommand, createSkillContentReader } from './skill-con
 import {createNativeCommandQueryHost} from './native-command-query.js'
 import {nativePlanModePolicy} from '../skills/plan-mode-command.js'
 import { createSkillCatalogCommand, createSkillCatalogReader, createSkillResourceCommand, createSkillResourceReader } from './skill-catalog-reader.js'
-import {createNativeWorkspaceAdmissionGate} from './native-workspace-factory.js'
+import {assertNativeWorkspaceFactoryAvailable,createNativeWorkspaceAdmissionGate} from './native-workspace-factory.js'
 import {createNativeGitHost,normalizeNativeGitHostConfig} from './native-git-host.js'
 import {createMcpControlHost,createMcpControlRouteHandler} from './mcp-control-host.js'
 import {createMcpDiscoveryScopeResolver} from './mcp-discovery-control.js'
@@ -267,8 +267,8 @@ export function createAdapterHandler({ controller, fileUploads, agents, sessions
       if(!standaloneTerminalHost)return json(503,{error:'standalone_terminal_host_unavailable'});
       try{
         if(url.pathname.endsWith('/authority')){
-          if(Object.keys(body).sort().join(',')!=='owner_id,workspace_id')return json(422,{error:'standalone_terminal_input_invalid'});
-          return json(200,await standaloneTerminalHost.readAuthority(body.owner_id,body.workspace_id,signal));
+          if(!['owner_id,workspace_id','owner_id,project_id,workspace_id'].includes(Object.keys(body).sort().join(','))||body.project_id!==undefined&&(typeof body.project_id!=='string'||!ID.test(body.project_id)))return json(422,{error:'standalone_terminal_input_invalid'});
+          return json(200,await standaloneTerminalHost.readAuthority(body.owner_id,body.workspace_id,signal,body.project_id));
         }
         if(url.pathname.endsWith('/attach')||url.pathname.endsWith('/input')){
           const attach=url.pathname.endsWith('/attach');
@@ -1042,7 +1042,10 @@ export function apply(ctx, config = {}) {
     ctx.provide('jotHooksRuntime',hooksRuntime);
     ctx.effect(()=>()=>hooksRuntime.close());
   }
-  if(config.standaloneTerminalWorkspaces!==undefined)normalizeStandaloneTerminalBindings(config.standaloneTerminalWorkspaces,new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')));
+  if(config.standaloneTerminalWorkspaces!==undefined){
+    const bindings=normalizeStandaloneTerminalBindings(config.standaloneTerminalWorkspaces,new Set([...ALLOWED_AGENT_PRESETS].filter(preset=>preset!=='jot-workbench-budgeted')));
+    if(bindings.some(row=>row.project_id!==undefined)&&config.nativeWorkspaceAdmission!==true)throw Error('standalone_terminal_project_admission_required');
+  }
   if(config.pluginProfileEnabled!==undefined&&typeof config.pluginProfileEnabled!=='boolean')throw Error('plugin_profile_config_invalid');
   if(config.pluginProfileEnabled===true&&config.hostSettingsBootstrap===undefined)throw Error('plugin_profile_bootstrap_required');
   if(config.hostCredentialRefs!==undefined&&validateHostCredentialRefs(config.hostCredentialRefs).length&&(!config.hostSettingsBootstrap||config.hostSettingsOwnerRoutesEnabled!==true))throw Error('host_credentials_route_invalid')
@@ -1336,11 +1339,12 @@ export function apply(ctx, config = {}) {
     ctx.effect(()=>()=>nativeWorkspaceFileReader.dispose());
     const terminalControl=createTerminalControl({readIdentity:()=>resolveOwnerBoundDshProfileContext(ctx.get('profileContext')),
       terminalController:()=>ctx.get('terminalController',false),sessionController:()=>ctx.sessionController,sessionNotFoundError:ApiSessionNotFound,agents:ctx.agents,sessions:ctx.sessions,
-      gateway:()=>ctx.get('typertGateway',false),createPeer:()=>{
+      assertWorkspaceAvailable:sessionId=>assertNativeWorkspaceFactoryAvailable(ctx,sessionId),gateway:()=>ctx.get('typertGateway',false),createPeer:()=>{
         const connection=ctx.get('connection',false);
         if(typeof connection?.createPeer!=='function')throw Error('terminal_attachment_unavailable');
         return connection.createPeer({principal:{kind:'owner'},interactions:'none'});
       }});
+    ctx.provide('jotTerminalControl',terminalControl);
     ctx.effect(()=>()=>terminalControl.dispose());
     if(config.standaloneTerminalWorkspaces?.length&&['claimStandaloneTerminalAttempt','claimStandaloneTerminalCommand'].some(method=>typeof workbenchBridge?.[method]!=='function'))throw Error('standalone_terminal_host_unavailable');
     const standaloneTerminalHost=config.standaloneTerminalWorkspaces?.length?createStandaloneTerminalHost({bindings:config.standaloneTerminalWorkspaces,

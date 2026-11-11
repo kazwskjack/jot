@@ -10,7 +10,7 @@ import {useResource} from '../workbench/useResource';
 import {StandaloneTerminalCommandStore} from './terminal-command-store.mjs';
 import {StandaloneTerminalSessionStore,validateStandaloneTerminalAdmission,validateStandaloneTerminalCatalog} from './standalone-terminal-session.mjs';
 import type {StandaloneTerminalAdmission,StandaloneTerminalAdmissionCatalog} from '../../packages/gateway/src/terminal/standalone-admissions';
-type Intent={request_id:string;workspace_id:string};
+type Intent={request_id:string;workspace_id:string;project_id?:string};
 type Workspace={workspace_id:string;title:string;can_read:boolean;can_write:boolean};
 /** Explicit independent Session creation preserves its identity before the first request. */
 export default function StandaloneTerminals({scopeKey,workspaces,onInputPendingChange}:{scopeKey:string;workspaces:readonly Workspace[];onInputPendingChange:(value:boolean)=>void}){
@@ -21,14 +21,14 @@ export default function StandaloneTerminals({scopeKey,workspaces,onInputPendingC
   return{store,items,selected,error:''};
  }catch{return{store:null,items:[] as Intent[],selected:'',error:'standalone_terminal_storage_invalid'};}});
  const [items,setItems]=useState<Intent[]>(journal.items),[selected,setSelected]=useState(journal.selected);
- const [workspace,setWorkspace]=useState(workspaces.find(item=>item.can_read&&item.can_write)?.workspace_id??'');
+ const [workspace,setWorkspace]=useState(workspaces.find(item=>item.can_read&&item.can_write)?.workspace_id??''),[project,setProject]=useState('');
  const [opened,setOpened]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [snapshot,setSnapshot]=useState<StandaloneTerminalAdmission>(),[inputPending,setInputPending]=useState(false);
  const [terminalEpoch,setTerminalEpoch]=useState(0),[historyRevision,setHistoryRevision]=useState(0);
  const pendingInput=useRef(false);
  const alive=useRef(true),operation=useRef<AbortController|null>(null),selection=useRef(selected);selection.current=selected;
  const intent=items.find(item=>item.request_id===selected),value=snapshot?.request_id===selected?snapshot:undefined;
- const locked=busy||mutationPending||inputPending,canPrepare=workspaces.some(item=>item.workspace_id===workspace&&item.can_read&&item.can_write);
+ const locked=busy||mutationPending||inputPending;
  const [cursors,setCursors]=useState<Array<string|null>>([null]),[page,setPage]=useState(0),before=cursors[page]??null;
  const catalog=useResource(async signal=>{
   if(taskDraftScope()!==scopeKey)throw Error('terminal_session_scope_changed');
@@ -37,6 +37,15 @@ export default function StandaloneTerminals({scopeKey,workspaces,onInputPendingC
   return{...result,scope:scopeKey};
  },JSON.stringify(['standalone-terminal-catalog',scopeKey,before]),opened&&/^[a-f0-9]{64}$/.test(scopeKey));
  const currentCatalog=!catalog.loading&&!catalog.error&&catalog.data?.scope===scopeKey&&catalog.data.before_request_id===before?catalog.data:null;
+ const projects=useResource(async signal=>{
+  if(taskDraftScope()!==scopeKey)throw Error('terminal_session_scope_changed');
+  const data=await request<{items:Array<{id:string;title:string}>}>('/projects','GET',undefined,undefined,signal);
+  if(!data||!Array.isArray(data.items)||data.items.some(item=>!item||typeof item.id!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(item.id)||typeof item.title!=='string')
+   ||new Set(data.items.map(item=>item.id)).size!==data.items.length||taskDraftScope()!==scopeKey)throw Error('terminal_project_scope_unconfirmed');
+  return{items:data.items.map(item=>({id:item.id,title:item.title})),scope:scopeKey};
+ },JSON.stringify(['standalone-terminal-projects',scopeKey]),opened&&/^[a-f0-9]{64}$/.test(scopeKey));
+ const currentProjects=!projects.loading&&!projects.error&&projects.data?.scope===scopeKey?projects.data:null;
+ const canPrepare=workspaces.some(item=>item.workspace_id===workspace&&item.can_read&&item.can_write)&&(!project||Boolean(currentProjects?.items.some(item=>item.id===project)));
  const inputChanged=useCallback((_id:string,pending:boolean)=>{pendingInput.current=pending;setInputPending(pending);onInputPendingChange(pending);},[onInputPendingChange]);
  const activeChanged=useCallback((_id:string,_active:boolean)=>{},[]);
  const settled=useCallback((message?:string)=>{if(message)setNotice(message);setHistoryRevision(value=>value+1);},[]);
@@ -62,13 +71,13 @@ export default function StandaloneTerminals({scopeKey,workspaces,onInputPendingC
  useEffect(()=>{if(opened&&intent)void perform(intent,'read');},[opened,selected]);
  function prepare(){
   if(locked||pendingInput.current||operation.current||!journal.store||taskDraftScope()!==scopeKey||!canPrepare)return;
-  const original={request_id:crypto.randomUUID(),workspace_id:workspace};
+  const original={request_id:crypto.randomUUID(),workspace_id:workspace,...(project?{project_id:project}:{})};
   try{const next=journal.store.add(original) as Intent[];setItems(next);selection.current=original.request_id;setSelected(original.request_id);setSnapshot(undefined);void perform(original,'prepare');}
   catch{setError(t('无法保存原请求，尚未发送。请保留当前记录。','The original request could not be saved and was not sent. Keep the current records.'));}
  }
  function openExisting(admitted:StandaloneTerminalAdmission){
   if(locked||pendingInput.current||operation.current||!journal.store||taskDraftScope()!==scopeKey)return;
-  const original={request_id:admitted.request_id,workspace_id:admitted.workspace_id};
+  const original={request_id:admitted.request_id,workspace_id:admitted.workspace_id,...(admitted.project_id===undefined?{}:{project_id:admitted.project_id})};
   try{setItems(journal.store.add(original) as Intent[]);selection.current=original.request_id;setSelected(original.request_id);setSnapshot(undefined);void perform(original,'read');}
   catch{setError(t('无法保留此请求，请先清理已确认的本地记录；服务端会话仍保留。','This request could not be retained. Remove a confirmed local record first; server sessions remain unchanged.'));}
  }
@@ -99,11 +108,17 @@ export default function StandaloneTerminals({scopeKey,workspaces,onInputPendingC
     <option value="">{t('选择可写工作区','Choose a Writable Workspace')}</option>
     {workspaces.filter(item=>item.can_read&&item.can_write).map(item=><option key={item.workspace_id} value={item.workspace_id}>{item.title||item.workspace_id}</option>)}
    </select></label>
+   <label>{t('项目 ','Project ')}<select value={project} onChange={event=>setProject(event.currentTarget.value)}>
+    <option value="">{t('工作区默认目录','Workspace Default Directory')}</option>
+    {currentProjects?.items.map(item=><option key={item.id} value={item.id}>{item.title||item.id}</option>)}
+   </select></label>
+   {projects.error&&<p role="status">{t('项目目录尚未确认，可重新读取。','The project catalog is unconfirmed. Read it again.')}</p>}
+   <button type="button" disabled={projects.loading} onClick={projects.reload}>{t('重新读取项目','Read Projects Again')}</button>
    <button type="button" disabled={!canPrepare} onClick={prepare}>{t('准备新请求','Prepare New Request')}</button>
   </fieldset>
   <label>{t('本标签页保留的原请求 ','Original Requests Kept in This Tab ')}<select value={selected} disabled={locked||Boolean(journal.error)} onChange={event=>{if(pendingInput.current||operation.current||mutationPending)return;setSelected(event.currentTarget.value);setSnapshot(undefined);setError('');setNotice('');}}>
    <option value="">{t('选择原请求','Choose Original Request')}</option>
-   {items.map(item=><option key={item.request_id} value={item.request_id}>{item.workspace_id} · {item.request_id}</option>)}
+   {items.map(item=><option key={item.request_id} value={item.request_id}>{item.workspace_id}{item.project_id?' · '+item.project_id:''} · {item.request_id}</option>)}
   </select></label>
   {busy&&<p role="status">{t('正在核对原请求…','Checking Original Request…')}</p>}
   {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
@@ -115,7 +130,7 @@ export default function StandaloneTerminals({scopeKey,workspaces,onInputPendingC
    {catalog.error&&<p role="alert">{t('目录尚未确认，可重新读取或返回首页。','The catalog is unconfirmed. Read it again or return to the first page.')}</p>}
    {currentCatalog&&<>{!currentCatalog.items.length&&<p role="status">{t('此页没有独立会话记录。','This page has no standalone session records.')}</p>}
     <ul>{currentCatalog.items.map(item=><li key={item.request_id}>
-     <code>{item.workspace_id}</code> · {states[item.state]} · <time>{item.created_at}</time>
+     <code>{item.workspace_id}</code>{item.project_id&&<> · <code>{item.project_id}</code></>} · {states[item.state]} · <time>{item.created_at}</time>
      <p><code>{item.request_id}</code></p>
      <button type="button" disabled={locked||Boolean(journal.error)||selected===item.request_id} onClick={()=>openExisting(item)}>{t('打开原会话控件','Open Original Session Controls')}</button>
     </li>)}</ul>
@@ -128,7 +143,7 @@ export default function StandaloneTerminals({scopeKey,workspaces,onInputPendingC
    </nav>
   </section>
   {intent&&<>
-   <p>{t('请求 ','Request ')}<code>{intent.request_id}</code> · <code>{intent.workspace_id}</code></p>
+   <p>{t('请求 ','Request ')}<code>{intent.request_id}</code> · <code>{intent.workspace_id}</code>{intent.project_id&&<> · <code>{intent.project_id}</code></>}</p>
    <button type="button" disabled={busy||inputPending} onClick={()=>void perform(intent,'read')}>{t('读取原请求','Read Original Request')}</button>
    {!value&&<button type="button" disabled={locked||Boolean(journal.error)} onClick={()=>void perform(intent,'prepare')}>{t('重新准备同一请求','Prepare the Same Request Again')}</button>}
   </>}
