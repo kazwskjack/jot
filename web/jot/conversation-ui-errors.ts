@@ -1,6 +1,23 @@
 // Fixed owned conversation UI failures; unknown/raw content stays unchanged.
 import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
 const english:Record<string,string>={
+ "该技能未提供可沿当前权限读取的原始文件声明，可读取技能详情中的原生元数据。": "This skill provides no original file manifest readable under current permissions. Read the native metadata in its skill details.",
+ "找不到该技能或相对路径，请检查输入后重试。": "The skill or relative path was not found. Check the input and retry.",
+ "技能资源路径或响应无效，请检查相对路径格式。": "The skill resource path or response is invalid. Check the relative path format.",
+ "技能目录或会话权限已变化，请刷新目录后重试。": "The skill catalog or session permissions changed. Refresh the catalog before retrying.",
+ "所选资源超过可读取大小限制。": "The selected resource exceeds the readable size limit.",
+ "技能资源服务或网络暂时不可用，请稍后重试。": "The skill resource service or network is unavailable. Retry later.",
+ "资源读取已取消，请重试。": "Resource reading was cancelled. Retry.",
+ "技能资源读取失败，请重试；如果仍失败，请刷新技能目录。": "Reading the skill resource failed. Retry; if it still fails, refresh the skill catalog.",
+ "用户或运行范围已变化，请重新打开目录。": "The user or run scope changed. Reopen the catalog.",
+ "请先核对当前保留的原请求。": "Verify the currently retained original request first.",
+ "浏览器恢复记录暂不可用。可从最近操作读取原状态。": "The browser recovery record is unavailable. Read the original status from recent operations.",
+ "暂未找到原操作。可核对并结束尚未派发的原请求。": "The original operation was not found. Verify and close the original request if it has not been dispatched.",
+ "原请求内容或权限范围已变化，请读取原操作状态。": "The original request content or permission scope changed. Read the original operation status.",
+ "尚未保存可核对的原生审计配对，原请求继续保留。": "No verifiable native audit pairing has been saved. The original request remains retained.",
+ "原生审计与原请求的已存证据冲突，原状态继续保留。": "The native audit conflicts with the saved evidence for the original request. Its original state remains retained.",
+ "原生日志暂不可读取，稍后可按原请求继续核对。": "The native log is unreadable. Continue verification using the original request later.",
+ "原操作暂未确认，请保留请求 ID 并重新读取状态。": "The original operation is unconfirmed. Retain its request ID and read the status again.",
  "文件原版本或命中内容尚未确认": "The original file version or matching content is unconfirmed.",
  "原文件正文读取失败": "Reading the original file body failed.",
  "成果目录来源尚未确认": "The artifact catalog source is unconfirmed.",
