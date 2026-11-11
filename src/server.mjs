@@ -42,15 +42,24 @@ export async function buildServer(options={}){
       namespaces:(process.env.JOT_HOST_SETTINGS_NAMESPACES??'').split(',').map(value=>value.trim()).filter(Boolean),
       ...(hostSettingsWriteEnabled?{writeEnabled:true,writeNamespace:hostSettingsWriteNamespace}:{})}}:{})};
   const workbench=workbenchConfig(options.workbench??defaultWorkbench);
-  const root=resolve(options.root??'.data/files'),store=new Store(options.database??'.data/jot.db');store.recover();
+  const root=resolve(options.root??'.data/files'),streams=new Set();
+  let store,agent,app,closing,agentClosed=false,appClosed=false,storeClosed=false;
+  const close=()=>closing??=(async()=>{
+    for(const stream of streams)stream.destroy();
+    if(agent&&!agentClosed){await agent.close();agentClosed=true;}
+    if(app&&!appClosed){await app.close();appClosed=true;}
+    if(store&&!storeClosed){store.close();storeClosed=true;}
+  })().catch(error=>{closing=null;throw error;});
+  try{
+  store=new Store(options.database??'.data/jot.db');store.recover();
   const origins=new Set((process.env.JOT_WEB_ORIGINS??'').split(',').map(x=>x.trim()).filter(Boolean));
   const tools=createTools({store,root,origins,searchUrl:process.env.JOT_SEARCH_URL??'',browserEnabled:process.env.JOT_BROWSER==='true'&&!demo,...(options.browserFactory?{browserFactory:options.browserFactory}:{})});
   const demoProvider=async (messages,definitions,signal,onText)=>{
     const text='This is a local demonstration, not a model response. Jot can show task progress, preserve conversations, request approval and deliver files. Configure a model endpoint to perform real tasks.';
     for(const word of text.split(' ')){await new Promise((resolve,reject)=>{if(signal.aborted)return reject(new Error('cancelled'));const done=()=>{signal.removeEventListener('abort',abort);resolve();},timer=setTimeout(done,35);const abort=()=>{clearTimeout(timer);reject(new Error('cancelled'));};signal.addEventListener('abort',abort,{once:true});});onText(word+' ');}return {role:'assistant',content:text};
   };
-  const agent=new Agent(store,{provider:options.provider??(demo?demoProvider:modelProvider({baseUrl:process.env.JOT_MODEL_URL,key:process.env.JOT_MODEL_KEY,model:process.env.JOT_MODEL})),chatRoute:chat,tools,maxWorkers:options.maxWorkers??process.env.JOT_WORKERS,maxSteps:options.maxSteps??process.env.JOT_MAX_STEPS,approvalTimeoutMs:options.approvalTimeoutMs??process.env.JOT_APPROVAL_TIMEOUT_MS});
-  const app=Fastify({logger:false,bodyLimit:1500000}),streams=new Set();
+  agent=new Agent(store,{provider:options.provider??(demo?demoProvider:modelProvider({baseUrl:process.env.JOT_MODEL_URL,key:process.env.JOT_MODEL_KEY,model:process.env.JOT_MODEL})),chatRoute:chat,tools,maxWorkers:options.maxWorkers??process.env.JOT_WORKERS,maxSteps:options.maxSteps??process.env.JOT_MAX_STEPS,approvalTimeoutMs:options.approvalTimeoutMs??process.env.JOT_APPROVAL_TIMEOUT_MS});
+  app=Fastify({logger:false,bodyLimit:1500000});
   if(typeof options.onDiagnosticResponse==='function')app.addHook('onResponse',async(_req,reply)=>{if(reply.statusCode>=500)try{options.onDiagnosticResponse(reply.statusCode);}catch{}});
   app.addHook('onRequest',async(req,reply)=>{
     const host=req.headers.host??'localhost';
@@ -124,8 +133,14 @@ export async function buildServer(options={}){
       return reply.header('Content-Type',types[ext]??'application/octet-stream').header('Content-Security-Policy',`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; frame-src 'self' ${officeOrigin(host)}; object-src 'none'; frame-ancestors 'none'`).send(data);
     }catch{return reply.code(404).send('Run npm run build before opening the interface.');}
   });
-  let closing;
-  return {app,agent,store,close:()=>closing??=(async()=>{for(const stream of streams)stream.destroy();await agent.close();await app.close();store.close();})()};
+  return {app,agent,store,close};
+  }catch(error){
+    if(!store&&error?.partialStore)store=error.partialStore;
+    try{await close();}catch{
+      const failure=new Error('desktop_backend_cleanup_failed',{cause:error});failure.partialBackend={close};throw failure;
+    }
+    throw error;
+  }
 }
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){

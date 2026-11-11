@@ -22,7 +22,10 @@ export async function startLocalBackend({buildServer,userDataPath,publicRoot,pro
    close:()=>{service.beginDrain?.();if(!closing)note('backend-draining');return closing??=Promise.resolve().then(()=>service.close()).then(async()=>{closed=true;note('backend-closed');if(!probeOnly)try{await diagnostics?.flush();}catch{}}).catch(error=>{closing=null;throw error;});}});
  }catch(error){
   note('backend-error',{error});
-  try{await service?.close();}catch{}
+  const partial=service??error?.partialBackend;
+  try{await partial?.close();}catch{
+   const failure=new Error('desktop_backend_cleanup_failed',{cause:error});failure.partialBackend=partial;throw failure;
+  }
   throw error;
  }
 }

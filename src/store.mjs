@@ -9,6 +9,7 @@ export class Store {
   constructor(path) {
     if(path!==':memory:')mkdirSync(dirname(path),{recursive:true});
     this.db=new DatabaseSync(path);
+    try{
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL REFERENCES conversations(id),role TEXT NOT NULL,content TEXT NOT NULL,created_at TEXT NOT NULL,run_id TEXT);
@@ -30,8 +31,12 @@ export class Store {
       if(!runColumns.has('mode'))this.db.exec("ALTER TABLE runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'work' CHECK(mode IN ('chat','work'))");
       if(!runColumns.has('conversation_version'))this.db.exec('ALTER TABLE runs ADD COLUMN conversation_version INTEGER NOT NULL DEFAULT 1 CHECK(conversation_version>=1)');
       this.db.exec('COMMIT');
-    }catch(error){this.db.exec('ROLLBACK');this.db.close();throw error;}
+    }catch(error){this.db.exec('ROLLBACK');throw error;}
     chat.initChatTables(this.db);
+    }catch(error){
+      try{this.db.close();}catch{const failure=new Error('desktop_backend_cleanup_failed',{cause:error});failure.partialStore={close:()=>this.db.close()};throw failure;}
+      throw error;
+    }
   }
   commandReceipt(requestId,kind,payload){
     if(requestId===undefined)return null;if(typeof requestId!=='string'||!requestId||requestId.length>100)throw Error('invalid_request_id');

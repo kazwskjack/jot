@@ -1,3 +1,4 @@
+import {createDesktopStartupView} from './startup-view.mjs';
 import {createDesktopRendererRecovery} from './renderer-recovery.mjs';
 import {desktopLanguage,desktopText} from './desktop-text.mjs';
 import {createDesktopAppearanceStore,configureDesktopHardware} from './appearance-storage.mjs';
@@ -98,7 +99,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   write:async state=>{const saved=await saveDesktopNotificationState(statePath,state);deviceNotificationEnabled=saved.preferences.enabled;return saved;}
  };
  let appOrigin='',mainWindow=null,tray=null,removeIpcHandlers=null,quitConfirmed=false,shutdownPromise=null,shuttingDown=false,queuedTaskNavigation=null;
- let permissionRequestHandler=null,permissionCheckHandler=null,diagnostics=null,appearanceStore=null;
+ let permissionRequestHandler=null,permissionCheckHandler=null,diagnostics=null,appearanceStore=null,startupView=null,startupRun=null;
  const report=error=>{try{diagnostics?.record('desktop-error',{error});}catch{}console.error('[Jot desktop]',error);};
  const restoreWindow=()=>{
   if(!showWindow||!mainWindow||mainWindow.isDestroyed())return;
@@ -221,7 +222,29 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   return startLocalBackendImpl({buildServer,diagnostics,userDataPath,publicRoot:paths.publicRoot});
  };
  const backendFactory=async()=>{hostBackend=await createBackend();return hostBackend;};
- const windowFactory=async(origin)=>{
+ const windowAppearance=()=>{
+  const nativeTheme=electron.nativeTheme,persistedAppearance=appearanceStore?.read(),initialMode=persistedAppearance?.stored?persistedAppearance.themeMode:'system';
+  if(nativeTheme&&nativeTheme.themeSource!==initialMode)nativeTheme.themeSource=initialMode;
+  const resolvedTheme=mode=>mode==='dark'||mode==='system'&&nativeTheme?.shouldUseDarkColors===true?'dark':'light';
+  const initialTheme=resolvedTheme(initialMode),initialAppearance=persistedAppearance?.stored?withoutMissingImage(persistedAppearance.lightAppearance,true):null;
+  return {nativeTheme,resolvedTheme,initialTheme,initialAppearance,reducedMotion:persistedAppearance?.interfacePreferences?.reducedMotion??'system'};
+ };
+ const prepareWindowFactory=async existing=>{
+  await app.whenReady();if(shuttingDown)throw Error('desktop_startup_cancelled');
+  if(existing&&existing===startupView&&mainWindow===existing.window&&!existing.window.isDestroyed()){await existing.render({phase:'loading'});return existing;}
+  if(mainWindow&&!mainWindow.isDestroyed())throw Error('desktop_window_already_owned');
+  const appearance=windowAppearance(),window=new BrowserWindow({width:1200,height:820,minWidth:880,minHeight:620,show:false,autoHideMenuBar:true,
+   ...windowChromeOptions(process.platform,appearance.initialTheme,appearance.initialAppearance),webPreferences:desktopWebPreferences(paths.preloadPath)});
+  mainWindow=window;
+  let prepared;
+  try{
+  prepared=createDesktopStartupView({owner:window,getWindow:()=>mainWindow,getAppearance:windowAppearance,language:()=>desktopLanguage(app),isQuitting:()=>shuttingDown,
+   onQuit:()=>app.quit(),onRetry:()=>runStartup(true),getLogFile:()=>diagnostics?.getFile()??null,shell:electron.shell,showWindow,onError:report,
+   onClosed:()=>{if(mainWindow===window)mainWindow=null;}});
+  startupView=prepared;await prepared.render({phase:'loading'});return prepared;
+  }catch(error){if(prepared)prepared.destroy();else{if(!window.isDestroyed())window.destroy();if(mainWindow===window)mainWindow=null;}throw error;}
+ };
+ const windowFactory=async(origin,_backend,prepared)=>{
   appOrigin=origin;
   await app.whenReady();
   permissionRequestHandler=(webContents,permission,callback,details)=>{
@@ -241,19 +264,32 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   });
   session.defaultSession.setPermissionRequestHandler(permissionRequestHandler);
   session.defaultSession.setPermissionCheckHandler(permissionCheckHandler);
-  const nativeTheme=electron.nativeTheme,persistedAppearance=appearanceStore?.read(),initialMode=persistedAppearance?.stored?persistedAppearance.themeMode:'system';
-  if(nativeTheme)nativeTheme.themeSource=initialMode;
-  const resolvedTheme=mode=>mode==='dark'||mode==='system'&&nativeTheme?.shouldUseDarkColors===true?'dark':'light';
-  const initialTheme=resolvedTheme(initialMode),initialAppearance=persistedAppearance?.stored?withoutMissingImage(persistedAppearance.lightAppearance,true):null;
-  const window=new BrowserWindow({
+  const {nativeTheme,resolvedTheme,initialTheme,initialAppearance}=windowAppearance();
+  if(prepared){await prepared.render({phase:'opening'});await prepared.release();}
+  if(shuttingDown||prepared?.window.isDestroyed())throw Error('desktop_startup_cancelled');
+  const window=prepared?.window??new BrowserWindow({
    width:1200,height:820,minWidth:880,minHeight:620,show:false,autoHideMenuBar:true,...windowChromeOptions(process.platform,initialTheme,initialAppearance),
    webPreferences:desktopWebPreferences(paths.preloadPath)
   });
   mainWindow=window;
   let commandMenu=null,captionMenu=null,windowChrome=null,linuxCaptionMenu=null,desktopHelp=null,rendererRecovery=null,appearanceDocument=0;
+  let syncNotificationPermission=null,commandNavigationStarted=null,denyNavigation=null,downloadHandler=null,didFinishLoadHandler=null,renderProcessGoneHandler=null,applySavedAppearance=null,closeHandler=null;
+  let recoveryTimer=null,recoveryAttempts=0,stableTimer=null;
+  const destroyWindow=(keepWindow=false)=>{
+   if(recoveryTimer)clearTimeout(recoveryTimer);if(stableTimer)clearTimeout(stableTimer);
+   if(syncNotificationPermission)window.off('focus',syncNotificationPermission);if(closeHandler)window.off('close',closeHandler);if(applySavedAppearance)nativeTheme?.removeListener?.('updated',applySavedAppearance);
+   rendererRecovery?.dispose();desktopHelp?.dispose();linuxCaptionMenu?.dispose();windowChrome?.dispose();captionMenu?.dispose();commandMenu?.reset();if(commandNavigationStarted)window.webContents.off('did-start-navigation',commandNavigationStarted);
+   if(didFinishLoadHandler)window.webContents.off('did-finish-load',didFinishLoadHandler);if(renderProcessGoneHandler)window.webContents.off('render-process-gone',renderProcessGoneHandler);
+   if(denyNavigation)window.webContents.off('will-navigate',denyNavigation);if(denyNavigation)window.webContents.off('will-redirect',denyNavigation);
+   if(downloadHandler)window.webContents.session.off('will-download',downloadHandler);
+   removeIpcHandlers?.();removeIpcHandlers=null;
+   if(tray&&!tray.isDestroyed())tray.destroy();tray=null;
+   if(!keepWindow){if(!window.isDestroyed())window.destroy();if(mainWindow===window)mainWindow=null;}
+  };
+  try{
   const resetCommandMenu=()=>{captionMenu?.close();linuxCaptionMenu?.invalidate();commandMenu?.reset();};
-  const commandNavigationStarted=(_event,_url,inPlace,mainFrame)=>{if(mainFrame===true&&inPlace!==true){appearanceDocument+=1;resetCommandMenu();}};
-  const syncNotificationPermission=()=>{
+  commandNavigationStarted=(_event,_url,inPlace,mainFrame)=>{if(mainFrame===true&&inPlace!==true){appearanceDocument+=1;resetCommandMenu();}};
+  syncNotificationPermission=()=>{
    void permissionStatus().then(status=>{
     notificationRuntime.permissionChanged(status);
     if(mainWindow!==window||window.isDestroyed()||window.webContents.isDestroyed?.())return;
@@ -261,16 +297,15 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
    }).catch(()=>{});
   };
   window.on('focus',syncNotificationPermission);
-  const denyNavigation=(_event,url)=>{if(!isDesktopAppUrl(url,appOrigin))_event.preventDefault();};
+  denyNavigation=(_event,url)=>{if(!isDesktopAppUrl(url,appOrigin))_event.preventDefault();};
   window.webContents.on('did-start-navigation',commandNavigationStarted);
   window.webContents.on('will-navigate',denyNavigation);
   window.webContents.on('will-redirect',denyNavigation);
   window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
-  const downloadHandler=(event,_item,contents)=>{if(contents===window.webContents)event.preventDefault();};
+  downloadHandler=(event,_item,contents)=>{if(contents===window.webContents)event.preventDefault();};
   window.webContents.session.on('will-download',downloadHandler);
-  let recoveryTimer=null,recoveryAttempts=0,stableTimer=null;
-  const didFinishLoadHandler=()=>{windowChrome?.publish();deliverPendingTaskNavigation(window);if(recoveryTimer){clearTimeout(recoveryTimer);recoveryTimer=null;}if(stableTimer)clearTimeout(stableTimer);stableTimer=setTimeout(()=>{stableTimer=null;recoveryAttempts=0;},30000);stableTimer.unref?.();};
-  const renderProcessGoneHandler=(_event,details)=>{
+  didFinishLoadHandler=()=>{windowChrome?.publish();deliverPendingTaskNavigation(window);if(recoveryTimer){clearTimeout(recoveryTimer);recoveryTimer=null;}if(stableTimer)clearTimeout(stableTimer);stableTimer=setTimeout(()=>{stableTimer=null;recoveryAttempts=0;},30000);stableTimer.unref?.();};
+  renderProcessGoneHandler=(_event,details)=>{
    if(shuttingDown||details?.reason==='clean-exit')return;
    if(stableTimer){clearTimeout(stableTimer);stableTimer=null;}
    resetCommandMenu();
@@ -285,7 +320,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   };
   window.webContents.on('did-finish-load',didFinishLoadHandler);
   window.webContents.on('render-process-gone',renderProcessGoneHandler);
-  window.on('close',event=>{if(!shuttingDown&&tray&&!tray.isDestroyed()){event.preventDefault();window.hide();}});
+  closeHandler=event=>{if(!shuttingDown&&tray&&!tray.isDestroyed()){event.preventDefault();window.hide();}};window.on('close',closeHandler);
   desktopHelp=createDesktopHelp({app,owner:window,getWindow:()=>mainWindow,appOrigin,dialog,clipboard:electron.clipboard,shell:electron.shell,getReleaseId:()=>supervisorBootstrap?.scope?.releaseId??null,getLogFile:()=>diagnostics?.getFile()??null,
    getBuildInfo:()=>{
     if(!supervisorProducer)return null;
@@ -297,7 +332,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   if(process.platform==='win32'||process.platform==='linux')window.setMenuBarVisibility(false);
   if(process.platform==='win32'||process.platform==='linux')captionMenu=createDesktopCaptionMenu({owner:window,getWindow:()=>mainWindow,appOrigin,Menu,getTemplate:()=>commandMenu.template(true),getCursor:typeof electron.screen?.getCursorScreenPoint==='function'?()=>electron.screen.getCursorScreenPoint():null});
   if(['win32','linux','darwin'].includes(process.platform))windowChrome=createDesktopWindowChrome({owner:window,getWindow:()=>mainWindow,appOrigin,initialTheme,initialAppearance,getMenus:()=>commandMenu.template().map(item=>item.id).filter(id=>typeof id==='string')});
-  const applySavedAppearance=()=>{
+  applySavedAppearance=()=>{
    if(shuttingDown||mainWindow!==window||window.isDestroyed()||window.webContents.isDestroyed?.())return;
    const value=appearanceStore?.read();if(!value?.stored)return;
    try{if(nativeTheme&&nativeTheme.themeSource!==value.themeMode)nativeTheme.themeSource=value.themeMode;
@@ -343,24 +378,16 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
     return selected;
    },
   });
-  const destroyWindow=()=>{
-   if(recoveryTimer)clearTimeout(recoveryTimer);if(stableTimer)clearTimeout(stableTimer);
-   window.off('focus',syncNotificationPermission);nativeTheme?.removeListener?.('updated',applySavedAppearance);
-   rendererRecovery?.dispose();desktopHelp?.dispose();linuxCaptionMenu?.dispose();windowChrome?.dispose();captionMenu?.dispose();commandMenu?.reset();window.webContents.off('did-start-navigation',commandNavigationStarted);
-   window.webContents.off('did-finish-load',didFinishLoadHandler);window.webContents.off('render-process-gone',renderProcessGoneHandler);
-   window.webContents.off('will-navigate',denyNavigation);window.webContents.off('will-redirect',denyNavigation);
-   window.webContents.session.off('will-download',downloadHandler);
-   removeIpcHandlers?.();removeIpcHandlers=null;
-   if(tray&&!tray.isDestroyed())tray.destroy();tray=null;
-   if(!window.isDestroyed())window.destroy();
-   if(mainWindow===window)mainWindow=null;
-  };
-  try{await window.loadURL(appOrigin+'/workbench.html');if(showWindow)window.show();}
-  catch(error){destroyWindow();throw error;}
-  return {destroy:destroyWindow};
+  await window.loadURL(appOrigin+'/workbench.html');if(showWindow)window.show();
+  return {destroy:()=>destroyWindow()};
+  }catch(error){
+   const keep=!!prepared&&!window.isDestroyed();destroyWindow(keep);
+   if(keep)try{await prepared.render({phase:'failed',canRetry:false});}catch{prepared.destroy();}
+   throw error;
+  }
  };
  let startupOperationId=null,startupRestoredStartup=null;
- lifecycle=createDesktopLifecycleImpl({app,backendFactory,windowFactory,onError:report,beforeStart:async()=>{
+ lifecycle=createDesktopLifecycleImpl({app,backendFactory,windowFactory,prepareWindowFactory,onError:report,beforeStart:async()=>{
   if(!diagnostics){diagnostics=createDesktopDiagnosticLog({userDataPath});diagnostics.record('session-start');}
   if(supervisorBootstrap&&(supervisorBootstrap.scope.restoredNonce!==(restoredStartupNonce??null)))
    throw new Error('desktop_host_supervisor_bootstrap_unavailable');
@@ -407,11 +434,13 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   event.preventDefault();
   if(shutdownPromise)return;
   shuttingDown=true;notificationRuntime.closeAll();
+  if(startupView?.active&&mainWindow===startupView.window&&!startupView.window.isDestroyed()&&lifecycle.phase!=='ready')void startupView.render({phase:'stopping'}).catch(report);
   shutdownPromise=(async()=>{await appearanceStore?.flush();return lifecycle.stop('quit');})().then(async()=>{
    try{await diagnostics?.close();}catch{}
    quitConfirmed=true;app.quit();
   }).catch(error=>{
    report(error);shuttingDown=false;shutdownPromise=null;restoreWindow();
+   if(startupView&&mainWindow===startupView.window&&!startupView.window.isDestroyed()&&lifecycle.phase==='failed')void startupView.render({phase:'failed',canRetry:false}).catch(report);
   });
  });
  app.on('will-quit',()=>{
@@ -420,7 +449,11 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   session.defaultSession.setPermissionRequestHandler(null);
   session.defaultSession.setPermissionCheckHandler(null);
  });
- void lifecycle.start().then(async result=>{
+ const retryEligible=()=>!updateHostEnabled&&!supervisorBootstrap&&restoredStartupNonce===null&&!startupOperationId&&!startupRestoredStartup;
+ const runStartup=(retry=false)=>{
+  if(startupRun||shuttingDown)return startupRun;
+  if(retry&&(!retryEligible()||!lifecycle.canRetry))return null;
+  startupRun=(retry?lifecycle.retry():lifecycle.start()).then(async result=>{
   if(result?.started===false){if(startupRestoredStartup)throw new Error('desktop_update_restored_startup_not_started');return;}
   if(startupRestoredStartup){
    let confirmation;
@@ -450,9 +483,16 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   }
   report(error);
   if(updateHostEnabled&&updatePolicy.profile==='desktop-electron'){app.exit(1);return;}
+  if(shuttingDown)return;
+  if(lifecycle.phase==='failed'&&startupView&&!startupView.window.isDestroyed()&&mainWindow===startupView.window){
+   try{await startupView.render({phase:'failed',canRetry:retryEligible()&&lifecycle.canRetry});return;}catch(presentationError){report(presentationError);}
+  }
   try{if(!shuttingDown){await app.whenReady();if(!shuttingDown){const language=desktopLanguage(app);dialog?.showErrorBox(desktopText('startupTitle',language),desktopText('startupFailure',language));}}}
   catch(presentationError){report(presentationError);}
   finally{app.quit();}
- });
+ }).finally(()=>{startupRun=null;});
+  return startupRun;
+ };
+ void runStartup();
  return Object.freeze({lifecycle,notificationRuntime,updateLifecycle,get origin(){return appOrigin;}});
 }
