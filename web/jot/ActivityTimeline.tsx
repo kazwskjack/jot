@@ -8,7 +8,7 @@ import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import type {Activity} from './types';
 import type {NativeMemberTarget} from './native-member-execution';
-import {activityUiText,activityTodoSourceKey,activityArtifactTargets,type ActivityArtifactTarget,activityDetailRows,activityDisplayStatus,activityForest,activityTreeProgress,type ActivityProgress,activityIsActive as running,visibleActivityRows,activityKindLabels,activityStatusLabels,type ActivityRow,type ToolActivity,type ActivityReveal,type ActivityRun} from './activity-presentation';
+import {activityUiText,activityCompactDetail,activityTodoSourceKey,activityArtifactTargets,type ActivityArtifactTarget,activityDetailRows,activityDisplayStatus,activityForest,activityTreeProgress,type ActivityProgress,activityIsActive as running,visibleActivityRows,activityKindLabels,activityStatusLabels,type ActivityRow,type ToolActivity,type ActivityReveal,type ActivityRun} from './activity-presentation';
 import ActivityArtifactDetails from './ActivityArtifactDetails';
 import ActivityToolResult from './ActivityToolResult';
 import './activity-timeline.css';
@@ -16,6 +16,11 @@ import './activity-timeline.css';
 function progressText(value:ActivityProgress,t:(zh:string,en:string)=>string){
  return [t(`${value.total} 个已加载步骤`,`${value.total} loaded steps`),value.active&&t(`${value.active} 个进行中`,`${value.active} active`),value.succeeded&&t(`${value.succeeded} 个已完成`,`${value.succeeded} completed`),value.failed&&t(`${value.failed} 个失败`,`${value.failed} failed`),
   value.cancelled&&t(`${value.cancelled} 个已取消`,`${value.cancelled} cancelled`),value.partial&&t(`${value.partial} 个部分完成`,`${value.partial} partial`),value.unknown&&t(`${value.unknown} 个状态待确认`,`${value.unknown} with unconfirmed state`)].filter(Boolean).join(' · ');
+}
+
+function CompactActivityDetail({activity}:{activity:ToolActivity}){
+ const language=useApplicationLanguage(),detail=activityCompactDetail(activity);
+ return detail?<span className="jot-activity-compact" data-chat-search-ignore> · {activityUiText(detail.label,language)}: <code>{detail.value}</code></span>:null;
 }
 
 type GroupDisplay={open?:boolean;expanded:Record<string,boolean>;page:number};
@@ -70,7 +75,7 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,
   if(!row)return;pendingFocus.current=undefined;row.querySelector<HTMLButtonElement>(':scope > button')?.focus();row.scrollIntoView({block:'nearest'});
  },[open,expanded,currentPage,group.rows]);
  return <details lang={language} ref={region} className="jot-activity-group" open={open} onToggle={event=>{if(event.target!==event.currentTarget)return;const next=event.currentTarget.open;if(!next)pendingFocus.current=undefined;if(next!==open){navigation.current=undefined;onDisplayChange(previous=>({...previous,open:next}));}}}>
-  <summary onClick={event=>{if(event.target instanceof Element&&event.target.closest('button,a,input,select,textarea'))return;event.preventDefault();navigation.current=undefined;pendingFocus.current=undefined;onDisplayChange(previous=>({...previous,open:!open}));}}>{activityUiText(activityKindLabels[group.kind],language)} · {progressText(progress.total,t)}{progress.total.latest&&<span> · {t('最近活动：','Latest Activity: ')}{progress.total.latest.detail.tool_name??activityUiText(activityKindLabels[progress.total.latest.kind],language)} · {progress.total.latest.title} · {activityUiText(activityStatusLabels[activityDisplayStatus(progress.total.latest,run)]??activityStatusLabels.unknown,language)}</span>}</summary>
+  <summary onClick={event=>{if(event.target instanceof Element&&event.target.closest('button,a,input,select,textarea'))return;event.preventDefault();navigation.current=undefined;pendingFocus.current=undefined;onDisplayChange(previous=>({...previous,open:!open}));}}>{activityUiText(activityKindLabels[group.kind],language)} · {progressText(progress.total,t)}{progress.total.latest&&<span> · {t('最近活动：','Latest Activity: ')}{progress.total.latest.detail.tool_name??activityUiText(activityKindLabels[progress.total.latest.kind],language)} · {progress.total.latest.title}<CompactActivityDetail activity={progress.total.latest}/> · {activityUiText(activityStatusLabels[activityDisplayStatus(progress.total.latest,run)]??activityStatusLabels.unknown,language)}</span>}</summary>
   {open&&<>
    {progress.total.latest&&<button type="button" data-chat-search-ignore onClick={()=>locate(progress.total.latest!.activity_id)}>{t('定位最近活动步骤','Locate Latest Active Step')}</button>}
    <ol start={currentPage*50+1}>{visible.slice(currentPage*50,currentPage*50+50).map(row=>{
@@ -85,10 +90,10 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,
       ?{root_run_id:activity.run_id,child_session_ref:activity.detail.child_session_ref,child_run_id:child}:undefined;
     return <li key={activity.activity_id} data-chat-search-activity={activity.activity_id} data-message-key={JSON.stringify(['activity',activity.run_id,activity.activity_id])} data-chat-search-ready={isExpanded?'true':'false'} style={{paddingInlineStart:Math.min(row.depth,8)*12}}>
      <button type="button" aria-expanded={isExpanded} onClick={()=>{navigation.current=undefined;onDisplayChange(previous=>({...previous,expanded:{...previous.expanded,[activity.activity_id]:!isExpanded}}));}}>
-      <span aria-hidden="true">{isExpanded?t('收起','Collapse'):t('展开','Expand')} </span>{activityUiText(activityKindLabels[activity.kind],language)} · {activity.title} · {activityUiText(activityStatusLabels[status]??activityStatusLabels.unknown,language)}<span data-chat-search-ignore>{row.children>0?t(` · ${row.children} 个子步骤`,` · ${row.children} child steps`):''}</span>
+      <span aria-hidden="true">{isExpanded?t('收起','Collapse'):t('展开','Expand')} </span>{activityUiText(activityKindLabels[activity.kind],language)} · {activity.title}<CompactActivityDetail activity={activity}/> · {activityUiText(activityStatusLabels[status]??activityStatusLabels.unknown,language)}<span data-chat-search-ignore>{row.children>0?t(` · ${row.children} 个子步骤`,` · ${row.children} child steps`):''}</span>
      </button>
      {nested&&nested.total>0&&<div data-chat-search-ignore><small>{t('嵌套步骤','Nested Steps')} · {progressText(nested,t)}</small>
-      {nested.latest&&<p>{t('最近活动：','Latest Activity: ')}<code>{nested.latest.detail.tool_name??activityUiText(activityKindLabels[nested.latest.kind],language)}</code> · {nested.latest.title} · {activityUiText(activityStatusLabels[activityDisplayStatus(nested.latest,run)]??activityStatusLabels.unknown,language)}{' '}
+      {nested.latest&&<p>{t('最近活动：','Latest Activity: ')}<code>{nested.latest.detail.tool_name??activityUiText(activityKindLabels[nested.latest.kind],language)}</code> · {nested.latest.title}<CompactActivityDetail activity={nested.latest}/> · {activityUiText(activityStatusLabels[activityDisplayStatus(nested.latest,run)]??activityStatusLabels.unknown,language)}{' '}
        <button type="button" onClick={()=>locate(nested.latest!.activity_id)}>{t('定位活动子步骤','Locate Active Child Step')}</button></p>}
      </div>}
      {row.depth>0&&<small data-chat-search-ignore>{t('层级','Level')} {row.depth+1} · {t('父步骤','Parent Step')} {activity.parent_activity_id}</small>}

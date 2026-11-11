@@ -107,6 +107,22 @@ export function activityDisplayStatus(activity:ToolActivity,run?:ActivityRun){
  return activity.status;
 }
 
+/** Compact previews use only public detail fields; expanded details retain the full value. */
+export function activityCompactDetail(activity:ToolActivity):{label:string;value:string}|undefined{
+ let label:string,value:string|undefined;
+ switch(activity.kind){
+  case 'file_read':case 'file_edit':label='文件';value=activity.detail.display_path;break;
+  case 'command':label='命令';value=activity.detail.display_command;break;
+  case 'search':label='搜索词';value=activity.detail.queries?.[0];break;
+  case 'subagent':label='公开摘要';value=activity.detail.summary;break;
+  case 'browse':label='网址';value=activity.detail.url??activity.detail.urls?.[0];break;
+  case 'crawl':label='网址';value=activity.detail.urls?.[0];break;
+ }
+ if(!value?.trim())return;
+ const characters=Array.from(value.replace(/\s+/g,' ').trim());
+ return {label,value:characters.slice(0,160).join('')+(characters.length>160?'…':'')};
+}
+
 /** Only fields in the original public activity contract enter the display/search. */
 export function activityDetailRows(activity:ToolActivity,language:ApplicationLanguage='zh-CN'):Array<{label:string;value:string}>{
  const rows:Array<{label:string;value:string}>=[];
