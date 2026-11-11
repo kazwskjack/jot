@@ -3,7 +3,7 @@ import type {Caps,HostAdminClient,HostOnboardingSnapshot,HostReadinessResponse,H
 import {taskDraftScope} from '../jot/client';
 import {createHostSettingsSaveAttempt,hostSettingsSaveCommand} from './host-settings-save-attempt.mjs';
 import {createHostSettingsRecovery} from './host-settings-recovery.mjs';
-import {useToolDisplayPreference} from '../jot/useToolDisplayPreference';
+import {useMessageDisplayPreferences,useToolDisplayPreference} from '../jot/useToolDisplayPreference';
 import HostCredentialsPanel from './HostCredentialsPanel';
 import PluginProfilesPanel from './PluginProfilesPanel';
 import HostReadinessPanel from './HostReadinessPanel';
@@ -28,7 +28,7 @@ function conflictVersion(error:unknown){
  return null;
 }
 export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminClient}){
- const toolDisplay=useToolDisplayPreference();
+ const toolDisplay=useToolDisplayPreference(),messageDisplay=useMessageDisplayPreferences();
  const readinessEnabled=hostCapabilityEnabled(caps,'host_readiness');
  const settingsNamespace=typeof caps.workbench?.host_settings_write_namespace==='string'&&/^[a-z][a-z0-9._-]{0,127}$/.test(caps.workbench.host_settings_write_namespace)&&caps.workbench.host_settings_write_namespace!=='jot-host-policy'?caps.workbench.host_settings_write_namespace:null;
  const settingsEnabled=hostCapabilityEnabled(caps,'host_settings')&&settingsNamespace!==null;
@@ -191,7 +191,11 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
     <h3 id="wb-tool-display">会话显示</h3>
     <label className="wb-checkbox"><input type="checkbox" checked={toolDisplay.enabled} disabled={!toolDisplay.available} onChange={event=>toolDisplay.setEnabled(event.currentTarget.checked)}/>自动展开工具步骤</label>
     <p className="wb-settings-note">显示已加载的工具分组和步骤详情；手动折叠的选择会保留，工具正文和文件仍需主动打开。</p>
-    {!toolDisplay.available?<p role="status">当前账户身份尚未确认，暂不能保存偏好。</p>:!toolDisplay.persisted&&<p role="status">浏览器未保存此偏好，当前页面内的选择仍然有效，刷新后可能恢复之前的设置。</p>}
+    <label className="wb-checkbox"><input type="checkbox" checked={messageDisplay.value.showThinking} disabled={!messageDisplay.available} onChange={event=>messageDisplay.setPreference('showThinking',event.currentTarget.checked)}/>显示模型思考与摘要</label>
+    {messageDisplay.value.showThinking&&<label className="wb-checkbox"><input type="checkbox" checked={messageDisplay.value.inlineThinking} disabled={!messageDisplay.available} onChange={event=>messageDisplay.setPreference('inlineThinking',event.currentTarget.checked)}/>以行内样式显示思考内容</label>}
+    <label className="wb-checkbox"><input type="checkbox" checked={messageDisplay.value.sendByCtrlEnter} disabled={!messageDisplay.available} onChange={event=>messageDisplay.setPreference('sendByCtrlEnter',event.currentTarget.checked)}/>使用 Ctrl/Cmd + Enter 发送</label>
+    <p className="wb-settings-note">开启快捷键选项后，Enter 换行；Shift + Enter 始终换行。</p>
+    {!toolDisplay.available?<p role="status">当前账户身份尚未确认，暂不能保存偏好。</p>:(!toolDisplay.persisted||!messageDisplay.persisted)&&<p role="status">浏览器未保存此偏好，当前页面内的选择仍然有效，刷新后可能恢复之前的设置。</p>}
    </section>
    {caps.workbench?.plugin_profiles===true&&<PluginProfilesPanel key={currentTaskScope} scopeKey={currentTaskScope} onPendingChange={reportPluginPending}/>}
    {settingsReadEnabled&&<HostCredentialsPanel client={client} scopeKey={currentTaskScope}/>}

@@ -41,6 +41,8 @@ import {modelRoutingStatus,modelSelectionPreservingFallbacks} from './model-rout
 import {ConversationForkWriter,conversationForkRetrySource} from './conversation-fork-controller.mjs';
 import {ConversationForkAction} from './conversation-fork-action.mjs';
 import PromptComposer from './PromptComposer';
+import MessageThinking from './MessageThinking';
+import {useMessageDisplayPreferences} from './useToolDisplayPreference';
 import ConversationHistorySearch from './ConversationHistorySearch';
 import {AssistantReplyQuoteAction,AssistantReplyQuotes,replyQuoteMessage,type AssistantReplyQuote} from './AssistantReplyQuote';
 import {appendVoiceText} from './voice-draft-controller.mjs';
@@ -148,6 +150,7 @@ function ConversationMessageBody({message,onOpenReference}:{message:Message;onOp
 }
 type ComposerDraft={text:string;replyQuotes:AssistantReplyQuote[];textReferences:FileSelectionReference[];goalMode:boolean};
 function ConversationContent({id,onClose,onReload,onTaskSource,onForkConversation,ordinary=false}:ConversationProps){
+ const {value:displayPreferences}=useMessageDisplayPreferences();
  const [,render]=useState(0),[draft,setDraft]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[expanded,setExpanded]=useState<Record<string,boolean>>({}),[maxBytes,setMaxBytes]=useState<number>(),[preview,setPreview]=useState<{name:string;text?:string;url?:string;unsupported?:boolean;truncated?:boolean;loading?:boolean}>(),[forkStates,setForkStates]=useState<Record<string,{state:string;retryable:boolean;error:string}>>({});
  const [voice,setVoice]=useState<Capabilities['voice']>(),[voiceBusy,setVoiceBusy]=useState(false),draftRef=useRef(draft),conversationRegion=useRef<HTMLElement>(null),previewRequest=useRef<AbortController|undefined>(undefined);
  const [replyQuotes,setReplyQuotes]=useState<AssistantReplyQuote[]>([]);
@@ -525,6 +528,7 @@ function ConversationContent({id,onClose,onReload,onTaskSource,onForkConversatio
      onNoEffect={()=>controller.refresh()}/>}
     {pendingForkForMessage&&!forkState?.error&&<p role="status">副本请求结果尚未确认；重试会复用原命令。</p>}
     {forkState?.error&&<p role="status">{forkState.error}</p>}
+    <ConversationDisplayBoundary label="模型思考与摘要"><MessageThinking message={message} owner={fileOwner} conversationId={id} show={displayPreferences.showThinking} inline={displayPreferences.inlineThinking}/></ConversationDisplayBoundary>
     <ConversationDisplayBoundary label="消息正文"><ConversationMessageBody message={message} onOpenReference={openReferenceSource}/></ConversationDisplayBoundary>
     <div className={`jot-message-files ${message.role==='user'?'uploaded':''}`}>{(message.role==='user'||open?files:files.slice(0,3)).map(file=><React.Fragment key={`${file.artifact_id}:${file.version}`}>{message.role==='user'&&<button type="button" onClick={()=>showPreview(file)} disabled={busy}>预览 {file.relative_path||file.file_name}</button>}<button type="button" onClick={()=>file.part_count?setMessageArtifact({owner:taskDraftScope(),target:{kind:'file',artifactId:file.artifact_id,label:file.file_name,version:file.version,sha256:file.sha256}}):download(file)} disabled={busy}>{file.part_count?'查看各卷':'下载'} {file.relative_path||file.file_name}</button></React.Fragment>)}</div>
     {message.role==='user'&&Object.hasOwn(message,'attachment_refs')&&(message.attachments?.length??0)>files.length&&<p role="status">原附件版本暂不可用，请重新添加文件。</p>}

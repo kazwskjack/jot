@@ -1,3 +1,4 @@
+import {useMessageDisplayPreferences} from './useToolDisplayPreference';
 import type {ModelCompatibility} from './types';
 import React,{useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {isComposerExpanded,isSubmitKey,modelSelection,nextEffort,selectedModel,selectedEffort,modelCapabilitySummary} from './prompt-composer-policy.mjs';
@@ -29,6 +30,7 @@ function ModelMenuLabel({option}:{option:PromptModelOption}){
 
 /** Independent implementation from the public preview; material belongs to the host. */
 export default function PromptComposer({value,onChange,onSubmit,attachments,hasAttachments=false,onAttach,onDropFiles,onDropError,voiceControl,voiceActive=false,keepVoiceVisible=false,responding=false,onStop,disabled=false,inputDisabled=false,submitDisabled=false,attachDisabled=false,stopDisabled=disabled,modelOptions=[],selection,onSelectionChange,goalMenu,uploadMenu,onGoalMode,placeholder='输入消息…',ariaLabel='消息',maxLength=8000,submitLabel='发送',className='',onOpenChange}:PromptComposerProps){
+ const {value:displayPreferences}=useMessageDisplayPreferences();
  const root=useRef<HTMLDivElement>(null),textarea=useRef<HTMLTextAreaElement>(null),modelButton=useRef<HTMLButtonElement>(null),fallbackButton=useRef<HTMLButtonElement>(null),plusButton=useRef<HTMLButtonElement>(null),composing=useRef(false),dragDepth=useRef(0);
  const [focused,setFocused]=useState(false),[menu,setMenu]=useState<'model'|'fallback'|'more'|null>(null),[dragging,setDragging]=useState(false);
  const expanded=isComposerExpanded({focused,value,hasAttachments,voiceActive,menu});
@@ -67,9 +69,9 @@ export default function PromptComposer({value,onChange,onSubmit,attachments,hasA
   onDragLeave={()=>{dragDepth.current=Math.max(0,dragDepth.current-1);if(!dragDepth.current)setDragging(false);}}
   onDrop={event=>{event.preventDefault();dragDepth.current=0;setDragging(false);const items=Array.from(event.dataTransfer.items),dropItems=items.length?items:Array.from(event.dataTransfer.files);if(!disabled&&!attachDisabled&&onDropFiles&&dropItems.length){setFocused(true);void collectDroppedFiles(dropItems).then(dropped=>{const files=dropped.map(item=>item.file),relativePaths=dropped.map(item=>item.relativePath);if(files.length)onDropFiles(files,relativePaths);}).catch(error=>onDropError?.(error));}}}>
   {hasAttachments&&<div className="jot-prompt-attachments" aria-label="待发送附件">{attachments}</div>}
-  <textarea ref={textarea} className="jot-prompt-textarea" aria-label={ariaLabel} placeholder={placeholder} value={value} disabled={disabled||inputDisabled} maxLength={maxLength} rows={1}
+  <textarea ref={textarea} className="jot-prompt-textarea" aria-label={ariaLabel} placeholder={placeholder} value={value} disabled={disabled||inputDisabled} maxLength={maxLength} rows={1} aria-keyshortcuts={displayPreferences.sendByCtrlEnter?'Control+Enter Meta+Enter':'Enter Control+Enter Meta+Enter'}
    onChange={event=>onChange(event.target.value)} onCompositionStart={()=>{composing.current=true;}} onCompositionEnd={()=>{composing.current=false;}}
-   onKeyDown={event=>{if(isSubmitKey({key:event.key,shiftKey:event.shiftKey,keyCode:event.nativeEvent.keyCode,isComposing:composing.current||event.nativeEvent.isComposing})){event.preventDefault();send();}}}/>
+   onKeyDown={event=>{if(!event.defaultPrevented&&isSubmitKey({key:event.key,shiftKey:event.shiftKey,ctrlKey:event.ctrlKey,metaKey:event.metaKey,keyCode:event.nativeEvent.keyCode,isComposing:composing.current||event.nativeEvent.isComposing},displayPreferences.sendByCtrlEnter)){event.preventDefault();send();}}}/>
   <div className="jot-prompt-toolbar">
    <div className="jot-prompt-settings" aria-hidden={!expanded} inert={!expanded}>
     {selection&&<div className="jot-prompt-model-anchor"><button ref={modelButton} className="jot-prompt-setting" type="button" aria-label={`选择模型，当前 ${model?.label??selection.model}，健康状态${healthLabel(model)}`} aria-haspopup="menu" aria-expanded={menu==='model'} disabled={disabled||!modelOptions.length} onClick={()=>setMenu(current=>current==='model'?null:'model')}><Glyph kind="model"/><span>{model?.label??selection.model}</span></button>
