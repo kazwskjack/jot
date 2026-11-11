@@ -1,3 +1,4 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
 import {taskDraftScope} from './client';
 import {useToolDisplayPreference} from './useToolDisplayPreference';
 import NativeTodoInputContent from './NativeTodoInputContent';
@@ -7,14 +8,14 @@ import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import type {Activity} from './types';
 import type {NativeMemberTarget} from './native-member-execution';
-import {activityTodoSourceKey,activityArtifactTargets,type ActivityArtifactTarget,activityDetailRows,activityDisplayStatus,activityForest,activityTreeProgress,type ActivityProgress,activityIsActive as running,visibleActivityRows,activityKindLabels,activityStatusLabels,type ActivityRow,type ToolActivity,type ActivityReveal,type ActivityRun} from './activity-presentation';
+import {activityUiText,activityTodoSourceKey,activityArtifactTargets,type ActivityArtifactTarget,activityDetailRows,activityDisplayStatus,activityForest,activityTreeProgress,type ActivityProgress,activityIsActive as running,visibleActivityRows,activityKindLabels,activityStatusLabels,type ActivityRow,type ToolActivity,type ActivityReveal,type ActivityRun} from './activity-presentation';
 import ActivityArtifactDetails from './ActivityArtifactDetails';
 import ActivityToolResult from './ActivityToolResult';
 import './activity-timeline.css';
 
-function progressText(value:ActivityProgress){
- return [`${value.total} 个已加载步骤`,value.active&&`${value.active} 个进行中`,value.succeeded&&`${value.succeeded} 个已完成`,value.failed&&`${value.failed} 个失败`,
-  value.cancelled&&`${value.cancelled} 个已取消`,value.partial&&`${value.partial} 个部分完成`,value.unknown&&`${value.unknown} 个状态待确认`].filter(Boolean).join(' · ');
+function progressText(value:ActivityProgress,t:(zh:string,en:string)=>string){
+ return [t(`${value.total} 个已加载步骤`,`${value.total} loaded steps`),value.active&&t(`${value.active} 个进行中`,`${value.active} active`),value.succeeded&&t(`${value.succeeded} 个已完成`,`${value.succeeded} completed`),value.failed&&t(`${value.failed} 个失败`,`${value.failed} failed`),
+  value.cancelled&&t(`${value.cancelled} 个已取消`,`${value.cancelled} cancelled`),value.partial&&t(`${value.partial} 个部分完成`,`${value.partial} partial`),value.unknown&&t(`${value.unknown} 个状态待确认`,`${value.unknown} with unconfirmed state`)].filter(Boolean).join(' · ');
 }
 
 type GroupDisplay={open?:boolean;expanded:Record<string,boolean>;page:number};
@@ -25,6 +26,7 @@ type ArtifactAction={onOpenArtifact:(activity:ToolActivity,target:ActivityArtifa
 type MemberDetailsAction={onOpenMember?:(target:NativeMemberTarget)=>void};
 
 function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,onOpenArtifact,onOpenToolResult,display,onDisplayChange,autoExpand}:{display:GroupDisplay;onDisplayChange:(update:(previous:GroupDisplay)=>GroupDisplay)=>void;autoExpand:boolean;group:Group;run?:ActivityRun;onSelectRun:(id:string)=>void;availableRuns:Set<string>;reveal?:ActivityReveal}&MemberDetailsAction&ArtifactAction&ToolResultAction){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const progress=useMemo(()=>activityTreeProgress(group.rows,run),[group.rows,run]),active=progress.total.active;
  const region=useRef<HTMLDetailsElement>(null),pendingFocus=useRef<string>();
  const [openedWhileActive,setOpenedWhileActive]=useState(active>0),[autoOpened,setAutoOpened]=useState(false);
@@ -67,10 +69,10 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,
   const row=Array.from(region.current?.querySelectorAll<HTMLElement>('[data-chat-search-activity]')??[]).find(element=>element.dataset.chatSearchActivity===id);
   if(!row)return;pendingFocus.current=undefined;row.querySelector<HTMLButtonElement>(':scope > button')?.focus();row.scrollIntoView({block:'nearest'});
  },[open,expanded,currentPage,group.rows]);
- return <details ref={region} className="jot-activity-group" open={open} onToggle={event=>{if(event.target!==event.currentTarget)return;const next=event.currentTarget.open;if(!next)pendingFocus.current=undefined;if(next!==open){navigation.current=undefined;onDisplayChange(previous=>({...previous,open:next}));}}}>
-  <summary onClick={event=>{if(event.target instanceof Element&&event.target.closest('button,a,input,select,textarea'))return;event.preventDefault();navigation.current=undefined;pendingFocus.current=undefined;onDisplayChange(previous=>({...previous,open:!open}));}}>{activityKindLabels[group.kind]} · {progressText(progress.total)}{progress.total.latest&&<span> · 最近活动：{progress.total.latest.detail.tool_name??activityKindLabels[progress.total.latest.kind]} · {progress.total.latest.title} · {activityStatusLabels[activityDisplayStatus(progress.total.latest,run)]??activityStatusLabels.unknown}</span>}</summary>
+ return <details lang={language} ref={region} className="jot-activity-group" open={open} onToggle={event=>{if(event.target!==event.currentTarget)return;const next=event.currentTarget.open;if(!next)pendingFocus.current=undefined;if(next!==open){navigation.current=undefined;onDisplayChange(previous=>({...previous,open:next}));}}}>
+  <summary onClick={event=>{if(event.target instanceof Element&&event.target.closest('button,a,input,select,textarea'))return;event.preventDefault();navigation.current=undefined;pendingFocus.current=undefined;onDisplayChange(previous=>({...previous,open:!open}));}}>{activityUiText(activityKindLabels[group.kind],language)} · {progressText(progress.total,t)}{progress.total.latest&&<span> · {t('最近活动：','Latest Activity: ')}{progress.total.latest.detail.tool_name??activityUiText(activityKindLabels[progress.total.latest.kind],language)} · {progress.total.latest.title} · {activityUiText(activityStatusLabels[activityDisplayStatus(progress.total.latest,run)]??activityStatusLabels.unknown,language)}</span>}</summary>
   {open&&<>
-   {progress.total.latest&&<button type="button" data-chat-search-ignore onClick={()=>locate(progress.total.latest!.activity_id)}>定位最近活动步骤</button>}
+   {progress.total.latest&&<button type="button" data-chat-search-ignore onClick={()=>locate(progress.total.latest!.activity_id)}>{t('定位最近活动步骤','Locate Latest Active Step')}</button>}
    <ol start={currentPage*50+1}>{visible.slice(currentPage*50,currentPage*50+50).map(row=>{
     const nested=progress.descendants.get(row.activity.activity_id);
     const activity=row.activity,status=activityDisplayStatus(activity,run),isExpanded=expanded[activity.activity_id]??(expandDefault||running(activity,run));
@@ -83,41 +85,42 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,
       ?{root_run_id:activity.run_id,child_session_ref:activity.detail.child_session_ref,child_run_id:child}:undefined;
     return <li key={activity.activity_id} data-chat-search-activity={activity.activity_id} data-message-key={JSON.stringify(['activity',activity.run_id,activity.activity_id])} data-chat-search-ready={isExpanded?'true':'false'} style={{paddingInlineStart:Math.min(row.depth,8)*12}}>
      <button type="button" aria-expanded={isExpanded} onClick={()=>{navigation.current=undefined;onDisplayChange(previous=>({...previous,expanded:{...previous.expanded,[activity.activity_id]:!isExpanded}}));}}>
-      <span aria-hidden="true">{isExpanded?'收起':'展开'} </span>{activityKindLabels[activity.kind]} · {activity.title} · {activityStatusLabels[status]??activityStatusLabels.unknown}<span data-chat-search-ignore>{row.children>0?` · ${row.children} 个子步骤`:''}</span>
+      <span aria-hidden="true">{isExpanded?t('收起','Collapse'):t('展开','Expand')} </span>{activityUiText(activityKindLabels[activity.kind],language)} · {activity.title} · {activityUiText(activityStatusLabels[status]??activityStatusLabels.unknown,language)}<span data-chat-search-ignore>{row.children>0?t(` · ${row.children} 个子步骤`,` · ${row.children} child steps`):''}</span>
      </button>
-     {nested&&nested.total>0&&<div data-chat-search-ignore><small>嵌套步骤 · {progressText(nested)}</small>
-      {nested.latest&&<p>最近活动：<code>{nested.latest.detail.tool_name??activityKindLabels[nested.latest.kind]}</code> · {nested.latest.title} · {activityStatusLabels[activityDisplayStatus(nested.latest,run)]??activityStatusLabels.unknown}{' '}
-       <button type="button" onClick={()=>locate(nested.latest!.activity_id)}>定位活动子步骤</button></p>}
+     {nested&&nested.total>0&&<div data-chat-search-ignore><small>{t('嵌套步骤','Nested Steps')} · {progressText(nested,t)}</small>
+      {nested.latest&&<p>{t('最近活动：','Latest Activity: ')}<code>{nested.latest.detail.tool_name??activityUiText(activityKindLabels[nested.latest.kind],language)}</code> · {nested.latest.title} · {activityUiText(activityStatusLabels[activityDisplayStatus(nested.latest,run)]??activityStatusLabels.unknown,language)}{' '}
+       <button type="button" onClick={()=>locate(nested.latest!.activity_id)}>{t('定位活动子步骤','Locate Active Child Step')}</button></p>}
      </div>}
-     {row.depth>0&&<small data-chat-search-ignore>层级 {row.depth+1} · 父步骤 {activity.parent_activity_id}</small>}
-     {row.issue&&<p role="status" data-chat-search-ignore>{row.issue}</p>}
+     {row.depth>0&&<small data-chat-search-ignore>{t('层级','Level')} {row.depth+1} · {t('父步骤','Parent Step')} {activity.parent_activity_id}</small>}
+     {row.issue&&<p role="status" data-chat-search-ignore>{activityUiText(row.issue,language)}</p>}
      {isExpanded&&<>
-      {status==='unknown'&&activity.status!=='unknown'&&<p role="status" data-chat-search-ignore>所属运行已结束，此步骤尚无终态回执。</p>}
-      {activity.kind==='subagent'&&activity.detail.todo_input&&<NativeTodoInputContent value={activity.detail.todo_input} sourceKey={activityTodoSourceKey(activity)} {...(reveal?.activityId===activity.activity_id?{reveal}:{})}/>}
-      <dl>{activityDetailRows(activity).map((detail,index)=><React.Fragment key={index}><dt>{detail.label}</dt><dd style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{detail.value}</dd></React.Fragment>)}</dl>
+      {status==='unknown'&&activity.status!=='unknown'&&<p role="status" data-chat-search-ignore>{t('所属运行已结束，此步骤尚无终态回执。','The owning run has ended; this step has no terminal receipt yet.')}</p>}
+      {activity.kind==='subagent'&&activity.detail.todo_input&&<div lang="zh-CN"><NativeTodoInputContent value={activity.detail.todo_input} sourceKey={activityTodoSourceKey(activity)} {...(reveal?.activityId===activity.activity_id?{reveal}:{})}/></div>}
+      <dl>{activityDetailRows(activity,language).map((detail,index)=><React.Fragment key={index}><dt>{detail.label}</dt><dd style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{detail.value}</dd></React.Fragment>)}</dl>
       {typeof activity.detail.tool_name==='string'&&(activity.detail.tool_name==='jot_workspace'||/^jot_mcp_[a-z0-9_]{1,50}$/.test(activity.detail.tool_name)
-       ||(activity.kind==='search'||activity.kind==='subagent')&&['glob','grep'].includes(activity.detail.tool_name)&&activity.detail.file_search)&&<button type="button" data-chat-search-ignore onClick={()=>onOpenToolResult(activity)}>查看工具结果正文</button>}
+       ||(activity.kind==='search'||activity.kind==='subagent')&&['glob','grep'].includes(activity.detail.tool_name)&&activity.detail.file_search)&&<button type="button" data-chat-search-ignore onClick={()=>onOpenToolResult(activity)}>{t('查看工具结果正文','View Tool Result Body')}</button>}
       {activity.status==='succeeded'&&(activity.kind==='search'||activity.kind==='subagent')&&['glob','grep'].includes(String(activity.detail.tool_name))
        &&Number.isSafeInteger(activity.detail.native_search_call_seq)&&Number.isSafeInteger(activity.detail.native_search_result_seq)
        &&activity.detail.file_search&&(activity.detail.file_search.shape==='source_limit'||activity.detail.file_search.truncated)
-       &&<button type="button" data-chat-search-ignore onClick={()=>onOpenToolResult(activity,true)}>读取已保留的大结果来源</button>}
-      {targets.slice(targetPage*10,targetPage*10+10).map(target=><button type="button" key={JSON.stringify(target)} data-chat-search-ignore onClick={()=>onOpenArtifact(activity,target)}>{target.label}</button>)}
-      {targetPageCount>1&&<nav aria-label="结果引用文件翻页" data-chat-search-ignore>
-       <button type="button" disabled={targetPage===0} onClick={()=>setArtifactPages(values=>new Map(values).set(activity.activity_id,targetPage-1))}>上一页文件</button>
+       &&<button type="button" data-chat-search-ignore onClick={()=>onOpenToolResult(activity,true)}>{t('读取已保留的大结果来源','Read Retained Large-Result Source')}</button>}
+      {targets.slice(targetPage*10,targetPage*10+10).map(target=><button type="button" key={JSON.stringify(target)} data-chat-search-ignore onClick={()=>onOpenArtifact(activity,target)}>{target.label.startsWith('查看结果引用文件 ')?t(target.label,`View Result File Reference ${target.label.slice('查看结果引用文件 '.length)}`):activityUiText(target.label,language)}</button>)}
+      {targetPageCount>1&&<nav aria-label={t('结果引用文件翻页','Result File Reference Pages')} data-chat-search-ignore>
+       <button type="button" disabled={targetPage===0} onClick={()=>setArtifactPages(values=>new Map(values).set(activity.activity_id,targetPage-1))}>{t('上一页文件','Previous File Page')}</button>
        <span>{targetPage+1} / {targetPageCount}</span>
-       <button type="button" disabled={targetPage+1===targetPageCount} onClick={()=>setArtifactPages(values=>new Map(values).set(activity.activity_id,targetPage+1))}>下一页文件</button>
+       <button type="button" disabled={targetPage+1===targetPageCount} onClick={()=>setArtifactPages(values=>new Map(values).set(activity.activity_id,targetPage+1))}>{t('下一页文件','Next File Page')}</button>
       </nav>}
-      {native&&onOpenMember&&<button type="button" data-chat-search-ignore onClick={()=>onOpenMember(native)}>查看原成员执行步骤</button>}
-      {child&&child!==activity.run_id&&availableRuns.has(child)&&<button type="button" data-chat-search-ignore onClick={()=>onSelectRun(child)}>查看子运行步骤</button>}
+      {native&&onOpenMember&&<button type="button" data-chat-search-ignore onClick={()=>onOpenMember(native)}>{t('查看原成员执行步骤','View Original Member Execution Steps')}</button>}
+      {child&&child!==activity.run_id&&availableRuns.has(child)&&<button type="button" data-chat-search-ignore onClick={()=>onSelectRun(child)}>{t('查看子运行步骤','View Child Run Steps')}</button>}
      </>}
     </li>;
    })}</ol>
-   {pageCount>1&&<nav aria-label="步骤翻页"><button type="button" disabled={currentPage===0} onClick={()=>{navigation.current=undefined;onDisplayChange(previous=>({...previous,page:currentPage-1}));}}>上一页步骤</button><span>{currentPage+1} / {pageCount}</span><button type="button" disabled={currentPage+1===pageCount} onClick={()=>{navigation.current=undefined;onDisplayChange(previous=>({...previous,page:currentPage+1}));}}>下一页步骤</button></nav>}
+   {pageCount>1&&<nav aria-label={t('步骤翻页','Step Pages')}><button type="button" disabled={currentPage===0} onClick={()=>{navigation.current=undefined;onDisplayChange(previous=>({...previous,page:currentPage-1}));}}>{t('上一页步骤','Previous Step Page')}</button><span>{currentPage+1} / {pageCount}</span><button type="button" disabled={currentPage+1===pageCount} onClick={()=>{navigation.current=undefined;onDisplayChange(previous=>({...previous,page:currentPage+1}));}}>{t('下一页步骤','Next Step Page')}</button></nav>}
   </>}
  </details>;
 }
 
 export default function ActivityTimeline({conversationId,activities,runs,reveal,onOpenMember}:{conversationId:string;activities:Activity[];runs:Record<string,ActivityRun>;reveal?:ActivityReveal}&MemberDetailsAction){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const toolDisplay=useToolDisplayPreference(),owner=taskDraftScope(),displayIdentity=JSON.stringify([owner,conversationId]);
  const [displays,setDisplays]=useState<TimelineDisplays>(()=>({identity:displayIdentity,groups:new Map(),steps:new Map()}));
  const currentDisplayIdentity=useRef(displayIdentity);currentDisplayIdentity.current=displayIdentity;
@@ -154,11 +157,11 @@ export default function ActivityTimeline({conversationId,activities,runs,reveal,
   if(!choice)for(const row of group.rows){choice=saved?.groups.get(JSON.stringify([selected,group.kind,row.activity.activity_id]));if(choice)break;}
   return {...(choice??{page:0}),expanded:selected?saved?.steps.get(selected)??{}:{}};
  };
- return <section className="jot-activity-timeline" aria-label="工具与子任务时间线">
-  <h3>工具与子任务</h3>
-  <label>运行记录 <select value={selected} onChange={event=>selectRun(event.currentTarget.value)}>{runIds.map(id=><option key={id} value={id}>{runs[id]?.created_at??id} · {runs[id]?.status??'历史运行'}</option>)}</select></label>
-  <small>当前已加载的公开步骤。父步骤缺失或终态未确认时会保留提示。</small>
-  {groups.map(group=><ConversationDisplayBoundary key={`${selected}:${group.id}`} label="步骤分组"><ActivityGroup group={group} autoExpand={toolDisplay.enabled} display={displayForGroup(group)} onDisplayChange={update=>{
+ return <section lang={language} className="jot-activity-timeline" aria-label={t('工具与子任务时间线','Tool and Subtask Timeline')}>
+  <h3>{t('工具与子任务','Tools and Subtasks')}</h3>
+  <label>{t('运行记录','Run Record')} <select value={selected} onChange={event=>selectRun(event.currentTarget.value)}>{runIds.map(id=><option key={id} value={id}>{runs[id]?.created_at??id} · {runs[id]?.status??t('历史运行','Historical Run')}</option>)}</select></label>
+  <small>{t('当前已加载的公开步骤。父步骤缺失或终态未确认时会保留提示。','Currently loaded public steps. Missing parents and unconfirmed terminal states retain their notices.')}</small>
+  {groups.map(group=><ConversationDisplayBoundary key={`${selected}:${group.id}`} label={t('步骤分组','Step Group')}><ActivityGroup group={group} autoExpand={toolDisplay.enabled} display={displayForGroup(group)} onDisplayChange={update=>{
    if(!selected||taskDraftScope()!==owner||currentDisplayIdentity.current!==displayIdentity)return;
    setDisplays(previous=>{
     if(taskDraftScope()!==owner||currentDisplayIdentity.current!==displayIdentity)return previous;
@@ -168,13 +171,13 @@ export default function ActivityTimeline({conversationId,activities,runs,reveal,
     return {identity:displayIdentity,groups,steps};
    });
   }} {...(run?{run}:{})} onSelectRun={selectRun} onOpenArtifact={(activity,target)=>{setToolResult(undefined);setArtifact({conversationId,runId:activity.run_id,activityId:activity.activity_id,target});}} onOpenToolResult={(activity,nativeSource)=>{setArtifact(undefined);setToolResult({conversationId,runId:activity.run_id,activityId:activity.activity_id,toolName:activity.detail.tool_name!,...(nativeSource?{nativeSource:true}:{})});}} availableRuns={availableRuns} {...(onOpenMember?{onOpenMember}:{})} {...(reveal?{reveal}:{})}/></ConversationDisplayBoundary>)}
-  {toolResult&&toolResult.conversationId===conversationId&&toolResult.runId===selected&&<section aria-label="已选步骤工具结果">
-   <button type="button" data-chat-search-ignore onClick={()=>setToolResult(undefined)}>关闭工具结果正文</button>
-   <ConversationDisplayBoundary key={JSON.stringify(toolResult)} label="步骤工具结果"><ActivityToolResult conversationId={conversationId} target={toolResult}/></ConversationDisplayBoundary>
+  {toolResult&&toolResult.conversationId===conversationId&&toolResult.runId===selected&&<section aria-label={t('已选步骤工具结果','Selected Step Tool Result')}>
+   <button type="button" data-chat-search-ignore onClick={()=>setToolResult(undefined)}>{t('关闭工具结果正文','Close Tool Result Body')}</button>
+   <ConversationDisplayBoundary key={JSON.stringify(toolResult)} label={t('步骤工具结果','Step Tool Result')}><div lang="zh-CN"><ActivityToolResult conversationId={conversationId} target={toolResult}/></div></ConversationDisplayBoundary>
   </section>}
-  {artifact&&artifact.conversationId===conversationId&&artifact.runId===selected&&<section aria-label="已选步骤文件">
-   <button type="button" data-chat-search-ignore onClick={()=>setArtifact(undefined)}>关闭步骤文件</button>
-   <ConversationDisplayBoundary key={JSON.stringify([conversationId,artifact.runId,artifact.activityId,artifact.target])} label="步骤文件详情"><ActivityArtifactDetails conversationId={conversationId} target={artifact.target} onOpen={target=>setArtifact(prior=>prior&&prior.conversationId===conversationId&&prior.target.artifactId===target.artifactId?{...prior,target}:prior)}/></ConversationDisplayBoundary>
+  {artifact&&artifact.conversationId===conversationId&&artifact.runId===selected&&<section aria-label={t('已选步骤文件','Selected Step File')}>
+   <button type="button" data-chat-search-ignore onClick={()=>setArtifact(undefined)}>{t('关闭步骤文件','Close Step File')}</button>
+   <ConversationDisplayBoundary key={JSON.stringify([conversationId,artifact.runId,artifact.activityId,artifact.target])} label={t('步骤文件详情','Step File Details')}><ActivityArtifactDetails conversationId={conversationId} target={artifact.target} onOpen={target=>setArtifact(prior=>prior&&prior.conversationId===conversationId&&prior.target.artifactId===target.artifactId?{...prior,target}:prior)}/></ConversationDisplayBoundary>
   </section>}
  </section>;
 }

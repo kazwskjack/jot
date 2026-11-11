@@ -151,7 +151,7 @@ export default function ConversationHistorySearch(props:Props){
   const sources:Array<{kind:'message'|'activity'|'content';id:string;text:string;activity?:ToolActivity}>=[
    ...activities.filter((activity):activity is ToolActivity=>activity.kind!=='compaction')
     .sort((a,b)=>a.started_at.localeCompare(b.started_at)||a.activity_id.localeCompare(b.activity_id))
-    .map(activity=>({kind:'activity' as const,id:activity.activity_id,text:activitySearchText(activity,runs[activity.run_id]),activity})),
+    .map(activity=>({kind:'activity' as const,id:activity.activity_id,text:activitySearchText(activity,runs[activity.run_id],language),activity})),
    ...contentDocuments,
    ...messages.map(message=>({kind:'message' as const,id:message.message_id,
     text:message.blocks.filter(block=>block.kind==='text').map(block=>block.text).join('\n')})),
@@ -162,7 +162,7 @@ export default function ConversationHistorySearch(props:Props){
    while(pattern.exec(source.text))count++;
    return {...source,count};
   }).filter(result=>result.count>0);
- },[messages,activities,runs,contentDocuments,needle]);
+ },[messages,activities,runs,contentDocuments,needle,language]);
  const total=results.reduce((sum,result)=>sum+result.count,0),activeIndex=Math.min(index,Math.max(0,total-1));
  const active=useMemo(()=>{
   let remaining=activeIndex;
@@ -172,10 +172,10 @@ export default function ConversationHistorySearch(props:Props){
    let match:RegExpExecArray|null=null;
    for(let occurrence=0;occurrence<=remaining;occurrence++)match=pattern.exec(result.text);
    if(match)return {source:result,occurrence:remaining,offset:match.index,length:match[0].length,
-     todo:result.activity?activityTodoSearchMatch(result.activity,runs[result.activity.run_id],match.index,match[0].length):undefined};
+     todo:result.activity?activityTodoSearchMatch(result.activity,runs[result.activity.run_id],match.index,match[0].length,language):undefined};
   }
   return null;
- },[results,activeIndex,needle,runs]);
+ },[results,activeIndex,needle,runs,language]);
 
  const activeKind=active?.source.kind,activeId=active?.source.id;
  const revealKey=active?JSON.stringify([highlightName,scope,navigationVersion,activeKind,activeId,query,active.offset]):'';
