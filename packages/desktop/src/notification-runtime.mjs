@@ -1,9 +1,9 @@
-import {markDesktopNotificationSeen,updateDesktopNotificationState} from './notification-state.mjs';
+import {markDesktopNotificationSeen,updateDesktopNotificationState,desktopNotificationIdentityKey} from './notification-state.mjs';
 import {parseDesktopCommand,parseDesktopNotificationRequest} from './bridge-contract.mjs';
 import {normalizeDesktopNotificationPreferences,shouldDeliverDesktopNotification} from './notification-policy.mjs';
 
-const identityOf=value=>({task_id:value.task_id,occurrence_id:value.occurrence_id,generation:value.generation,event_kind:value.event_kind});
-const keyOf=value=>JSON.stringify([value.task_id,value.occurrence_id,value.generation,value.event_kind]);
+const identityOf=value=>({task_id:value.task_id,occurrence_id:value.occurrence_id,generation:value.generation,event_kind:value.event_kind,...(Object.hasOwn(value,'event_id')?{event_id:value.event_id}:{})});
+const keyOf=desktopNotificationIdentityKey;
 const asDate=value=>value instanceof Date?value:new Date(value);
 
 export function createDesktopNotificationRuntime({NotificationClass,stateStore,permission,openTask,now=()=>new Date()}={}){
@@ -107,5 +107,5 @@ export function createDesktopNotificationRuntime({NotificationClass,stateStore,p
    return preferences;
   }finally{preferenceChanges--;}
  }
- return Object.freeze({show,dismiss,dismissTask,closeAll,permissionChanged,updatePreferences});
+ return Object.freeze({eventProtocol:2,show,dismiss,dismissTask,closeAll,permissionChanged,updatePreferences});
 }

@@ -3,6 +3,7 @@ import {normalizeDesktopNotificationPreferences} from '../../packages/desktop/sr
 export type DesktopNotificationPreferences={enabled:boolean;quiet_hours:{start:string;end:string;timezone:string}|null};
 export type DesktopNotificationPermission='granted'|'denied'|'default'|'unsupported'|'unknown';
 export type DesktopNotificationsBridge={
+ readNotificationCapabilities?:()=>Promise<unknown>;
  readNotificationPreferences:()=>Promise<unknown>;
  setNotificationPreferences:(value:DesktopNotificationPreferences)=>Promise<unknown>;
  readNotificationPermission:()=>Promise<unknown>;

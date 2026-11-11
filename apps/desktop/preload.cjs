@@ -96,6 +96,7 @@ const bridge=Object.freeze({
  setMenuState:value=>invoke('menu.state.set',value),
  onCommand(listener){if(typeof listener!=='function')throw TypeError('desktop_listener_invalid');commandListeners.add(listener);return()=>commandListeners.delete(listener);},
  selectFile:()=>invoke('dialog.selectFile'),
+ readNotificationCapabilities:()=>invoke('notification.capabilities'),
  readNotificationState:()=>invoke('notification.state.read'),
  initializeNotificationState:startedAt=>invoke('notification.state.initialize',{started_at:startedAt}),
  readNotificationPermission:()=>invoke('notification.permission.read'),

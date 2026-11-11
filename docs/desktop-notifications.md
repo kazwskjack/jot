@@ -36,7 +36,7 @@ Gateway 在原任务 admission 事务内为新 occurrence 保存单独的桌面�
 
 扫描只接受当前原任务版本/代际、角色 epoch、活动角色和原通知设置版本；暂停、归档、变更角色或通知设置后，不把旧 scope 当作新发送授权。历史不可改写事件本身不能证明当前仍允许发送；后续 feed、发送前核对及撤销必须复用同一来源与 scope 条件。
 
-原事件账本已增加只读任务事件 feed 与逐事件状态查询，尚未连接 renderer 的 showTaskNotification。旧 occurrence、同一 occurrence 多个待确认/失败事件的原生去重身份、跨账户/文档撤销、完整 OS 权限和 M24 范围仍待接续；不得用四字段旧去重键吞掉后续真实事件，或回写历史 seen 伪造已通知。仅审阅和修改源码，未执行 SQL、迁移、任务维护或产品。
+原事件账本已增加只读任务事件 feed 与逐事件状态查询，尚未连接 renderer 的 showTaskNotification。旧 occurrence、实际发送与跨账户/文档撤销、完整 OS 权限和 M24 范围仍待接续；逐事件原生去重身份已接入下述协议2，不回写历史 seen 伪造已通知。仅审阅和修改源码，未执行 SQL、迁移、任务维护或产品。
 
 ## 只读事件分页与当前来源查询
 
@@ -48,4 +48,16 @@ Gateway 在原任务 admission 事务内为新 occurrence 保存单独的桌面�
 
 响应含协议1、当前服务端时间及 execution_granted=false。Gateway 和工作台代理均加 private, no-store；公共 types、JSON/YAML API 声明和原 workbench client 已接入。事件读取结果只是该快照的来源状态，不能替代真正发送前的重新核对，也不承诺 OS 会显示通知。
 
-后续 renderer 仍须处理首次连接/历史基线、原生持久去重、同一 occurrence 的多个真实事件、未知结果、源失效及账户/文档撤销。新 candidate 带原 event_id，当前旧原生通知 parser 尚未接收此字段，因此此阶段不把新 DTO 直接送给原生 show。旧 occurrence 没有出生 scope 时不伪造历史授权，完整 OS/M24 范围也未结束。本次未运行 HTTP、SQL、任务维护、浏览器、Electron、构建或测试。
+后续 renderer 仍须处理首次连接/历史基线、原生持久去重、同一 occurrence 的多个真实事件、未知结果、源失效及账户/文档撤销。新 candidate 带原 event_id，新原生通知协议2可接收此字段，但旧主进程不支持。实际发送循环尚未接入，不把缺少主进程能力确认的 DTO 直接送给旧原生 show。旧 occurrence 没有出生 scope 时不伪造历史授权，完整 OS/M24 范围也未结束。本次未运行 HTTP、SQL、任务维护、浏览器、Electron、构建或测试。
+
+## 原生逐事件身份与旧记录
+
+原 notification.show/dismiss 的严格字段集合可额外包含原 event_id（desktop-notice- 后接64位小写十六进制）；显式 undefined/null、格式错误和多余字段均不降级为旧请求。没有 event_id 的旧请求仍沿用原四字段身份与键，不自动创造事件ID。新请求把事件ID加入相同身份键，运行中去重、撤销和 seen 写入共用同一个键函数；相同任务/occurrence/代际/种类的不同真实事件不再互相覆盖。
+
+持久状态读取接受原 version1，以及保留旧条目并允许原事件ID的新 version2。默认及纯旧请求保留原 version1；第一次确认显示带事件ID的通知时才写 version2。旧条目原样保留在原2000条上限内，不猜测它对应哪个新事件；重复相同新身份仍拒绝。version1文件不能夹带新事件字段，version2不会被新程序降回version1。未知版本或损坏内容继续拒绝，不清空历史。
+
+新增只读可信 IPC notification.capabilities，通过原 preload readNotificationCapabilities 查询实际主进程 runtime 的 event_protocol（2表示支持逐事件身份，旧/未提供能力的runtime为1）。它不是preload自己声明支持；旧主进程不认识此通道时调用失败，后续发送入口必须停止，不能删掉事件字段改用粗粒度旧键。偏好面板仍兼容原三种偏好/权限方法。
+
+协议2当前只确认身份能力，不是可靠派发回执或当前来源授权。原 native show 的布尔返回仍可能包含策略拒绝、原生失败或显示后的持久化失败，不能据 false 或缺少 seen 证明从未显示并自动重发；实际发送接入前仍须处理这一未知边界。历史事件仍需原来源重新核对。
+
+新程序保留旧状态；旧程序无法读取已写入的version2，会按原未知格式规则拒绝，而不是覆盖成空文件。此阶段没有运行或改写用户的实际通知状态文件，也没有安装或部署；回退兼容范围保留在后续发行/恢复工作中。

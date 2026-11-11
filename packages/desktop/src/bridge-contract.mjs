@@ -4,7 +4,7 @@ import {normalizeLightAppearance,isImageId,MAX_BACKGROUND_BYTES} from './light-a
 import {parseCaptionMenuRequest,parseCaptionProjectionCommand} from './caption-menu-contract.mjs';
 import {parseDesktopMenuState} from './menu-commands.mjs';
 const notificationEvents=new Set(['changed','completed','failed','needs_confirmation']);
-const channels=new Set(['appearance.capabilities','appearance.image.recover','appearance.image.save','appearance.image.read','appearance.image.delete','appearance.read','appearance.write','desktop.about.read','menu.caption.items','menu.caption.activate','menu.caption.dismiss','window.chrome.read','window.chrome.theme','window.chrome.appearance','menu.caption.show','menu.caption.close','menu.state.set','notification.show','notification.dismiss','notification.state.read','notification.state.initialize','notification.permission.read','preferences.read','preferences.write','window.openTask',
+const channels=new Set(['appearance.capabilities','appearance.image.recover','appearance.image.save','appearance.image.read','appearance.image.delete','appearance.read','appearance.write','desktop.about.read','menu.caption.items','menu.caption.activate','menu.caption.dismiss','window.chrome.read','window.chrome.theme','window.chrome.appearance','menu.caption.show','menu.caption.close','menu.state.set','notification.capabilities','notification.show','notification.dismiss','notification.state.read','notification.state.initialize','notification.permission.read','preferences.read','preferences.write','window.openTask',
  'update.status','update.check','update.download','update.pause','update.resume','update.cancel','update.activate','dialog.selectFile']);
 const hasOwn=(value,key)=>Object.prototype.hasOwnProperty.call(value,key);
 
@@ -65,7 +65,8 @@ export function parseDesktopCommand(channel,value){
  if(channel==='menu.state.set')return Object.freeze({channel,payload:parseDesktopMenuState(value)});
  if(channel==='notification.show'){
   const code='desktop_notification_invalid';record(value,code);
-  const keys=['task_id','occurrence_id','generation','event_kind','title','body'];exactKeys(value,keys,code);
+  const keys=['task_id','occurrence_id','generation','event_kind','title','body',...(Object.hasOwn(value,'event_id')?['event_id']:[])];exactKeys(value,keys,code);
+  if(Object.hasOwn(value,'event_id')&&(typeof value.event_id!=='string'||!/^desktop-notice-[a-f0-9]{64}$/.test(value.event_id)))fail(code);
   taskIdentity(value,code);
   if(!Number.isSafeInteger(value.generation)||value.generation<1||!notificationEvents.has(value.event_kind))fail(code);
   boundedString(value.title,200,code);boundedString(value.body,4096,code);
@@ -76,7 +77,8 @@ export function parseDesktopCommand(channel,value){
   return Object.freeze({channel,payload:Object.freeze({task_id:value.task_id,occurrence_id:value.occurrence_id})});
  }
  if(channel==='notification.dismiss'){
-  const code='desktop_notification_invalid';record(value,code);exactKeys(value,['task_id','occurrence_id','generation','event_kind'],code);taskIdentity(value,code);
+  const code='desktop_notification_invalid';record(value,code);exactKeys(value,['task_id','occurrence_id','generation','event_kind',...(Object.hasOwn(value,'event_id')?['event_id']:[])],code);taskIdentity(value,code);
+  if(Object.hasOwn(value,'event_id')&&(typeof value.event_id!=='string'||!/^desktop-notice-[a-f0-9]{64}$/.test(value.event_id)))fail(code);
   if(!Number.isSafeInteger(value.generation)||value.generation<1||!notificationEvents.has(value.event_kind))fail(code);
   return Object.freeze({channel,payload:Object.freeze({...value})});
  }
