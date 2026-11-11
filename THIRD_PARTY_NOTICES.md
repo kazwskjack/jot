@@ -344,3 +344,5 @@ Signed native Office openings also reuse the original isolated Word visual text,
 Signed native PDF and retained Office-PDF openings reuse the original complete Jot/PilotDeck PDF controller, including virtual continuous pages, thumbnails, outline/search, fullscreen, source references and owner-scoped bounded view-state retention. Native state identities bind original member/opened-source and optional derived PDF metadata.
 
 Office viewer state adaptation uses the existing Word/PPTX/Univer position and zoom APIs and fixed-origin session protocol. The parent keeps32 bounded owner/source-specific states; quote focus takes priority over saved regular view state. Original third-party assets, upstream hashes and AGPL attribution remain in the individual SOURCES.json records.
+
+Structured Office views reuse the attributed original OfficeContent text/table/sheet controls with bounded owner/source-specific position retention. Saved positions include document/table/slide pages or worksheet range pages and horizontal scrolling; existing source checks, quote focus and selection recovery remain on their original paths.

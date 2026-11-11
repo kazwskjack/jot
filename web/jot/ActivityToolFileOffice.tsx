@@ -1,3 +1,5 @@
+import {officeViewIdentity,readOfficeView} from './office-file-view-state';
+import {useStructuredOfficeViewState} from './office-structured-view-state';
 import type {OfficePrintFocus} from './pdf-file-view-state';
 import OfficeFilePrintPreview from './OfficeFilePrintPreview';
 import {OFFICE_SOURCE_MAX_BYTES} from '../../packages/gateway/src/artifacts/office-preview-format.js';
@@ -25,6 +27,7 @@ type Page={document_protocol:1;conversation_id:string;run_id:string;activity_id:
  document:OfficeDocumentPreview;engine:{name:string;version:string};execution_authorized:false;
  docx_visual?:VisualAdmission;pptx_visual?:VisualAdmission;xlsx_visual?:VisualAdmission};
 
+function storedPage(page:number|undefined,count:number){return Math.max(0,Math.min(page??0,Math.max(0,count-1)));}
 function Pager({page,count,onChange,label}:{page:number;count:number;onChange:(page:number)=>void;label:string}){
  return <nav aria-label={label} data-chat-search-ignore>
   <button type="button" disabled={page===0} onClick={()=>onChange(page-1)}>上一页</button>
@@ -63,6 +66,9 @@ function spreadsheetReferenceContext(sheet:Extract<OfficeDocumentPreview,{kind:'
 function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocumentPreview,{kind:'xlsx'}>;source?:FileReferenceIdentity|undefined;officeFocus?:OfficeCellFocus}){
  const context=useContext(FileTextReferenceContext),owner=taskDraftScope();
  const root=useRef<HTMLElement>(null),jumped=useRef(false);
+ const storageKey=source?officeViewIdentity(source,owner,'structured-xlsx'):undefined;
+ const stored=useMemo(()=>storageKey&&!officeFocus?readOfficeView(storageKey,owner,'structured-xlsx'):undefined,[storageKey,owner,officeFocus?.key]);
+ const saved=stored?.kind==='structured-xlsx'?stored:undefined;
  const ranges=useMemo(()=>officeFocus?.value.reference.locator.ranges.map(cellRangeCoordinates)??[],[officeFocus]);
  const focused=useMemo(()=>{
   if(!officeFocus||!source)return undefined;
@@ -88,16 +94,18 @@ function SpreadsheetContent({value,source,officeFocus}:{value:Extract<OfficeDocu
    ||ref.surroundingValues&&JSON.stringify(ref.surroundingValues)!==JSON.stringify(context.surroundingValues))confirmed=false;
   return {confirmed,index,address:ref.locator.activeRange.split(':')[0]};
  },[value,source,officeFocus,owner]);
- const [part,setPart]=useState(focused?.index??0);
+ const [part,setPart]=useState(focused?.index??storedPage(saved?.sheet,value.sheets.length));
  const cells=useMemo(()=>Object.entries(value.sheets[part]?.cells??{}).sort(([a],[b])=>a.localeCompare(b,undefined,{numeric:true})),[value,part]);
- const [page,setPage]=useState(()=>Math.max(0,Math.floor(cells.findIndex(([address])=>address===focused?.address)/50)));
+ const [page,setPage]=useState(()=>focused?Math.max(0,Math.floor(cells.findIndex(([address])=>address===focused.address)/50)):storedPage(saved?.page,Math.ceil(cells.length/50)));
  const [selected,setSelected]=useState<string[]>([]),[notice,setNotice]=useState('');
- const [rangeDraft,setRangeDraft]=useState(officeFocus?.value.reference.locator.activeRange??'A1:J20');
+ const [rangeDraft,setRangeDraft]=useState(officeFocus?.value.reference.locator.activeRange??saved?.range??'A1:J20');
  const [rangeView,setRangeView]=useState<string|undefined>(()=>{
-  const range=officeFocus?.value.reference.locator.activeRange;
+  if(!officeFocus)return saved?.range;
+  const range=officeFocus.value.reference.locator.activeRange;
   return range&&(range.includes(':')||!value.sheets[part]?.cells[range])?range:undefined;
  });
- const [rangeRow,setRangeRow]=useState(0),[rangeColumn,setRangeColumn]=useState(0);
+ const [rangeRow,setRangeRow]=useState(()=>storedPage(saved?.rowPage,rangeView?Math.ceil(cellRangeCoordinates(rangeView).rows/20):1)),[rangeColumn,setRangeColumn]=useState(()=>storedPage(saved?.columnPage,rangeView?Math.ceil(cellRangeCoordinates(rangeView).columns/10):1));
+ useStructuredOfficeViewState(storageKey,owner,root,{protocol:1,kind:'structured-xlsx',sheet:part,page,rowPage:rangeRow,columnPage:rangeColumn,left:0,...(rangeView?{range:rangeView}:{})},saved?.left);
  const anchor=useRef<{row:number;column:number}|null>(null),drag=useRef<number|undefined>(undefined);
  useEffect(()=>{
   const stop=()=>{drag.current=undefined;};
@@ -254,8 +262,18 @@ function OfficeDocumentContent({value,source,officeTextFocus}:{value:Exclude<Off
    ||original.file.version!==source.file.version||nativeReferenceIdentity(original.native_source)!==nativeReferenceIdentity(source.native_source)||original.file.sha256!==source.file.sha256||original.file.size!==source.file.size)return undefined;
   return resolveOfficeTextReference(view,original.reference);
  },[view,source,owner,officeTextFocus]);
- const [part,setPart]=useState(focused?.block.part??0),[page,setPage]=useState(focused?.block.page??0);
- const [column,setColumn]=useState(focused?.block.column??0),[table,setTable]=useState(focused?.block.table??0);
+ const viewKind=value.kind==='docx'?'structured-docx':'structured-pptx';
+ const storageKey=source?officeViewIdentity(source,owner,viewKind):undefined;
+ const stored=useMemo(()=>storageKey&&!officeTextFocus?readOfficeView(storageKey,owner,viewKind):undefined,[storageKey,owner,viewKind,officeTextFocus?.key]);
+ const saved=stored?.kind==='structured-docx'||stored?.kind==='structured-pptx'?stored:undefined;
+ const initialPart=focused?.block.part??storedPage(saved?.part,value.kind==='docx'&&value.tables.length?2:1);
+ const initialTable=focused?.block.table??storedPage(saved?.table,value.kind==='docx'?value.tables.length:1);
+ const initialRows=value.kind==='docx'?value.tables[initialTable]??[]:[];
+ const initialPages=value.kind==='pptx'?Math.ceil(value.slides.length/10):initialPart===0?Math.ceil(value.paragraphs.length/30):Math.ceil(initialRows.length/20);
+ const initialColumns=initialRows.reduce((count,row)=>Math.max(count,row.length),0);
+ const [part,setPart]=useState(initialPart),[page,setPage]=useState(focused?.block.page??storedPage(saved?.page,initialPages));
+ const [column,setColumn]=useState(focused?.block.column??storedPage(saved?.column,Math.ceil(initialColumns/20))),[table,setTable]=useState(initialTable);
+ useStructuredOfficeViewState(storageKey,owner,root,{protocol:1,kind:viewKind,part,page,table,column,left:0},saved?.left);
  const changePart=(value:number)=>{setPart(value);setPage(0);setColumn(0);};
  useEffect(()=>{
   if(!focused||jumped.current)return;
@@ -301,8 +319,9 @@ function OfficeDocumentContent({value,source,officeTextFocus}:{value:Exclude<Off
  </section>;
 }
 export function OfficeContent({value,source,officeFocus,officeTextFocus}:{value:OfficeDocumentPreview;source?:FileReferenceIdentity|undefined;officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus}){
- if(value.kind==='xlsx')return <SpreadsheetContent value={value} source={source} officeFocus={officeFocus}/>;
- return <OfficeDocumentContent value={value} source={source} officeTextFocus={officeTextFocus}/>;
+ const owner=taskDraftScope(),identity=source?officeViewIdentity(source,owner,value.kind==='xlsx'?'structured-xlsx':value.kind==='docx'?'structured-docx':'structured-pptx'):'unbound-'+value.kind;
+ if(value.kind==='xlsx')return <SpreadsheetContent key={JSON.stringify([identity,officeFocus?.key])} value={value} source={source} officeFocus={officeFocus}/>;
+ return <OfficeDocumentContent key={JSON.stringify([identity,officeTextFocus?.key])} value={value} source={source} officeTextFocus={officeTextFocus}/>;
 }
 
 export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus;printFocus?:OfficePrintFocus}){
