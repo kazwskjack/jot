@@ -69,6 +69,14 @@ export function registerStandaloneTerminalAdmissionRoutes(app:FastifyInstance,op
    const value=service.read(owner,id);if(!value)throw Error('standalone_terminal_admission_missing');return value;
   }catch(error){const result=failure(error);return reply.code(result.status).send({error:{code:result.code}});}
  });
+ app.get(path+'/:requestId/terminals/commands',async(request,reply)=>{
+  reply.header('cache-control','private, no-store');
+  try{
+   const owner=options.actor(request),id=(request.params as {requestId:string}).requestId,query=request.query as Record<string,unknown>,before=query.before_request_id??null;
+   if(!uuid(id)||Object.keys(query).some(key=>key!=='before_request_id')||before!==null&&!uuid(before))throw Error('standalone_terminal_input_invalid');
+   return service.terminalCommands(owner,id,before as string|null);
+  }catch(error){const result=failure(error);return reply.code(result.status).send({error:{code:result.code}});}
+ });
  for(const operation of ['dispatch','reconcile','end-wait'] as const){
   app.post(path+'/:requestId/terminals/commands'+(operation==='dispatch'?'':'/:commandId/'+operation),{config:{terminalStreamCommand:true},bodyLimit:32768},async(request,reply)=>{
    reply.header('cache-control','private, no-store');

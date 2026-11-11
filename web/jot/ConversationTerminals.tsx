@@ -73,6 +73,7 @@ export function TerminalPanel(props:(NativeTerminalScope&{expectedSessionId?:str
     if(receipt.state==='completed'||receipt.state==='wait_ended_unknown')return receipt;
     if(receipt.state==='rejected')throw new ApiError(receipt.rejection!.status,receipt.rejection!.error_code);
     if(receipt.state==='not_admitted') {
+      if(journal.store?.read()?.recoveryOnly)throw Error('恢复的原请求尚未确认；仅核对回执，不重发操作。');
       let value;
       try{value=validateTerminalInventory(await request<unknown>(path,method,body,key),receipt.session_id);}
       catch(reason){

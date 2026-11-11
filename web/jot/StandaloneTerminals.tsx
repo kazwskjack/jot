@@ -3,6 +3,8 @@ import {useApplicationLanguage,useApplicationText} from './application-language'
 import {request,taskDraftScope} from './client';
 import {TerminalPanel} from './ConversationTerminals';
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
+import StandaloneTerminalCommandHistory from './StandaloneTerminalCommandHistory';
+import type {StandaloneTerminalCommandRecord} from '../../packages/gateway/src/terminal/standalone-commands';
 import {MutationPendingState} from '../workbench/useMutationReceipt';
 import {useResource} from '../workbench/useResource';
 import {StandaloneTerminalCommandStore} from './terminal-command-store.mjs';
@@ -22,6 +24,7 @@ export default function StandaloneTerminals({scopeKey,workspaces,onInputPendingC
  const [workspace,setWorkspace]=useState(workspaces.find(item=>item.can_read&&item.can_write)?.workspace_id??'');
  const [opened,setOpened]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [snapshot,setSnapshot]=useState<StandaloneTerminalAdmission>(),[inputPending,setInputPending]=useState(false);
+ const [terminalEpoch,setTerminalEpoch]=useState(0),[historyRevision,setHistoryRevision]=useState(0);
  const pendingInput=useRef(false);
  const alive=useRef(true),operation=useRef<AbortController|null>(null),selection=useRef(selected);selection.current=selected;
  const intent=items.find(item=>item.request_id===selected),value=snapshot?.request_id===selected?snapshot:undefined;
@@ -36,7 +39,7 @@ export default function StandaloneTerminals({scopeKey,workspaces,onInputPendingC
  const currentCatalog=!catalog.loading&&!catalog.error&&catalog.data?.scope===scopeKey&&catalog.data.before_request_id===before?catalog.data:null;
  const inputChanged=useCallback((_id:string,pending:boolean)=>{pendingInput.current=pending;setInputPending(pending);onInputPendingChange(pending);},[onInputPendingChange]);
  const activeChanged=useCallback((_id:string,_active:boolean)=>{},[]);
- const settled=useCallback((message?:string)=>{if(message)setNotice(message);},[]);
+ const settled=useCallback((message?:string)=>{if(message)setNotice(message);setHistoryRevision(value=>value+1);},[]);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;operation.current?.abort();onInputPendingChange(false);};},[onInputPendingChange]);
  async function perform(original:Intent,action:'read'|'prepare'|'dispatch'|'observe'|'cancel'){
   if(operation.current||pendingInput.current||taskDraftScope()!==scopeKey||!journal.store)return;
@@ -68,6 +71,15 @@ export default function StandaloneTerminals({scopeKey,workspaces,onInputPendingC
   const original={request_id:admitted.request_id,workspace_id:admitted.workspace_id};
   try{setItems(journal.store.add(original) as Intent[]);selection.current=original.request_id;setSelected(original.request_id);setSnapshot(undefined);void perform(original,'read');}
   catch{setError(t('无法保留此请求，请先清理已确认的本地记录；服务端会话仍保留。','This request could not be retained. Remove a confirmed local record first; server sessions remain unchanged.'));}
+ }
+ function restoreOriginalCommand(admissionId:string,item:StandaloneTerminalCommandRecord){
+  if(locked||pendingInput.current||operation.current||taskDraftScope()!==scopeKey||value?.state!=='ready'||value.request_id!==admissionId)return;
+  try{
+   const store=new StandaloneTerminalCommandStore(window.sessionStorage,scopeKey,admissionId);
+   store.restoreCommand({path:'/standalone-terminals/admissions/'+admissionId+'/terminals/commands',method:'POST',key:item.command.request_id,body:item.command});
+   setTerminalEpoch(value=>value+1);
+   setNotice(t('已保留原请求。请在终端控件中核对原回执；不会重发操作。','The original request is retained. Reconcile its receipt in terminal controls; the operation will not be resent.'));
+  }catch{setError(t('无法恢复此原请求，请先保留并处理当前未确认记录。','This original request could not be restored. Retain and resolve the current unconfirmed record first.'));}
  }
  function forgetLocal(){
   if(locked||pendingInput.current||operation.current||!journal.store||!intent||!value||taskDraftScope()!==scopeKey)return;
@@ -128,9 +140,12 @@ export default function StandaloneTerminals({scopeKey,workspaces,onInputPendingC
     <button type="button" disabled={locked} onClick={()=>void perform(intent!,'cancel')}>{t('取消未启动请求','Cancel Unstarted Request')}</button>
    </>}
    {(value.state==='unknown'||value.state==='dispatched')&&<button type="button" disabled={locked} onClick={()=>void perform(intent!,'observe')}>{t('只观察原生结果','Observe Original Native Result')}</button>}
-   {value.state==='ready'&&<ConversationDisplayBoundary key={value.request_id} label={t('独立终端','Standalone Terminal')}>
-    <TerminalPanel admissionId={value.request_id} expectedSessionId={value.session_id} onSettled={settled} onActiveChange={activeChanged} onInputPendingChange={inputChanged}/>
-   </ConversationDisplayBoundary>}
+   {value.state==='ready'&&<>
+    <StandaloneTerminalCommandHistory key={value.request_id} admission={value} scopeKey={scopeKey} locked={locked} revision={historyRevision} onRestore={restoreOriginalCommand}/>
+    <ConversationDisplayBoundary key={value.request_id+':'+terminalEpoch} label={t('独立终端','Standalone Terminal')}>
+     <TerminalPanel admissionId={value.request_id} expectedSessionId={value.session_id} onSettled={settled} onActiveChange={activeChanged} onInputPendingChange={inputChanged}/>
+    </ConversationDisplayBoundary>
+   </>}
   </>}
   <p>{t('本标签页请求与服务端目录分开保留；移除本地记录不会关闭原生终端。登录状态以提供方原回执为准。','Tab requests and the server catalog are separate. Removing a local record does not close a native terminal. Login status comes from original provider receipts.')}</p>
  </details>;

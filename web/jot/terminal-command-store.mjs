@@ -21,10 +21,14 @@ class TerminalCommandJournal {
     if(raw===null)return null;
     if(raw.length>1048576)throw Error('terminal_storage_command_invalid');
     const value=JSON.parse(raw);
-    if(value&&typeof value==='object'&&!Array.isArray(value)
-      &&Object.keys(value).sort().join(',')==='command,end_wait_requested'&&value.end_wait_requested===true)
-      return {command:this.validate(value.command),endingWait:true};
-    return {command:this.validate(value),endingWait:false};
+    if(value&&typeof value==='object'&&!Array.isArray(value)){
+      const keys=Object.keys(value).sort().join(',');
+      if(keys==='command,end_wait_requested'&&value.end_wait_requested===true
+        ||keys==='command,recovery_only'&&value.recovery_only===true
+        ||keys==='command,end_wait_requested,recovery_only'&&value.end_wait_requested===true&&value.recovery_only===true)
+        return {command:this.validate(value.command),endingWait:value.end_wait_requested===true,recoveryOnly:value.recovery_only===true};
+    }
+    return {command:this.validate(value),endingWait:false,recoveryOnly:false};
   }
   saveCommand(command,expected) {
     if(command===null){this.complete(expected);return;}
@@ -32,16 +36,23 @@ class TerminalCommandJournal {
     const snapshot=this.read(),current=snapshot?.command;
     if(current&&(current.key!==command.key||Object.entries(current.body).some(([key,value])=>command.body[key]!==value)))
       throw Error('terminal_storage_conflict');
-    const raw=JSON.stringify(snapshot?.endingWait?{command,end_wait_requested:true}:command);
+    const raw=JSON.stringify(snapshot?.endingWait||snapshot?.recoveryOnly?{command,...(snapshot?.endingWait?{end_wait_requested:true}:{}),...(snapshot?.recoveryOnly?{recovery_only:true}:{})}:command);
+    if(raw.length>1048576)throw Error('terminal_storage_command_invalid');
+    this.storage.setItem(this.key,raw);
+  }
+  restoreCommand(command){
+    this.validate(command);const snapshot=this.read(),current=snapshot?.command;
+    if(current&&(current.key!==command.key||Object.entries(current.body).some(([key,value])=>command.body[key]!==value)))throw Error('terminal_storage_conflict');
+    const raw=JSON.stringify({command,recovery_only:true,...(snapshot?.endingWait?{end_wait_requested:true}:{})});
     if(raw.length>1048576)throw Error('terminal_storage_command_invalid');
     this.storage.setItem(this.key,raw);
   }
   requestEndWait(expected) {
     this.validate(expected);
-    const current=this.read()?.command;
+    const snapshot=this.read(),current=snapshot?.command;
     if(!current||current.key!==expected.key||Object.entries(current.body).some(([key,value])=>expected.body[key]!==value))
       throw Error('terminal_storage_conflict');
-    const raw=JSON.stringify({command:current,end_wait_requested:true});
+    const raw=JSON.stringify({command:current,end_wait_requested:true,...(snapshot?.recoveryOnly?{recovery_only:true}:{})});
     if(raw.length>1048576)throw Error('terminal_storage_command_invalid');
     this.storage.setItem(this.key,raw);
   }

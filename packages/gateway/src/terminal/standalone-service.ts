@@ -3,7 +3,7 @@ import type {Readable} from 'node:stream';
 import type {TerminalAttachment,TerminalInputPacket} from './stream.js';
 import {validateTerminalInventory} from './inventory.js';
 import {validateTerminalOptions,validateTerminalCommand,validateTerminalReceipt,type TerminalCommand} from './control.js';
-import {reserveStandaloneTerminalCommand,readStandaloneTerminalCommandReceipt,settleStandaloneTerminalCommand} from './standalone-commands.ts';
+import {listStandaloneTerminalCommands,reserveStandaloneTerminalCommand,readStandaloneTerminalCommandReceipt,settleStandaloneTerminalCommand} from './standalone-commands.ts';
 import {listStandaloneTerminalAdmissions,prepareStandaloneTerminalAdmission,readStandaloneTerminalAdmission,claimStandaloneTerminalAdmission,cancelStandaloneTerminalAdmission,
  markStandaloneTerminalUnknown,confirmStandaloneTerminalAdmission,type StandaloneTerminalAdmission} from './standalone-admissions.ts';
 
@@ -115,6 +115,7 @@ export class StandaloneTerminalAdmissions{
   if(row.state!=='ready')throw Error('standalone_terminal_transition_invalid');
   return row;
  }
+ terminalCommands(owner:string,request:string,before:string|null){return listStandaloneTerminalCommands(this.db,this.commandAdmission(owner,request),before);}
  async terminalCommand(owner:string,request:string,input:TerminalCommand,signal:AbortSignal){
   signal.throwIfAborted();const row=this.commandAdmission(owner,request),command=validateTerminalCommand(input);
   if(typeof this.client?.standaloneTerminalCommand!=='function')throw Error('standalone_terminal_native_unavailable');

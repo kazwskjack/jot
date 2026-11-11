@@ -884,3 +884,4 @@ export type TerminalSessionCatalog=import('../src/terminal/session-catalog').Ter
 
 export type StandaloneTerminalAdmission=import('../src/terminal/standalone-admissions').StandaloneTerminalAdmission;
 export type StandaloneTerminalAdmissionCatalog=import('../src/terminal/standalone-admissions').StandaloneTerminalAdmissionCatalog;
+export type {StandaloneTerminalCommandRecord,StandaloneTerminalCommandCatalog} from '../src/terminal/standalone-commands';

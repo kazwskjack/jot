@@ -6,7 +6,7 @@ import {readStandaloneTerminalAdmission,type StandaloneTerminalAdmission} from '
 import {validateTerminalCommand,validateTerminalReceipt,type TerminalCommand,type TerminalReceipt} from './control.js';
 
 type Row={owner_id:string;admission_id:string;request_id:string;command_sha256:string;command_json:string;
- admission_state_sha256:string;native_attempted_at:string|null;receipt_json:string|null};
+ admission_state_sha256:string;native_attempted_at:string|null;receipt_json:string|null;created_at:string};
 export const standaloneTerminalCommandHash=(command:TerminalCommand)=>createHash('sha256').update(canonicalJson(validateTerminalCommand(command))).digest('hex');
 function current(db:DatabaseSync,admission:StandaloneTerminalAdmission){
  const row=readStandaloneTerminalAdmission(db,admission.owner_id,admission.request_id);
@@ -50,6 +50,36 @@ export function settleStandaloneTerminalCommand(db:DatabaseSync,admission:Standa
   db.prepare('UPDATE ga_standalone_terminal_commands SET receipt_json=? WHERE owner_id=? AND admission_id=? AND request_id=? AND receipt_json IS NULL')
    .run(JSON.stringify(value),admission.owner_id,admission.request_id,command.request_id);
   return value;
+ });
+}
+export type StandaloneTerminalCommandRecord={request_id:string;command:TerminalCommand;command_sha256:string;created_at:string;native_attempted_at:string|null;
+ receipt_state:'unknown'|'completed'|'rejected'|'wait_ended_unknown'};
+export type StandaloneTerminalCommandCatalog={protocol:1;admission_id:string;session_id:string;admission_state_sha256:string;
+ items:StandaloneTerminalCommandRecord[];before_request_id:string|null;next_before_request_id:string|null;execution_authorized:false};
+/** Persisted create/close metadata only, never terminal input or a new native command. */
+export function listStandaloneTerminalCommands(db:DatabaseSync,admission:StandaloneTerminalAdmission,before:string|null):StandaloneTerminalCommandCatalog{
+ if(before!==null&&(typeof before!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(before)))throw Error('standalone_terminal_input_invalid');
+ return withReadTransaction(db,()=>{
+  current(db,admission);
+  const boundary=before===null?null:db.prepare('SELECT created_at FROM ga_standalone_terminal_commands WHERE owner_id=? AND admission_id=? AND request_id=?')
+   .get(admission.owner_id,admission.request_id,before) as {created_at:string}|undefined;
+  if(before!==null&&!boundary)throw Error('standalone_terminal_catalog_cursor_invalid');
+  const rows=db.prepare(`SELECT * FROM ga_standalone_terminal_commands WHERE owner_id=? AND admission_id=?
+   AND (? IS NULL OR created_at<? OR (created_at=? AND request_id<?)) ORDER BY created_at DESC,request_id DESC LIMIT 51`)
+   .all(admission.owner_id,admission.request_id,boundary?.created_at??null,boundary?.created_at??null,boundary?.created_at??null,before) as Row[];
+  const items=rows.slice(0,50).map(saved=>{
+   const command=validateTerminalCommand(JSON.parse(saved.command_json));
+   if(saved.owner_id!==admission.owner_id||saved.admission_id!==admission.request_id||saved.request_id!==command.request_id
+    ||saved.command_sha256!==standaloneTerminalCommandHash(command)||saved.command_json!==canonicalJson(command)
+    ||saved.admission_state_sha256!==admission.state_sha256)throw Error('standalone_terminal_command_conflict');
+   const receipt=saved.receipt_json===null?null:validateTerminalReceipt(JSON.parse(saved.receipt_json),command,admission.session_id);
+   if(receipt&&!['completed','rejected','wait_ended_unknown'].includes(receipt.state)
+    ||receipt&&receipt.state!=='wait_ended_unknown'&&saved.native_attempted_at===null)throw Error('terminal_receipt_invalid');
+   return{request_id:command.request_id,command,command_sha256:saved.command_sha256,created_at:saved.created_at,native_attempted_at:saved.native_attempted_at,
+    receipt_state:(receipt?.state??'unknown') as StandaloneTerminalCommandRecord['receipt_state']};
+  });
+  return{protocol:1,admission_id:admission.request_id,session_id:admission.session_id,admission_state_sha256:admission.state_sha256,
+   items,before_request_id:before,next_before_request_id:rows.length>50?items.at(-1)!.request_id:null,execution_authorized:false};
  });
 }
 export type StandaloneTerminalCommandAttempt={owner_id:string;admission_id:string;request_id:string;admission_state_sha256:string;command_sha256:string};

@@ -19,6 +19,7 @@ export function installStandaloneTerminalAdmissions(db:DatabaseSync){
    owner_id TEXT NOT NULL,admission_id TEXT NOT NULL,request_id TEXT NOT NULL,command_sha256 TEXT NOT NULL,command_json TEXT NOT NULL,
    admission_state_sha256 TEXT NOT NULL,native_attempted_at TEXT,receipt_json TEXT,created_at TEXT NOT NULL,
    PRIMARY KEY(owner_id,admission_id,request_id),FOREIGN KEY(owner_id,admission_id) REFERENCES ga_standalone_terminal_admissions(owner_id,request_id));
+  CREATE INDEX IF NOT EXISTS idx_ga_standalone_terminal_commands_catalog ON ga_standalone_terminal_commands(owner_id,admission_id,created_at DESC,request_id DESC);
   CREATE TRIGGER IF NOT EXISTS ga_standalone_terminal_command_immutable BEFORE UPDATE ON ga_standalone_terminal_commands
    WHEN NEW.owner_id IS NOT OLD.owner_id OR NEW.admission_id IS NOT OLD.admission_id OR NEW.request_id IS NOT OLD.request_id
     OR NEW.command_sha256 IS NOT OLD.command_sha256 OR NEW.command_json IS NOT OLD.command_json
