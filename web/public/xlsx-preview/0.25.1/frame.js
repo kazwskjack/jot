@@ -7,6 +7,48 @@ import {createSpreadsheetRegion} from './region.js';
 const parentHost=new URLSearchParams(location.search).get('parent');
 if(!parentHost||!/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(parentHost))throw Error('XLSX_PARENT_INVALID');
 const parentOrigin='http://'+parentHost,content=document.getElementById('content'),status=document.getElementById('status');
+// Keep language changes on owned UI nodes, outside document text and view/search state.
+let language='zh-CN';
+const labels=new Map(),languageListeners=new Set();
+const getLanguage=()=>language;
+const subscribeLanguage=listener=>{languageListeners.add(listener);return()=>{languageListeners.delete(listener);};};
+const showLabel=entry=>{
+ const text=language==='en'?entry.en:entry.zh;
+ if(entry.attribute)entry.element.setAttribute(entry.attribute,text);else entry.element.textContent=text;
+};
+const ui=(element,zh,en,attribute='')=>{
+ let fields=labels.get(element);if(!fields){fields=new Map();labels.set(element,fields);}
+ const entry={element,zh,en,attribute};fields.set(attribute,entry);showLabel(entry);
+};
+for(const element of document.querySelectorAll('[data-jot-ui-en]'))ui(element,element.textContent,element.dataset.jotUiEn);
+for(const element of document.querySelectorAll('[data-jot-ui-aria-en]'))ui(element,element.getAttribute('aria-label'),element.dataset.jotUiAriaEn,'aria-label');
+const setLanguage=value=>{
+ if(language===value)return;language=value;document.documentElement.lang=value;
+ for(const fields of labels.values())for(const entry of fields.values())showLabel(entry);
+ for(const listener of languageListeners)listener();
+};
+const notices={
+ "工作表视图恢复未完成，请手动定位。": "Worksheet view restoration did not complete. Locate the position manually.",
+ "原生选区已准备，请在查看器下方确认引用。": "The native selection is ready. Confirm the reference below the viewer.",
+ "原生选区或上下文超过当前引用范围，请缩小选区。": "The native selection or context exceeds current reference limits. Select a smaller range.",
+ "当前原生选区尚未就绪，请重新选择。": "The current native selection is not ready. Select again.",
+ "原生浮动入口尚未就绪，可使用工具栏准备引用。": "The native floating action is not ready. Use the toolbar to prepare a reference.",
+ "原生选区已交给原草稿入口。": "The native selection was handed to the original draft entry.",
+ "选区确认已取消，请重新准备。": "Selection confirmation was cancelled. Prepare it again.",
+ "工作表视口尚未就绪。": "The worksheet viewport is not ready.",
+ "区域边长至少需要8个显示像素。": "Region sides must be at least 8 display pixels.",
+ "已选择工作表视口区域，请在查看器下方确认截图引用。": "The worksheet viewport region is selected. Confirm the screenshot reference below the viewer.",
+ "工作表区域已取消。": "The worksheet region was cancelled.",
+ "在当前工作表视口拖选，或选择整个视口。": "Drag within the current worksheet viewport or select the whole viewport.",
+ "正在生成工作表视口PNG…": "Generating a worksheet viewport PNG…",
+ "截图引擎尚未就绪。": "The screenshot engine is not ready.",
+ "截图引擎读取失败。": "Loading the screenshot engine failed.",
+ "工作表视口已变化。": "The worksheet viewport changed.",
+ "PNG编码失败。": "PNG encoding failed.",
+ "截图超过当前8 MiB范围。": "The screenshot exceeds the 8 MiB limit.",
+ "PNG已生成，正在交给原草稿上传入口。": "The PNG was generated and is being handed to the original draft upload entry."
+};
+const notice=(element,message)=>ui(element,message,Object.hasOwn(notices,message)?notices[message]:message);
 const sheetSelect=document.getElementById('sheet'),zoom=document.getElementById('zoom'),cell=document.getElementById('cell');
 const query=document.getElementById('query'),counter=document.getElementById('matches'),coverage=document.getElementById('coverage');
 const batchPrevious=document.getElementById('search-batch-previous'),batchNext=document.getElementById('search-batch-next');
@@ -45,7 +87,7 @@ const restoreView=view=>{
    if(!await api.executeCommand('sheet.operation.set-scroll',{unitId:book.getId(),sheetId:view.sheetId,...view.scroll,duration:0}))throw Error('VIEW_SCROLL_UNCONFIRMED');
    await document.fonts?.ready;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));if(closed||generation!==viewGeneration)return;
    zoomPercent=sheet.getZoom()*100;zoom.value=String(zoomPercent);sheetSelect.value=sheet.getSheetId();updateCell(sheet);
-  }catch{if(!closed)status.textContent='工作表视图恢复未完成，请手动定位。';}
+  }catch{if(!closed)notice(status,'工作表视图恢复未完成，请手动定位。');}
  });
 };
 const instance=crypto.randomUUID();
@@ -67,7 +109,7 @@ const dispose=()=>{
  region?.dispose();cellReferences?.dispose();selectionListener?.dispose();activeSheetListener?.dispose();univer?.dispose();
  book=undefined;api=undefined;univer=undefined;content.replaceChildren();controls();
 };
-const fail=()=>{report({type:'jot-xlsx-error',code:'XLSX_RENDER_FAILED'});dispose();status.textContent='原生表格读取失败';};
+const fail=()=>{report({type:'jot-xlsx-error',code:'XLSX_RENDER_FAILED'});dispose();ui(status,'原生表格读取失败','Native spreadsheet reading failed');};
 function loadAsset(file,css=false){
  return new Promise((resolve,reject)=>{
   const element=document.createElement(css?'link':'script');
@@ -96,16 +138,16 @@ function showMatch(delta,generation){
  worksheet.zoom(zoomPercent/100);
  worksheet.getRange(match.row,match.column).activate();
  sheetSelect.value=match.sheetId;updateCell(worksheet,match.row,match.column);
- counter.textContent=`第 ${searchBatch+1} 批 · ${matchIndex+1} / ${matches.length}`;
+ ui(counter,`第 ${searchBatch+1} 批 · ${matchIndex+1} / ${matches.length}`,`Batch ${searchBatch+1} · ${matchIndex+1} / ${matches.length}`);
 }
 async function search(generation,value,page=0){
  if(closed||generation!==searchGeneration)return;
  const normalized=value.trim().toLocaleLowerCase();
- if(value.length>200){counter.textContent='查找文字最多200字符';return;}
+ if(value.length>200){ui(counter,'查找文字最多200字符','Search text is limited to 200 characters');return;}
  matches=[];matchIndex=0;hasNextSearchBatch=false;
  const data=workbookData,currentBook=book,cursor=searchStarts[page],found=[];
  let scannedCells=0,more=false,nextCursor;
- counter.textContent=`正在搜索第 ${page+1} 批…`;
+ ui(counter,`正在搜索第 ${page+1} 批…`,`Searching batch ${page+1}…`);
  if(normalized){
   scan:for(let sheetIndex=cursor.sheetIndex;sheetIndex<data.sheetOrder.length;sheetIndex++){
    if(closed||generation!==searchGeneration)return;
@@ -133,7 +175,7 @@ async function search(generation,value,page=0){
       if(found.length===1000)nextCursor={sheetIndex,rowIndex,columnIndex:columnIndex+1};
      }
      if(scannedCells%250===0){
-      counter.textContent=`正在搜索第 ${page+1} 批 · 已找到 ${found.length} 处`;
+      ui(counter,`正在搜索第 ${page+1} 批 · 已找到 ${found.length} 处`,`Searching batch ${page+1} · ${found.length} matches found`);
       await new Promise(resolve=>setTimeout(resolve,0));
      }
     }
@@ -143,15 +185,15 @@ async function search(generation,value,page=0){
  if(closed||generation!==searchGeneration)return;
  searchStarts.length=page+1;if(more)searchStarts.push(nextCursor);
  searchBatch=page;hasNextSearchBatch=more;matches=found;
- coverage.textContent=more?'当前批最多1000处，可继续搜索后续全部已接纳显示值。':normalized?'已搜索至可见工作表末尾。':'';
- counter.textContent=matches.length?`第 ${page+1} 批 · 1 / ${matches.length}`:normalized?'没有匹配':'尚未搜索';
+ ui(coverage,more?'当前批最多1000处，可继续搜索后续全部已接纳显示值。':normalized?'已搜索至可见工作表末尾。':'',more?'Up to 1000 matches in this batch. Continue to search all remaining admitted display values.':normalized?'Searched to the end of the visible worksheets.':'');
+ ui(counter,matches.length?`第 ${page+1} 批 · 1 / ${matches.length}`:normalized?'没有匹配':'尚未搜索',matches.length?`Batch ${page+1} · 1 / ${matches.length}`:normalized?'No matches':'Not searched');
  if(matches.length)showMatch(0,generation);
 }
 function scheduleSearch(immediate=false){
  const generation=++searchGeneration,value=query.value;
  clearTimeout(searchTimer);matches=[];matchIndex=0;
  searchBatch=0;searchStarts=[{sheetIndex:0,rowIndex:0,columnIndex:0}];hasNextSearchBatch=false;
- controls();coverage.textContent='';counter.textContent=value.trim()?'等待搜索':'尚未搜索';
+ controls();ui(coverage,'','');ui(counter,value.trim()?'等待搜索':'尚未搜索',value.trim()?'Waiting to search':'Not searched');
  searchTimer=setTimeout(()=>run(()=>search(generation,value)),immediate?0:180);
 }
 function changeSearchBatch(delta){
@@ -187,18 +229,20 @@ document.addEventListener('click',event=>{if(event.target instanceof Element&&ev
 addEventListener('message',async event=>{
  if(closed||event.source!==parent||event.origin!==parentOrigin||!event.data||typeof event.data!=='object'||Array.isArray(event.data))return;
  const value=event.data;
+ if(started&&value.type==='jot-xlsx-language'&&value.protocol===1&&value.token===token
+  &&Object.keys(value).sort().join(',')==='language,protocol,token,type'&&['zh-CN','en'].includes(value.language)){setLanguage(value.language);return;}
  if(value.type==='jot-xlsx-probe'&&value.protocol===1&&Object.keys(value).length===2){boot();return;}
  if(started&&value.protocol===1&&value.token===token&&Object.keys(value).length===4){if(value.type==='jot-xlsx-view-probe'&&book)restoreView(value.view);else{cellReferences?.command(value);region?.command(value);}return;}
  if(started||value.type!=='jot-xlsx-init'||value.protocol!==1||typeof value.token!=='string'||!/^[a-f0-9-]{36}$/.test(value.token)||Object.keys(value).length!==4
   ||!(value.bytes instanceof ArrayBuffer)||value.bytes.byteLength>32*1024*1024)return;
- started=true;token=value.token;status.textContent='正在读取原生表格组件…';
+ started=true;token=value.token;ui(status,'正在读取原生表格组件…','Loading native spreadsheet components…');
  try{
   await Promise.all(styles.map(file=>loadAsset(file,true)));
   for(const file of scripts){if(closed)return;await loadAsset(file);}
   if(closed)return;
   await loadAsset('/docx-preview/0.4.0/jszip.min.js');
   if(closed)return;
-  status.textContent='正在转换原工作簿…';
+  ui(status,'正在转换原工作簿…','Converting the original workbook…');
   const data=await createNativeWorkbook(value.bytes);
   if(closed)return;
   workbookData=data.workbook;
@@ -230,10 +274,10 @@ addEventListener('message',async event=>{
    cellReferences?.invalidate();const first=selections[0];if(first)updateCell(worksheet,first.startRow,first.startColumn);
   });
   activeSheetListener=api.addEvent(api.Event.ActiveSheetChanged,({activeSheet})=>{if(!closed){cellReferences?.invalidate();region?.sheetChanged();observeViewScroll();sheetSelect.value=activeSheet.getSheetId();updateCell(activeSheet);}});
-  cellReferences=createCellReferences({api,content,getBook:()=>book,isWorking:()=>busy,isRegionActive:()=>!!region?.active,report,run});
-  region=createSpreadsheetRegion({api,content,getBook:()=>book,isWorking:()=>busy,report,run,
+  cellReferences=createCellReferences({api,content,getBook:()=>book,isWorking:()=>busy,isRegionActive:()=>!!region?.active,report,run,notice,getLanguage,subscribeLanguage});
+  region=createSpreadsheetRegion({api,content,getBook:()=>book,isWorking:()=>busy,report,run,notice,
    onModeChange:()=>{cellReferences.invalidate();controls();},onViewRestored:ratio=>{zoomPercent=ratio*100;zoom.value=String(zoomPercent);}});
-  observeViewScroll();controls();status.textContent='原生工作簿已读取。'+data.warnings.map(warning=>warning.message).join(' ');
+  observeViewScroll();controls();ui(status,'原生工作簿已读取。'+data.warnings.map(warning=>warning.message).join(' '),'Native workbook read. '+data.warnings.map(warning=>warning.message).join(' '));
   report({type:'jot-xlsx-ready',info:{sheets:data.workbook.sheetOrder.length,warnings:data.warnings.length}});
  }catch{if(!closed)fail();}finally{value.bytes=null;}
 });

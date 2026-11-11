@@ -1,7 +1,7 @@
 /* Adapted from pinned PilotDeck SpreadsheetInteractivePreview.tsx. See SOURCES.json and LICENSES.txt. */
 import {createSpreadsheetContextSelectionIntent,shouldShowSpreadsheetSelectionPopup} from './context-selection.js';
 
-export function createCellReferences({api,content,getBook,isWorking,isRegionActive,report,run}){
+export function createCellReferences({api,content,getBook,isWorking,isRegionActive,report,run,notice,getLanguage,subscribeLanguage}){
  const controller=new AbortController(),options={signal:controller.signal};
  const prepare=document.getElementById('cell-prepare'),status=document.getElementById('cell-status');
  const focusRanges=document.getElementById('cell-focus-range'),locate=document.getElementById('cell-locate');
@@ -66,9 +66,9 @@ export function createCellReferences({api,content,getBook,isWorking,isRegionActi
   const worksheet=getBook().getActiveSheet();
   return snapshot(worksheet,worksheet.getSelection()?.getActiveRangeList().map(range=>range.getRange())??[]);
  };
- const offer=value=>{proposal={serial:++serial,...value};report({type:'jot-xlsx-cells',selection:proposal});status.textContent='原生选区已准备，请在查看器下方确认引用。';};
+ const offer=value=>{proposal={serial:++serial,...value};report({type:'jot-xlsx-cells',selection:proposal});notice(status,'原生选区已准备，请在查看器下方确认引用。');};
  const error=code=>{
-  invalidate();status.textContent=code==='SELECTION_TOO_LARGE'?'原生选区或上下文超过当前引用范围，请缩小选区。':'当前原生选区尚未就绪，请重新选择。';
+  invalidate();notice(status,code==='SELECTION_TOO_LARGE'?'原生选区或上下文超过当前引用范围，请缩小选区。':'当前原生选区尚未就绪，请重新选择。');
   report({type:'jot-xlsx-cell-error',code});
  };
  function prepareCurrent(){
@@ -122,9 +122,12 @@ export function createCellReferences({api,content,getBook,isWorking,isRegionActi
  }
  try{
   const componentKey='jot-native-cell-reference-'+crypto.randomUUID();
-  popupComponent=api.registerComponent(componentKey,()=>window.React.createElement('button',{
-   type:'button',className:'jot-native-cell-action',onPointerDown:event=>event.stopPropagation(),onPointerUp:event=>event.stopPropagation(),onClick:prepareCurrent
-  },'准备引用到当前对话'));
+  popupComponent=api.registerComponent(componentKey,()=>{
+   const language=window.React.useSyncExternalStore(subscribeLanguage,getLanguage);
+   return window.React.createElement('button',{
+    type:'button',className:'jot-native-cell-action',onPointerDown:event=>event.stopPropagation(),onPointerUp:event=>event.stopPropagation(),onClick:prepareCurrent
+   },language==='en'?'Prepare Reference for This Chat':'准备引用到当前对话');
+  });
   subscriptions.push(api.addEvent(api.Event.SelectionMoveStart,hidePopup));
   subscriptions.push(api.addEvent(api.Event.SelectionMoveEnd,hidePopup));
   subscriptions.push(api.addEvent(api.Event.CellPointerDown,({worksheet})=>{
@@ -141,7 +144,7 @@ export function createCellReferences({api,content,getBook,isWorking,isRegionActi
      if(getBook().getActiveSheet().getSheetId()!==worksheet.getSheetId())return;
      const range=worksheet.getSelection()?.getActiveRangeList()[0];if(!range)return;
      hidePopup();popup=range.attachRangePopup({componentKey,direction:'top-center',offset:[0,-8]})??undefined;
-    }catch{hidePopup();status.textContent='原生浮动入口尚未就绪，可使用工具栏准备引用。';}
+    }catch{hidePopup();notice(status,'原生浮动入口尚未就绪，可使用工具栏准备引用。');}
    });
   }));
  }catch(cause){dispose();throw cause;}
@@ -161,8 +164,8 @@ export function createCellReferences({api,content,getBook,isWorking,isRegionActi
      report({type:'jot-xlsx-cell-commit-ready',serial:proposal.serial});
     }catch(cause){error(cause.message==='SELECTION_TOO_LARGE'?'SELECTION_TOO_LARGE':'SELECTION_UNAVAILABLE');}
    });
-   else if(value.type==='jot-xlsx-cell-added'&&proposal?.serial===value.serial){invalidate();status.textContent='原生选区已交给原草稿入口。';}
-   else if(value.type==='jot-xlsx-cell-clear'&&proposal?.serial===value.serial){invalidate();status.textContent='选区确认已取消，请重新准备。';}
+   else if(value.type==='jot-xlsx-cell-added'&&proposal?.serial===value.serial){invalidate();notice(status,'原生选区已交给原草稿入口。');}
+   else if(value.type==='jot-xlsx-cell-clear'&&proposal?.serial===value.serial){invalidate();notice(status,'选区确认已取消，请重新准备。');}
   }
  };
 }

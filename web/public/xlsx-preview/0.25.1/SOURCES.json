@@ -610,6 +610,11 @@
     {
       "path": "web/public/xlsx-preview/0.25.1/frame.js",
       "changes": "Adds original-window/origin/protocol/token-bound view-probe and bounded view reports. Parent retains32 owner/source-keyed views. Word keeps zoom/outline/scroll, PPTX keeps slide/zoom/thumbnails/scroll, XLSX keeps actual sheet/zoom/scroll through original native API commands and serialized renderer queue. Explicit quote focus suppresses older saved viewport restoration. Frame timers/scroll subscriptions are released on closure; reports coalesce scroll updates at160ms. Original library and renderer assets remain unchanged."
+    },
+    {
+      "path": "web/public/xlsx-preview/0.25.1/frame.js",
+      "upstream_path": "ui/src/components/code-editor/view/subcomponents/SpreadsheetInteractivePreview.tsx",
+      "changes": "Adapts pinned translation display to saved Jot language through exact original-window/origin/protocol/token/four-field admission after initialization. Only owned toolbar/search/status/cell/region/accessibility nodes and known notices are rebound. Existing bundled React useSyncExternalStore updates the original native cell popup caption without re-registering it or rebuilding selection snapshots. Original workbook/sheet names/data/formulas/display values/locale, parsing/read-only permissions, sparse search cursors, source/view/cell/capture/proof messages and renderer lifetime remain unchanged. Library locale and original warning messages remain pending separately. No dependency/CSP/allowlist change or runtime execution."
     }
   ]
 }

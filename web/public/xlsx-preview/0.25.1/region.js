@@ -11,7 +11,7 @@ function loadEngine(){
  return engine;
 }
 
-export function createSpreadsheetRegion({api,content,getBook,isWorking,report,run,onModeChange,onViewRestored}){
+export function createSpreadsheetRegion({api,content,getBook,isWorking,report,run,notice,onModeChange,onViewRestored}){
  const controller=new AbortController(),options={signal:controller.signal};
  const begin=document.getElementById('region-start'),whole=document.getElementById('region-whole'),cancel=document.getElementById('region-cancel'),status=document.getElementById('region-status');
  const inputs=['x','y','width','height'].map(key=>[key,document.getElementById('region-'+key)]);
@@ -73,18 +73,18 @@ export function createSpreadsheetRegion({api,content,getBook,isWorking,report,ru
   try{
    const bounds=content.getBoundingClientRect();if(rect.width*bounds.width<8||rect.height*bounds.height<8)throw Error('区域边长至少需要8个显示像素。');
    const anchor=anchorRange();selection={serial:++serial,rect,view:view(),...(anchor?{anchorRange:anchor}:{})};focusView=undefined;draw(rect);controls();report({type:'jot-xlsx-region',selection});
-   status.textContent='已选择工作表视口区域，请在查看器下方确认截图引用。';
-  }catch(error){clear();status.textContent=error.message;}
+   notice(status,'已选择工作表视口区域，请在查看器下方确认截图引用。');
+  }catch(error){clear();notice(status,error.message);}
  }
  function stop(){
   if(capturing){report({type:'jot-xlsx-capture-cancel',reason:'cancelled'});return;}
   if(focusView){focusView=undefined;report({type:'jot-xlsx-region-focus',confirmed:false});}
-  active=false;clear();onModeChange(false);status.textContent='工作表区域已取消。';
+  active=false;clear();onModeChange(false);notice(status,'工作表区域已取消。');
  }
  begin.addEventListener('click',()=>{
   if(!enabled||isWorking()||capturing)return;
   if(focusView){focusView=undefined;report({type:'jot-xlsx-region-focus',confirmed:false});}
-  active=true;clear();onModeChange(true);status.textContent='在当前工作表视口拖选，或选择整个视口。';
+  active=true;clear();onModeChange(true);notice(status,'在当前工作表视口拖选，或选择整个视口。');
  },options);
  whole.addEventListener('click',()=>{if(active&&!isWorking()&&!capturing)choose({x:0,y:0,width:1,height:1});},options);
  cancel.addEventListener('click',stop,options);
@@ -123,7 +123,7 @@ export function createSpreadsheetRegion({api,content,getBook,isWorking,report,ru
   if(disposed||!enabled||capturing||!selection||selection.serial!==expected)return;
   const original=selection;
   if(!sameView(view(),original.view)){invalidate();return;}
-  capturing=true;box.hidden=true;controls();status.textContent='正在生成工作表视口PNG…';
+  capturing=true;box.hidden=true;controls();notice(status,'正在生成工作表视口PNG…');
   const frozen=Array.from(document.querySelectorAll('header button,header input,header select')).filter(node=>node!==cancel).map(node=>({node,disabled:node.disabled}));
   for(const {node} of frozen)node.disabled=true;
   try{
@@ -144,8 +144,8 @@ export function createSpreadsheetRegion({api,content,getBook,isWorking,report,ru
    if(blob.size<1||blob.size>8*1024*1024)throw Error('截图超过当前8 MiB范围。');
    const bytes=await blob.arrayBuffer();if(disposed)return;
    report({type:'jot-xlsx-capture',capture:{selection:original,width:widthPng,height:heightPng,bytes,nearbyText:''}},[bytes]);
-   status.textContent='PNG已生成，正在交给原草稿上传入口。';
-  }catch(error){if(!disposed){status.textContent=error.message;report({type:'jot-xlsx-capture-error',reason:'capture_failed'});}}
+   notice(status,'PNG已生成，正在交给原草稿上传入口。');
+  }catch(error){if(!disposed){notice(status,error.message);report({type:'jot-xlsx-capture-error',reason:'capture_failed'});}}
   finally{cleanup();capturing=false;if(!disposed){for(const {node,disabled} of frozen)node.disabled=disabled;controls();}}
  }
  async function restore(value){

@@ -11,6 +11,9 @@ import XlsxCellReferences from './XlsxCellReferences';
 
 function XlsxAttempt({source,owner,identity,officeFocus,officeRegionFocus}:{source:FileViewingSource;owner:string;identity:string;officeFocus?:OfficeCellFocus;officeRegionFocus?:OfficeRegionFocus}){
  const language=useApplicationLanguage(),t=useApplicationText();
+ const currentLanguage=useRef(language);currentLanguage.current=language;
+ const setViewerLanguage=useRef<()=>void>(()=>{});
+ useEffect(()=>{setViewerLanguage.current();},[language]);
  const referenceSource=fileViewingReferenceSource(source);
  const cellSession=useRef<OfficeRegionSession|undefined>(undefined);
  const frame=useRef<HTMLIFrameElement>(null),probe=useRef<(element:HTMLIFrameElement)=>void>(()=>{}),cancel=useRef<()=>void>(()=>{});
@@ -21,10 +24,11 @@ function XlsxAttempt({source,owner,identity,officeFocus,officeRegionFocus}:{sour
   const dispose=()=>{closed=true;controller.abort();bytes=undefined;window.clearTimeout(timer);window.removeEventListener('message',message);window.document.removeEventListener('securitypolicyviolation',policy);};
   const fail=(message:string)=>{if(closed)return;dispose();setState({phase:'error',message});};
   const arm=()=>{window.clearTimeout(timer);timer=window.setTimeout(()=>fail('工作簿视觉读取超时，请重读或重新加载Jot页面。'),30000);};
+  setViewerLanguage.current=()=>{if(live()&&sent&&origin)frame.current?.contentWindow?.postMessage({type:'jot-xlsx-language',protocol:1,token,language:currentLanguage.current},origin);};
   const send=()=>{
    if(!live()||!booted||sent||!origin||!bytes||!frame.current?.contentWindow)return;
    sent=true;
-   try{frame.current.contentWindow.postMessage({type:'jot-xlsx-init',protocol:1,token,bytes},origin,[bytes]);bytes=undefined;}
+   try{frame.current.contentWindow.postMessage({type:'jot-xlsx-init',protocol:1,token,bytes},origin,[bytes]);bytes=undefined;setViewerLanguage.current();}
    catch{fail('原工作簿未能交给视觉查看器，请重试。');}
   };
   const message=(event:MessageEvent)=>{
@@ -57,7 +61,7 @@ function XlsxAttempt({source,owner,identity,officeFocus,officeRegionFocus}:{sour
    const verified=await readFileVisualSourceBytes(source,owner,controller.signal);if(!live())return;bytes=verified.buffer as ArrayBuffer;send();
   };
   void load().catch(error=>{if(!controller.signal.aborted)fail(error instanceof Error?error.message:'原工作簿读取失败');});
-  return()=>{dispose();cellSession.current=undefined;probe.current=()=>{};cancel.current=()=>{};};
+  return()=>{dispose();cellSession.current=undefined;setViewerLanguage.current=()=>{};probe.current=()=>{};cancel.current=()=>{};};
  },[identity,owner]);
  return <section lang={language} className="jot-xlsx-preview" aria-label={t('原工作簿视觉内容','Original Workbook Visual Content')}>
   <p role={state.phase==='error'?'alert':'status'}>{state.working?t('正在处理原生工作簿…','Processing native workbook…'):state.phase==='ready'&&state.sheets!==undefined?t(state.message,`${state.sheets} native sheets read${state.warnings?'; workbook display notices are present. Compare with the original file.':'.'}`):conversationUiError(state.message,language)} {(state.phase==='loading'||state.working)&&<button type="button" onClick={()=>cancel.current()}>{t('取消并关闭视觉查看器','Cancel and Close Visual Viewer')}</button>}</p>
