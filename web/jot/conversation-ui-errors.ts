@@ -1,6 +1,16 @@
 // Fixed owned conversation UI failures; unknown/raw content stays unchanged.
 import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
 const english:Record<string,string>={
+ "选中文字超出消息范围，请缩小选区。": "Selected text exceeds the message limit. Select a smaller region.",
+ "当前PDF页面尚未完成绘制，请稍后重试。": "The current PDF page has not finished rendering. Try again later.",
+ "上一张截图仍在处理，请稍后重试。": "The previous screenshot is still processing. Try again later.",
+ "PDF页面已变化，请重新选择区域。": "The PDF page has changed. Select the region again.",
+ "区域边长至少需要8个显示像素。": "Each region edge must be at least 8 display pixels.",
+ "区域画布暂不可用。": "The region canvas is unavailable.",
+ "截图编码失败": "Screenshot encoding failed.",
+ "截图引用未被接收，请查看当前对话的提示。": "The screenshot reference was not accepted. Check the current conversation notice.",
+ "区域截图失败": "Region screenshot capture failed.",
+ "请从已绘制的PDF页面内开始选择。": "Start selecting within a rendered PDF page.",
  "转换PDF大小与来源结果不一致。": "The converted PDF size differs from the source result.",
  "转换PDF摘要与来源结果不一致。": "The converted PDF digest differs from the source result.",
  "转换PDF页数与已核对结果不一致。": "The converted PDF page count differs from the verified result.",

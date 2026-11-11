@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import type {OfficePrintView} from '../../packages/gateway/contracts/types';
 import {officePreviewFormat} from '../../packages/gateway/src/artifacts/document-preview-content';
 // Adapted from PilotDeck revision 783499ffdb2d501bf590b2e035acd027a882df10.
@@ -18,6 +20,7 @@ const clamp=(rect:Rect,bounds:DOMRect):Rect=>({left:Math.max(bounds.left,Math.mi
 const normalized=(rect:Rect,bounds:DOMRect)=>normalizeRect({x:(rect.left-bounds.left)/bounds.width,y:(rect.top-bounds.top)/bounds.height,width:(rect.right-rect.left)/bounds.width,height:(rect.bottom-rect.top)/bounds.height});
 
 export default function PdfFileRegionReference({root,source,page,rotation,printView}:{root:RefObject<HTMLDivElement|null>;source:FileReferenceIdentity;page:number;rotation:number;printView?:OfficePrintView}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const context=useContext(FileTextReferenceContext),latest=useRef(context);latest.current=context;
  const owner=taskDraftScope(),identity=JSON.stringify([owner,source,rotation,printView]),sourceIdentity=useRef(identity);sourceIdentity.current=identity;
  const printMime=printView?officePreviewFormat(source.file.path)?.mediaType:undefined;
@@ -93,10 +96,10 @@ export default function PdfFileRegionReference({root,source,page,rotation,printV
   setRect({left:bounds.left+next.x*bounds.width,top:bounds.top+next.y*bounds.height,right:bounds.left+(next.x+next.width)*bounds.width,bottom:bounds.top+(next.y+next.height)*bounds.height});
  };
  if(!context)return null;
- return <section aria-label="PDF区域引用" data-chat-search-ignore>
-  <button type="button" disabled={disabled||active} onClick={()=>{setError('');setActive(true);}}>框选PDF区域</button>
+ return <section lang={language} aria-label={t("PDF区域引用","PDF Region Reference")} data-chat-search-ignore>
+  <button type="button" disabled={disabled||active} onClick={()=>{setError('');setActive(true);}}>{t('框选PDF区域','Select PDF Region')}</button>
   {active&&bounds&&createPortal(<>
-   <div ref={overlay} role="region" aria-label="拖动选择PDF区域" style={{position:'fixed',zIndex:110,left:bounds.left,top:bounds.top,width:bounds.width,height:bounds.height,cursor:'crosshair',touchAction:'none',background:'rgba(60,120,255,0.04)'}}
+   <div lang={language} ref={overlay} role="region" aria-label={t("拖动选择PDF区域","Drag to Select a PDF Region")} style={{position:'fixed',zIndex:110,left:bounds.left,top:bounds.top,width:bounds.width,height:bounds.height,cursor:'crosshair',touchAction:'none',background:'rgba(60,120,255,0.04)'}}
     onPointerDown={event=>{
      if(busy||event.button!==0)return;event.preventDefault();const element=event.currentTarget;element.style.pointerEvents='none';const value=resolve(window.document.elementFromPoint(event.clientX,event.clientY));element.style.pointerEvents='';
      if(!value){setError('请从已绘制的PDF页面内开始选择。');return;}
@@ -107,10 +110,10 @@ export default function PdfFileRegionReference({root,source,page,rotation,printV
     onPointerCancel={()=>{start.current=undefined;setRect(undefined);setTarget(undefined);}}>
     {rect&&<div style={{position:'absolute',pointerEvents:'none',left:rect.left-bounds.left,top:rect.top-bounds.top,width:rect.right-rect.left,height:rect.bottom-rect.top,border:'2px solid currentColor',background:'rgba(60,120,255,0.15)'}}/>}
    </div>
-   <section ref={panel} role="dialog" aria-label="PDF区域引用控件" style={{position:'fixed',zIndex:112,left:8,right:8,bottom:8,maxHeight:'40vh',overflow:'auto',padding:12,background:'var(--jot-background,white)',border:'1px solid currentColor'}} onKeyDown={event=>{event.stopPropagation();if(event.key==='Escape'){event.preventDefault();cancel();}}}>
-   <button type="button" disabled={busy} onClick={selectPage}>选择当前整页</button><button type="button" onClick={cancel}>取消区域引用</button>
-   <fieldset disabled={busy||!norm}><legend>调整区域百分比</legend>{([['x','左边'],['y','顶部'],['width','宽度'],['height','高度']] as const).map(([field,label])=><label key={field}>{label}<input type="number" min={0} max={100} step={0.1} value={norm?Math.round(norm[field]*1000)/10:0} onChange={event=>adjust(field,Number(event.target.value))}/></label>)}<button type="button" onClick={()=>void capture()}>添加截图引用</button></fieldset>
-    {busy&&<p role="status">正在核对区域截图…</p>}{error&&<p role="alert">{error}</p>}
+   <section lang={language} ref={panel} role="dialog" aria-label={t("PDF区域引用控件","PDF Region Reference Controls")} style={{position:'fixed',zIndex:112,left:8,right:8,bottom:8,maxHeight:'40vh',overflow:'auto',padding:12,background:'var(--jot-background,white)',border:'1px solid currentColor'}} onKeyDown={event=>{event.stopPropagation();if(event.key==='Escape'){event.preventDefault();cancel();}}}>
+   <button type="button" disabled={busy} onClick={selectPage}>{t('选择当前整页','Select Entire Current Page')}</button><button type="button" onClick={cancel}>{t('取消区域引用','Cancel Region Reference')}</button>
+   <fieldset disabled={busy||!norm}><legend>{t('调整区域百分比','Adjust Region Percentages')}</legend>{([['x',t('左边','Left')],['y',t('顶部','Top')],['width',t('宽度','Width')],['height',t('高度','Height')]] as const).map(([field,label])=><label key={field}>{label}<input type="number" min={0} max={100} step={0.1} value={norm?Math.round(norm[field]*1000)/10:0} onChange={event=>adjust(field,Number(event.target.value))}/></label>)}<button type="button" onClick={()=>void capture()}>{t('添加截图引用','Add Screenshot Reference')}</button></fieldset>
+    {busy&&<p role="status">{t('正在核对区域截图…','Verifying region screenshot…')}</p>}{error&&<p role="alert">{conversationUiError(error,language)}</p>}
    </section>
   </>,window.document.body)}
  </section>;

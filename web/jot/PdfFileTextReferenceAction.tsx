@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import type {OfficePrintView} from '../../packages/gateway/contracts/types';
 import {officePreviewFormat} from '../../packages/gateway/src/artifacts/document-preview-content';
 // Selection lifecycle adapted from Jot AssistantReplyQuote.tsx and PilotDeck revision 783499ffdb2d501bf590b2e035acd027a882df10.
@@ -34,6 +36,7 @@ function selectionSnapshot(root:HTMLElement,range:Range){
 
 type Action={range:Range;reference:FileTextReference;top:number;left:number};
 export default function PdfFileTextReferenceAction({root,source,rotation,printView}:{root:RefObject<HTMLElement|null>;source:FileReferenceIdentity;rotation:number;printView?:OfficePrintView}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const context=useContext(FileTextReferenceContext),current=useRef(context);current.current=context;
  const owner=taskDraftScope(),identity=JSON.stringify([owner,source,rotation,printView]),button=useRef<HTMLButtonElement>(null);
  const [action,setAction]=useState<Action>(),[notice,setNotice]=useState('');
@@ -66,5 +69,5 @@ export default function PdfFileTextReferenceAction({root,source,rotation,printVi
   if(!snapshot||snapshot.selectedText!==action.reference.reference.selectedText||snapshot.pages.join(',')!==action.reference.reference.locator.pageNumbers?.join(',')){setAction(undefined);return;}
   if(target.onAdd(action.reference)){window.getSelection()?.removeAllRanges();setAction(undefined);}
  };
- return <>{notice&&<p role="alert">{notice}</p>}{action&&!disabled&&createPortal(<button ref={button} type="button" className="jot-assistant-quote-action" style={{top:action.top,left:action.left}} onPointerDown={event=>event.preventDefault()} onMouseDown={event=>event.preventDefault()} onClick={commit}>引用PDF文字到当前对话</button>,window.document.body)}</>;
+ return <>{notice&&<p lang={language} role="alert">{conversationUiError(notice,language)}</p>}{action&&!disabled&&createPortal(<button lang={language} aria-label={t("引用PDF文字到当前对话","Quote PDF Text in This Chat")} ref={button} type="button" className="jot-assistant-quote-action" style={{top:action.top,left:action.left}} onPointerDown={event=>event.preventDefault()} onMouseDown={event=>event.preventDefault()} onClick={commit}>{t("引用PDF文字到当前对话","Quote PDF Text")}</button>,window.document.body)}</>;
 }
