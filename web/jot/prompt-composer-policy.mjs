@@ -5,12 +5,12 @@ function defaultEffort(option){
  return efforts.includes('high')?'high':efforts[0];
 }
 export function selectedEffort(options,selection){return selection?.reasoning_effort??defaultEffort(selectedModel(options,selection));}
-export function modelCapabilitySummary(option){
- const info=option?.compatibility;
- if(!info)return '能力未知';
- const modalities=info.input_modalities===null?'输入能力未知':info.input_modalities.map(value=>({text:'文本',image:'图像'}[value]??value)).join('/')||'无声明输入模态';
- const number=value=>value===null?'未知':new Intl.NumberFormat('zh-CN').format(value);
- return `${modalities} · 上下文 ${number(info.context_window)} · 默认输出 ${number(info.default_max_tokens)} · 元数据 ${info.metadata_digest.slice(0,8)}`;
+export function modelCapabilitySummary(option,language='zh-CN'){
+ const text=(zh,en)=>language==='en'?en:zh,info=option?.compatibility;
+ if(!info)return text('能力未知','Capabilities unknown');
+ const modalities=info.input_modalities===null?text('输入能力未知','Input capabilities unknown'):info.input_modalities.map(value=>({text:text('文本','Text'),image:text('图像','Image')}[value]??value)).join('/')||text('无声明输入模态','No input modalities declared');
+ const number=value=>value===null?text('未知','Unknown'):new Intl.NumberFormat(language==='en'?'en':'zh-CN').format(value);
+ return language==='en'?`${modalities} · Context ${number(info.context_window)} · Default output ${number(info.default_max_tokens)} · Metadata ${info.metadata_digest.slice(0,8)}`:`${modalities} · 上下文 ${number(info.context_window)} · 默认输出 ${number(info.default_max_tokens)} · 元数据 ${info.metadata_digest.slice(0,8)}`;
 }
 export function modelSelection(option){
  const effort=defaultEffort(option);

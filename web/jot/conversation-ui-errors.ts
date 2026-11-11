@@ -1,0 +1,43 @@
+// Fixed owned conversation UI failures; unknown/raw content stays unchanged.
+import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
+const english:Record<string,string>={
+ "原成员请求结果尚未确认": "The original member request result is unconfirmed.",
+ "无法清除已停止成员的请求记录": "Unable to clear the stopped member’s request record.",
+ "无法读取成员列表": "Unable to read the member list.",
+ "无法恢复原成员请求状态": "Unable to restore the original member request state.",
+ "无法清除原成员请求状态": "Unable to clear the original member request state.",
+ "原请求结果尚未确认": "The original request result is unconfirmed.",
+ "原文件引用所属账户已变化": "The account owning the original file reference has changed.",
+ "草稿暂时无法保存": "Unable to save the draft right now.",
+ "文件引用所属账户已变化，请重新打开会话": "The account owning the file reference has changed. Reopen the conversation.",
+ "服务尚未确认整组引用快照及Office区域PNG输入能力，请刷新能力后重试。": "The service has not confirmed complete reference snapshots and Office-region PNG inputs. Refresh capabilities before retrying.",
+ "服务尚未确认整组引用快照及原生单元格视图，请刷新能力后重试。": "The service has not confirmed complete reference snapshots and native cell views. Refresh capabilities before retrying.",
+ "服务尚未确认原生来源引用快照，请刷新能力后重试。": "The service has not confirmed native-source reference snapshots. Refresh capabilities before retrying.",
+ "服务尚未确认整组转换PDF引用及来源证明，请刷新能力后重试。": "The service has not confirmed the complete converted-PDF references and source proof. Refresh capabilities before retrying.",
+ "引用与消息过长，请减少引用或缩短消息后发送": "The references and message are too long. Reduce references or shorten the message before sending.",
+ "引用与消息过长，请减少引用或缩短消息": "The references and message are too long. Reduce references or shorten the message.",
+ "消息已发送，本地发送或附件回执清理尚未保存。请重读回执后重试原消息，核对原会话。": "The message was sent, but local message or attachment receipt cleanup has not been saved. Reread the receipts, then retry the original message and check the original conversation.",
+ "补充已保留给原任务，正在等待接收": "The follow-up is retained for the original task and is awaiting receipt.",
+ "会话内容或操作状态已变化，已保留页面，请核对后重试。": "Conversation content or operation state has changed. This page is retained; check it before retrying.",
+ "区域引用或截图信息未能核对，请重新选择。": "The region reference or screenshot could not be verified. Select it again.",
+ "截图所属账户已变化": "The account owning the screenshot has changed.",
+ "请在附件区处理此上传批次": "Handle this upload batch in the attachments area.",
+ "停止目标状态尚未确认": "The stop target state is unconfirmed.",
+ "取消结果未确认，请重试": "Cancellation is unconfirmed. Please retry.",
+ "批次取消结果未确认，请重试": "Batch cancellation is unconfirmed. Please retry.",
+ "文件预览未确认": "The file preview is unconfirmed.",
+ "文件暂不可下载": "The file cannot be downloaded right now.",
+ "无法读取所选文件夹": "Unable to read the selected folder.",
+ "备用模型配置未确认，请刷新对话后再更改模型": "Fallback model configuration is unconfirmed. Refresh the conversation before changing models.",
+ "新对话配置尚未确认": "New conversation configuration is unconfirmed.",
+ "新建对话尚未确认": "Conversation creation is unconfirmed.",
+ "对话模式能力尚未确认": "Conversation mode capabilities are unconfirmed.",
+ "请先确认可写工作区和可用模型": "Confirm a writable workspace and an available model first.",
+ "对话设置结果尚未确认，请重试原请求": "The conversation setting result is unconfirmed. Retry the original request.",
+ "没有待确认的对话设置": "No conversation setting is awaiting confirmation.",
+ "请先重试原新建请求": "Retry the original creation request first.",
+ "读取失败": "Unable to read the data."
+};
+export function conversationUiError(value:string,language:ApplicationLanguage){
+ return language==='en'&&Object.hasOwn(english,value)?english[value]!:value;
+}

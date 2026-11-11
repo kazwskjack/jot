@@ -125,7 +125,7 @@ export default function NativeMemberDetails({rootRunId,childSessionRef,childRunI
   const back=[...(current?.back??[]),prior];setError(undefined);
   setNavigation({identity,current:{root_run_id:next.root_run_id,child_session_ref:next.child_session_ref,child_run_id:next.child_run_id},first:current?.first??prior,back:back.slice(-32),trimmed:!!current?.trimmed||back.length>32});
  };
- return <section className="jot-native-member-details" aria-label="原成员执行记录">
+ return <section lang="zh-CN" className="jot-native-member-details" aria-label="原成员执行记录">
   <button type="button" aria-expanded={open} onClick={()=>setOpen(value=>!value)}>{open?'收起原成员步骤':'查看原成员步骤'}</button>
   {open&&<>
    {current&&<nav aria-label="成员执行返回位置" data-chat-search-ignore>

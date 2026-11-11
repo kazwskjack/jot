@@ -69,7 +69,7 @@ export default function ActivityArtifactDetails({conversationId,target,onOpen}:{
  },[identity,revision]);
  const current=state?.identity===identity?state:undefined,content=current?.content;
  const download=(file:Artifact)=>`${base}/v1/artifacts/${encodeURIComponent(file.artifact_id)}${file.part_index===undefined?'':`/parts/${file.part_index}`}/download?version=${file.version}`;
- return <div ref={region} tabIndex={-1} className="jot-activity-content" aria-label="步骤文件内容">
+ return <div ref={region} lang="zh-CN" tabIndex={-1} className="jot-activity-content" aria-label="步骤文件内容">
   <ArtifactVersionHistory key={JSON.stringify([owner,conversationId,target.artifactId])} conversationId={conversationId} artifactId={target.artifactId} onOpen={onOpen}/>
   <ArtifactRecovery key={JSON.stringify([owner,target.artifactId])} artifactId={target.artifactId} version={target.kind==='file'?target.version:target.toVersion} sha256={target.kind==='file'?target.sha256:target.afterSha256} partIndex={target.kind==='file'?target.partIndex:undefined} onRestored={reload}/>
   {(!current||!content&&!current.error)&&<p role="status">正在读取步骤文件…</p>}

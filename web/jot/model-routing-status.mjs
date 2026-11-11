@@ -1,25 +1,24 @@
 const HEALTH={healthy:'健康',unhealthy:'当前不可用',stale:'健康检查已过期',unknown:'健康状态未知'};
+const HEALTH_EN={healthy:'Healthy',unhealthy:'Currently unavailable',stale:'Health check expired',unknown:'Health unknown'};
 const plain=value=>!!value&&typeof value==='object'&&!Array.isArray(value);
-
-export function modelHealthLabel(health){return plain(health)?HEALTH[health.status]??'健康状态未知':'健康状态未知';}
-
+export function modelHealthLabel(health,language='zh-CN'){
+ const labels=language==='en'?HEALTH_EN:HEALTH;return plain(health)&&Object.hasOwn(labels,health.status)?labels[health.status]:labels.unknown;
+}
 function catalogRoute(route,catalog){
  if(!plain(route)||typeof route.provider!=='string'||typeof route.model!=='string'||!Array.isArray(catalog))return;
  return catalog.find(item=>item?.provider===route.provider&&item?.model===route.model);
 }
-
-function routeStatus(route,catalog,index){
- const item=catalogRoute(route,catalog);
- if(!item)return index===0?'主模型（健康状态未知）':`备用路线 ${index}（健康状态未知）`;
- const name=`${item.provider}/${item.model}`,health=modelHealthLabel(item.health);
- return index===0?`主模型 ${name}：${health}`:`${name}（${health}）`;
+function routeStatus(route,catalog,index,language){
+ const item=catalogRoute(route,catalog),en=language==='en';
+ if(!item)return index===0?(en?'Primary model (health unknown)':'主模型（健康状态未知）'):(en?`Fallback route ${index} (health unknown)`:`备用路线 ${index}（健康状态未知）`);
+ const name=`${item.provider}/${item.model}`,health=modelHealthLabel(item.health,language);
+ return index===0?(en?`Primary model ${name}: ${health}`:`主模型 ${name}：${health}`):(en?`${name} (${health})`:`${name}（${health}）`);
 }
-
-export function modelRoutingStatus(selection,catalog){
- const primary=routeStatus(selection,catalog,0),fallbacks=selection?.fallbacks;
- if(fallbacks===undefined||fallbacks===null||Array.isArray(fallbacks)&&fallbacks.length===0)return{primary,fallbacks:'备用顺序：未配置'};
- if(!Array.isArray(fallbacks)||fallbacks.length>3)return{primary,fallbacks:'备用顺序：配置无效，请刷新确认'};
- return{primary,fallbacks:`备用顺序：${fallbacks.map((route,index)=>routeStatus(route,catalog,index+1)).join(' → ')}`};
+export function modelRoutingStatus(selection,catalog,language='zh-CN'){
+ const primary=routeStatus(selection,catalog,0,language),fallbacks=selection?.fallbacks,en=language==='en';
+ if(fallbacks===undefined||fallbacks===null||Array.isArray(fallbacks)&&fallbacks.length===0)return{primary,fallbacks:en?'Fallback order: not configured':'备用顺序：未配置'};
+ if(!Array.isArray(fallbacks)||fallbacks.length>3)return{primary,fallbacks:en?'Fallback order: invalid configuration; refresh to confirm':'备用顺序：配置无效，请刷新确认'};
+ return{primary,fallbacks:`${en?'Fallback order: ':'备用顺序：'}${fallbacks.map((route,index)=>routeStatus(route,catalog,index+1,language)).join(' → ')}`};
 }
 
 function checkedFallbacks(fallbacks){
