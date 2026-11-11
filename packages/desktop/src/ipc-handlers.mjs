@@ -33,7 +33,8 @@ export function registerDesktopIpcHandlers({ipcMain,appOrigin,getWindow,stateSto
   ['menu.caption.show',async(_event,payload)=>{if(typeof showCaptionMenu!=='function')throw Error('desktop_caption_unavailable');return showCaptionMenu(payload);}],
   ['menu.caption.close',async()=>{if(typeof closeCaptionMenu!=='function')throw Error('desktop_caption_unavailable');closeCaptionMenu();return Object.freeze({protocol:1,closed:true});}],
   ['menu.state.set',async(_event,payload)=>{if(typeof setMenuState!=='function')throw Error('desktop_menu_unavailable');setMenuState(payload);return Object.freeze({protocol:1,accepted:true});}],
-  ['notification.capabilities',async()=>Object.freeze({event_protocol:notificationRuntime.eventProtocol===2?2:1,delivery_protocol:notificationRuntime.deliveryProtocol===1?1:0})],
+  ['notification.capabilities',async()=>Object.freeze({event_protocol:notificationRuntime.eventProtocol===2?2:1,delivery_protocol:notificationRuntime.deliveryProtocol===1?1:0,inspection_protocol:notificationRuntime.inspectionProtocol===1?1:0})],
+  ['notification.inspect',async(_event,payload)=>notificationRuntime.inspect(payload)],
   ['notification.state.read',async()=>stateStore.read()],
   ['notification.state.initialize',async(_event,payload)=>{
    return updateDesktopNotificationState(stateStore,current=>initializeDesktopNotificationState(current,payload.started_at));

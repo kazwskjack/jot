@@ -24,7 +24,7 @@ function quietAt(quiet,date){
  const minute=part('hour')*60+part('minute'),start=Number(quiet.start.slice(0,2))*60+Number(quiet.start.slice(3)),end=Number(quiet.end.slice(0,2))*60+Number(quiet.end.slice(3));
  return start<end?minute>=start&&minute<end:minute>=start||minute<end;
 }
-function normalizeDeliveryPolicy(value){
+export function normalizeDesktopTaskNotificationPolicy(value){
  if(value===undefined||value===null)return {min_interval_seconds:60,max_per_24_hours:20,quiet_hours:null};
  if(!plainRecord(value)||Object.keys(value).some(key=>!['min_interval_seconds','max_per_24_hours','quiet_hours'].includes(key))||
   !Number.isInteger(value.min_interval_seconds)||value.min_interval_seconds<1||value.min_interval_seconds>86400||
@@ -40,7 +40,7 @@ export function shouldDeliverDesktopNotification({candidate,preferences,taskSett
  if(!candidate||!notificationEvents.has(candidate.event_kind)||!taskSettings||!Array.isArray(taskSettings.events)||!taskSettings.events.includes(candidate.event_kind))return {deliver:false,reason:'event_not_selected'};
  const time=now instanceof Date?now:new Date(now);
  if(Number.isNaN(time.getTime()))return {deliver:false,reason:'invalid_time'};
- const policy=normalizeDeliveryPolicy(taskSettings.delivery_policy);
+ const policy=normalizeDesktopTaskNotificationPolicy(taskSettings.delivery_policy);
  if(quietAt(local.quiet_hours,time)||quietAt(policy.quiet_hours,time))return {deliver:false,reason:'quiet_hours'};
  const recent=Array.isArray(history)?history.filter(item=>item&&item.task_id===candidate.task_id).map(item=>Date.parse(item.shown_at)).filter(value=>Number.isFinite(value)&&value<=time.getTime()&&value>time.getTime()-86400000):[];
  if(recent.length>=policy.max_per_24_hours)return {deliver:false,reason:'rate_limited'};

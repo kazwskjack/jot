@@ -1,9 +1,15 @@
+import type {DesktopTaskNotificationCandidate,DesktopTaskNotificationSettings} from './types';
 import {normalizeDesktopNotificationPreferences} from '../../packages/desktop/src/notification-policy.mjs';
 
 export type DesktopNotificationPreferences={enabled:boolean;quiet_hours:{start:string;end:string;timezone:string}|null};
 export type DesktopNotificationPermission='granted'|'denied'|'default'|'unsupported'|'unknown';
 export type DesktopNotificationsBridge={
  readNotificationCapabilities?:()=>Promise<unknown>;
+ readNotificationState?:()=>Promise<unknown>;
+ initializeNotificationState?:(startedAt:string)=>Promise<unknown>;
+ showTaskNotification?:(candidate:DesktopTaskNotificationCandidate,settings:DesktopTaskNotificationSettings)=>Promise<unknown>;
+ dismissTaskNotification?:(identity:Pick<DesktopTaskNotificationCandidate,'event_id'|'task_id'|'occurrence_id'|'generation'|'event_kind'>)=>Promise<unknown>;
+ inspectTaskNotification?:(identity:Pick<DesktopTaskNotificationCandidate,'event_id'|'task_id'|'occurrence_id'|'generation'|'event_kind'>)=>Promise<unknown>;
  readNotificationPreferences:()=>Promise<unknown>;
  setNotificationPreferences:(value:DesktopNotificationPreferences)=>Promise<unknown>;
  readNotificationPermission:()=>Promise<unknown>;
@@ -26,7 +32,7 @@ export type DesktopNotificationDeliveryReceipt={protocol:1;event_id:string;statu
 const deliveryRecord=(value:unknown):Record<string,unknown>|null=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null;
 export function supportsDesktopNotificationDelivery(value:unknown):boolean{
  const row=deliveryRecord(value);
- return !!row&&Object.keys(row).sort().join(',')==='delivery_protocol,event_protocol'&&row.event_protocol===2&&row.delivery_protocol===1;
+ return !!row&&Object.keys(row).sort().join(',')==='delivery_protocol,event_protocol,inspection_protocol'&&row.event_protocol===2&&row.delivery_protocol===1&&row.inspection_protocol===1;
 }
 export function desktopNotificationDeliveryReceipt(value:unknown,eventId:string):DesktopNotificationDeliveryReceipt{
  const row=deliveryRecord(value);

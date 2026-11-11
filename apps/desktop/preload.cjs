@@ -97,6 +97,7 @@ const bridge=Object.freeze({
  onCommand(listener){if(typeof listener!=='function')throw TypeError('desktop_listener_invalid');commandListeners.add(listener);return()=>commandListeners.delete(listener);},
  selectFile:()=>invoke('dialog.selectFile'),
  readNotificationCapabilities:()=>invoke('notification.capabilities'),
+ inspectTaskNotification:identity=>invoke('notification.inspect',identity),
  readNotificationState:()=>invoke('notification.state.read'),
  initializeNotificationState:startedAt=>invoke('notification.state.initialize',{started_at:startedAt}),
  readNotificationPermission:()=>invoke('notification.permission.read'),

@@ -12,7 +12,7 @@
 
 ## 未完成范围
 
-M20.04 尚未完成。工作台顶部已接入当前设备的通知设置及原菜单入口，原 showTaskNotification/initializeNotificationState 任务通知入口尚未接入。完整任务事件订阅、任务撤销生命周期、OS 权限状态及 M24 桌面生命周期仍需连接原任务数据来源。不能用轮询猜测完成、旧页面状态、WebPush 投递或内存点击记录冒充原任务完成与系统权限。
+M20.04 尚未完成。工作台顶部已接入当前设备的通知设置及原菜单入口，原 showTaskNotification/initializeNotificationState 任务事件循环现已接入。旧 occurrence 证明、跨 origin 游标迁移、未知记录的显式结束等待、完整 OS 权限及 M24 发行/回退范围仍未完成。不能用轮询猜测完成、旧页面状态、WebPush 投递或内存点击记录冒充原任务完成与系统权限。
 
 本次为底层源码增量，未运行测试、构建、Electron、浏览器或 OS 通知，也没有安装、重启或部署。
 
@@ -24,7 +24,7 @@ M20.04 尚未完成。工作台顶部已接入当前设备的通知设置及原�
 
 权限请求是用户点击后调用原浏览器 Notification.requestPermission，再读取主进程的原权限结果；没有自动弹窗、测试通知或 API 探测。设备开关保存为开启后才可申请。显示的 granted/denied/default 是当前应用 origin 的浏览器权限，不能证明 Windows 通知设置、macOS 系统授权、Focus Assist/系统免打扰等允许展示，界面保留这一差异。未增加 OS 设置跳转或假装已经确认全部系统权限。
 
-本次不发送任务通知，也不根据通知偏好推断任务完成。完整原任务事件来源与撤销接线继续开发，未运行产品或测试。
+设备偏好面板本身不发送任务通知，也不根据偏好推断完成。实际事件循环如下；此任务没有运行产品或测试。
 
 ## 原任务事件来源账本
 
@@ -36,7 +36,7 @@ Gateway 在原任务 admission 事务内为新 occurrence 保存单独的桌面�
 
 扫描只接受当前原任务版本/代际、角色 epoch、活动角色和原通知设置版本；暂停、归档、变更角色或通知设置后，不把旧 scope 当作新发送授权。历史不可改写事件本身不能证明当前仍允许发送；后续 feed、发送前核对及撤销必须复用同一来源与 scope 条件。
 
-原事件账本已增加只读任务事件 feed 与逐事件状态查询，尚未连接 renderer 的 showTaskNotification。旧 occurrence、实际发送与跨账户/文档撤销、完整 OS 权限和 M24 范围仍待接续；逐事件原生去重身份已接入下述协议2，不回写历史 seen 伪造已通知。仅审阅和修改源码，未执行 SQL、迁移、任务维护或产品。
+原事件账本已增加只读任务事件 feed 与逐事件状态查询，已连接 renderer 的原 showTaskNotification，并在每次发送前重新核对原来源。旧 occurrence、旧记录迁移、完整 OS 权限和 M24 范围仍待接续；逐事件原生去重身份已接入下述协议2，不回写历史 seen 伪造已通知。仅审阅和修改源码，未执行 SQL、迁移、任务维护或产品。
 
 ## 只读事件分页与当前来源查询
 
@@ -48,7 +48,7 @@ Gateway 在原任务 admission 事务内为新 occurrence 保存单独的桌面�
 
 响应含协议1、当前服务端时间及 execution_granted=false。Gateway 和工作台代理均加 private, no-store；公共 types、JSON/YAML API 声明和原 workbench client 已接入。事件读取结果只是该快照的来源状态，不能替代真正发送前的重新核对，也不承诺 OS 会显示通知。
 
-后续 renderer 仍须处理首次连接/历史基线、原生持久去重、同一 occurrence 的多个真实事件、未知结果、源失效及账户/文档撤销。新 candidate 带原 event_id，新原生通知协议2可接收此字段，但旧主进程不支持。实际发送循环尚未接入，不把缺少主进程能力确认的 DTO 直接送给旧原生 show。旧 occurrence 没有出生 scope 时不伪造历史授权，完整 OS/M24 范围也未结束。本次未运行 HTTP、SQL、任务维护、浏览器、Electron、构建或测试。
+后续 renderer 仍须处理首次连接/历史基线、原生持久去重、同一 occurrence 的多个真实事件、未知结果、源失效及账户/文档撤销。新 candidate 带原 event_id，新原生通知协议2可接收此字段，但旧主进程不支持。现有发送循环拒绝缺少主进程能力确认的旧主进程，不删除事件ID降级发送。旧 occurrence 没有出生 scope 时不伪造历史授权，完整 OS/M24 范围也未结束。本次未运行 HTTP、SQL、任务维护、浏览器、Electron、构建或测试。
 
 ## 原生逐事件身份与旧记录
 
@@ -64,7 +64,7 @@ event_protocol2只确认身份能力，不是当前来源授权。新主进程�
 
 ## 逐事件发送回执
 
-原 notification.show 对不含 event_id 的旧请求仍返回原布尔值；带原 event_id 的请求返回严格的 `{protocol:1,event_id,status,reason}`。主进程实际能力查询同时返回 event_protocol2 和 delivery_protocol1。仅有身份协议、缺少回执协议、旧布尔结果或畸形/错事件回执均不能作为新流程的确认，前端不会删除事件ID再尝试旧接口。
+原 notification.show 对不含 event_id 的旧请求仍返回原布尔值；带原 event_id 的请求返回严格的 `{protocol:1,event_id,status,reason}`。主进程实际能力查询同时返回 event_protocol2 和 delivery_protocol1。仅有身份协议、缺少回执或只读核对协议、旧布尔结果或畸形/错事件回执均不能作为新流程的确认，前端不会删除事件ID再尝试旧接口。
 
 - shown：原生 show 事件后，原共享状态队列已确认写入相同事件 seen；不代表 OS 用户实际阅读了通知。
 - already_seen：相同身份已在已确认 active/seen 中，不重新显示。
@@ -74,4 +74,18 @@ event_protocol2只确认身份能力，不是当前来源授权。新主进程�
 
 回执的事件ID必须原样匹配，新客户端严格区分成功/已存在的空reason，以及deferred/unknown的固定原因代码。原生 show 调用前即设置本次派发标志，抛错也保留unknown；show之后再发现权限/策略失效只会关闭并保留unknown，不改成“从未发送”。读盘等准备错误发生在该标志之前才返回deferred。
 
-这套回执不提供跨重启的全部请求日志。renderer仍须在调用前持久保存原事件尝试，按原事件恢复核对seen与来源，持久保留未知而不是自动重发；有明确未发送回执时才可在当前来源仍有效的前提下延后。实际订阅/发送/撤销循环和未知尝试保留尚待接入，本轮未运行原生通知、产品、测试或部署。
+这套回执不提供跨重启的全部请求日志。renderer现已在调用前持久保存原事件尝试，按原事件恢复核对seen与来源，保留未知而不自动重发；有明确未发送回执时才可在当前来源仍有效的前提下延后。实际循环和未知尝试保留现已接入；未知记录的显式结束等待与旧 origin 迁移仍待接续。本任务未运行原生通知、产品、测试或部署。
+
+## 工作台发送与恢复循环
+
+工作台账户会话内挂载 useDesktopTaskNotifications，普通浏览器无原生桥接则不启动。循环要求实际主进程 event_protocol2、delivery_protocol1、inspection_protocol1 及当前 origin 的 Web Locks；旧版本不回退发送。原可信 notification.inspect 仅按原事件身份读取 active/pending/seen/not_recorded，不执行或重发；not_recorded 不能证明从未展示。
+
+原账户 hash 作用域的 localStorage 保存原 event cursor、首次连接服务端时间基线和最多64条 pending身份/状态，不存候选正文或密钥。Web Lock 串行同 origin/账户的写者；每次保存核对原字节并回读确认。损坏/未知格式、写失败、外部覆盖或协议不符停止新发送，不静默清空。首次开启采用首次服务端读取时刻为基线，不推送此前历史；原账本仍按50项分页扫描，游标只越过已保存或已明确跳过的记录。普通同 origin 重载沿用原基线和游标，离线后产生的原事件仍可继续分页。
+
+每轮先读取原设备偏好，最多轮询核对8条待处理记录，位置轮转避免只处理前几条；再读取一页原事件。来源校验、候选及原task_settings逐字段核对身份与策略，来源失效则按原身份撤销。尚未有尝试的queued记录只有在原生核对后、最新服务端来源仍有效且设备开启时，才先保存dispatching，再调用原生show。shown/already_seen转为已显示观察；原生明确deferred才允许回到queued；unknown/in_progress、异常/错回执/中断均只核对，不重发。已确认但不再active的seen可从本地待处理队列移除；这不删除原生seen。
+
+HTTP读取有12秒子AbortController，离开账户或超时会释放请求；原生等待也有限时，结果不明保留原尝试并停止该发送流程。源网络错误不会授权发送，会尝试关闭已知通知并保留记录待再次核对。定时器/监听器在释放时清理；状态与计数不变不反复触发工作台渲染。账户切换、手动重新核对、卸载或文档离开会按原身份撤销已知在途/显示记录，主进程原导航和renderer终止处理仍独立保留。
+
+工作台显示未确认/队列满/不可用状态及“重新核对通知”；该按钮不重发不明记录。达到64条时保留未读游标，不丢弃记录继续吞新事件。用户仍可使用原通知的点击/动作打开原task/occurrence，不创建或执行任务。偏好/权限不会自动申请，无测试通知。
+
+当前保留边界：队列被永久未知占满时需要后续显式结束等待控制；首次连接时间基线不是旧事件补发；localStorage/Web Lock受origin约束，发行时若端口/origin改变，跨origin持久游标迁移尚未实现；无Web Locks版本不会发送。旧无出生scope事件不伪造原权限，完整OS权限、撤销失败的系统表现和M24回退尚未验证或完成。源码接入不等于已运行，未执行测试、构建、HTTP、Electron或OS通知。

@@ -90,6 +90,11 @@ export function createDesktopNotificationRuntime({NotificationClass,stateStore,p
    throw error;
   }finally{if(pending.get(key)===entry)pending.delete(key);}
  }
+ async function inspect(value){
+  const identity=parseDesktopCommand('notification.inspect',value).payload,key=keyOf(identity);
+  const state=await stateStore.read();
+  return Object.freeze({protocol:1,event_id:identity.event_id,status:active.has(key)?'active':pending.has(key)?'pending':state.seen.some(item=>keyOf(item)===key)?'seen':'not_recorded'});
+ }
  function dismiss(value){
   let identity;try{identity=parseDesktopCommand('notification.dismiss',value).payload;}catch{return false;}
   const key=keyOf(identity),entry=active.get(key)??pending.get(key);
@@ -114,5 +119,5 @@ export function createDesktopNotificationRuntime({NotificationClass,stateStore,p
    return preferences;
   }finally{preferenceChanges--;}
  }
- return Object.freeze({eventProtocol:2,deliveryProtocol:1,show,dismiss,dismissTask,closeAll,permissionChanged,updatePreferences});
+ return Object.freeze({eventProtocol:2,deliveryProtocol:1,inspectionProtocol:1,show,inspect,dismiss,dismissTask,closeAll,permissionChanged,updatePreferences});
 }
