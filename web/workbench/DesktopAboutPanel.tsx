@@ -1,3 +1,5 @@
+import {useApplicationLanguage} from '../jot/application-language';
+import {desktopUiMessage} from './desktop-ui-messages';
 // About presentation adapts PilotDeck 783499ff desktopAbout/DesktopAboutSections; AGPL-3.0.
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from '../jot/client';
@@ -19,6 +21,7 @@ function aboutInfo(value:unknown):About{
  return {...r,package_version:r.package_version??null,package_manifest_sha256:r.package_manifest_sha256??null,build_source:r.build_source??'unavailable'} as unknown as About;
 }
 export default function DesktopAboutPanel({scopeKey}:{scopeKey:string}){
+ const language=useApplicationLanguage(),message=(value:string)=>desktopUiMessage(value,language);
  const [bridge]=useState(()=>(window as Window&{jotDesktop?:{getDesktopAbout?:()=>Promise<unknown>}}).jotDesktop);
  const [info,setInfo]=useState<About|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState('');
  const mounted=useRef(false),reading=useRef<object|null>(null),generation=useRef(0);
@@ -32,21 +35,21 @@ export default function DesktopAboutPanel({scopeKey}:{scopeKey:string}){
  },[bridge,scopeKey]);
  useEffect(()=>{mounted.current=true;void refresh();return()=>{mounted.current=false;generation.current+=1;reading.current=null;};},[refresh]);
  if(typeof bridge?.getDesktopAbout!=='function')return null;
- return <section className="wb-form" aria-labelledby="wb-desktop-about">
-  <h3 id="wb-desktop-about">关于 Jot 桌面版</h3>
-  {loading&&<p role="status">正在读取本机应用信息…</p>}{error&&<p role="alert">{error}</p>}
+ return <section lang={language} className="wb-form" aria-labelledby="wb-desktop-about">
+  <h3 id="wb-desktop-about">{message("关于 Jot 桌面版")}</h3>
+  {loading&&<p role="status">{message("正在读取本机应用信息…")}</p>}{error&&<p role="alert">{message(error)}</p>}
   {info&&<>
-   <p>当前应用报告版本：<strong>{info.version??'未提供'}</strong></p>
-   {info.package_version&&<p>当前运行发行包版本：<strong>{info.package_version}</strong></p>}
-   <p>{info.platform} · {info.arch} · {info.os_release??'系统版本未提供'}</p>
-   <p className="wb-settings-note">构建时间：{info.build_time??'未提供'}；源码提交：{info.source_commit??'未提供'}</p>
-   <p className="wb-settings-note">构建来源：{info.build_source==='running-release-manifest'?'当前运行发行包清单（与启动器摘要匹配）':'未提供可靠发行清单'}。构建时间仅在原清单提供时展示。</p>
-   {info.package_manifest_sha256&&<p className="wb-settings-note">发行清单 SHA-256：<code>{info.package_manifest_sha256}</code></p>}
-   {info.launcher_release_id&&<p className="wb-settings-note">启动器发行标识：<code>{info.launcher_release_id}</code></p>}
-   <p className="wb-settings-note">Electron {info.versions.electron??'未知'} · Chromium {info.versions.chrome??'未知'} · Node {info.versions.node??'未知'}</p>
+   <p>{message("当前应用报告版本：")}<strong>{info.version??message('未提供')}</strong></p>
+   {info.package_version&&<p>{message("当前运行发行包版本：")}<strong>{info.package_version}</strong></p>}
+   <p>{info.platform} · {info.arch} · {info.os_release??message('系统版本未提供')}</p>
+   <p className="wb-settings-note">{message("构建时间：")}{info.build_time??message('未提供')}{message("；源码提交：")}{info.source_commit??message('未提供')}</p>
+   <p className="wb-settings-note">{message("构建来源：")}{info.build_source==='running-release-manifest'?message('当前运行发行包清单（与启动器摘要匹配）'):message('未提供可靠发行清单')}{message("。构建时间仅在原清单提供时展示。")}</p>
+   {info.package_manifest_sha256&&<p className="wb-settings-note">{message("发行清单 SHA-256：")}<code>{info.package_manifest_sha256}</code></p>}
+   {info.launcher_release_id&&<p className="wb-settings-note">{message("启动器发行标识：")}<code>{info.launcher_release_id}</code></p>}
+   <p className="wb-settings-note">Electron {info.versions.electron??message('未知')} · Chromium {info.versions.chrome??message('未知')} · Node {info.versions.node??message('未知')}</p>
    <p className="wb-settings-note">{info.license}</p>
-   <details><summary>完整版本信息（可选择复制）</summary><pre tabIndex={0} style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:240,overflow:'auto'}}>{info.version_information}</pre></details>
+   <details><summary>{message("完整版本信息（可选择复制）")}</summary><pre tabIndex={0} style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:240,overflow:'auto'}}>{info.version_information}</pre></details>
   </>}
-  <button type="button" disabled={loading} onClick={()=>void refresh()}>刷新版本信息</button>
+  <button type="button" disabled={loading} onClick={()=>void refresh()}>{message("刷新版本信息")}</button>
  </section>;
 }
