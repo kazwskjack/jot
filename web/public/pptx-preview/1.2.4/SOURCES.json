@@ -61,6 +61,10 @@
       "path": "web/public/pptx-preview/1.2.4/frame.js",
       "upstream_path": "ui/src/components/code-editor/view/subcomponents/PptxBuiltinPreview.tsx",
       "changes": "Adapts pinned useTranslation display to saved Jot language through exact parent-window/origin/protocol/token/four-field language admission after original initialization. Binds only owned navigation/search/status/thumbnail aria/region labels. Original slide DOM, raw slide text, search indices/cursors/highlights/generations, native render queue, partial errors, four-handle thumbnail paging and source/capture/view messages remain. Old thumbnail language bindings are released with original handles on page changes; language never re-renders slides or starts search/capture/navigation. Original assets/CSP unchanged; no runtime execution performed."
+    },
+    {
+      "path": "web/public/pptx-preview/1.2.4/frame.js",
+      "changes": "Adds display-only pre-init language preview bound to the already verified original parent window/origin and this boot instance, with exact four fields and zh-CN/en. Parent sends it after valid unstarted boot and before original byte init; started/closed sessions reject preview and retain original token-bound language. No source bytes, owner, boot/init/proposal/reference/view/capture state or authority is changed, and locale changes never reload iframe/document. Static HTML remains Chinese only before the original script boot/handshake; no runtime execution performed."
     }
   ]
 }

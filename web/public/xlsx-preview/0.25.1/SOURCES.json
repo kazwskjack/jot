@@ -704,6 +704,10 @@
       "path": "web/public/xlsx-preview/0.25.1/frame.js",
       "upstream_path": "ui/src/components/code-editor/view/subcomponents/SpreadsheetInteractivePreview.tsx",
       "changes": "Adds the seven unmodified en-US locale UMD entries from the same cached0.25.1 package archives, preserving archive integrity and entry hashes. Existing facade loadLocales/setLocale refreshes the UI dictionary under the original ZH_CN locale identity because number-format and formula engines also read getCurrentLocale. Original workbook locale/data/instance/display-value/reference identities remain unchanged; no workbook reconstruction or selection/search reset. Macro warnings translate only their fixed code; image warnings use the original parsed source count, retaining original warning messages and unknown fallback. Runtime behavior unexecuted."
+    },
+    {
+      "path": "web/public/xlsx-preview/0.25.1/frame.js",
+      "changes": "Adds display-only pre-init language preview bound to the already verified original parent window/origin and this boot instance, with exact four fields and zh-CN/en. Parent sends it after valid unstarted boot and before original byte init; started/closed sessions reject preview and retain original token-bound language. No source bytes, owner, boot/init/proposal/reference/view/capture state or authority is changed, and locale changes never reload iframe/document. Static HTML remains Chinese only before the original script boot/handshake; no runtime execution performed."
     }
   ]
 }

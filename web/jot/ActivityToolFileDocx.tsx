@@ -84,7 +84,9 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
   const dispose=()=>{closed=true;controller.abort();bytes=undefined;selected.current=undefined;pending.current=undefined;window.clearTimeout(timeout);window.clearTimeout(pendingTimer.current);window.removeEventListener('message',message);window.document.removeEventListener('securitypolicyviolation',policyViolation);};
   const fail=(text:string)=>{if(!live())return;dispose();setProposal(undefined);setCommitting(false);if(officeTextFocus)setFocused(false);setState({phase:'error',message:text});};
   setViewerLanguage.current=()=>{
-   if(live()&&sent)target?.contentWindow?.postMessage({type:'jot-docx-language',protocol:1,token,language:currentLanguage.current},viewerOrigin);
+   if(!live()||!booted||!instance)return;
+   target?.contentWindow?.postMessage(sent?{type:'jot-docx-language',protocol:1,token,language:currentLanguage.current}
+    :{type:'jot-docx-language-preview',protocol:1,instance,language:currentLanguage.current},viewerOrigin);
   };
   const send=(element:HTMLIFrameElement)=>{
    if(!live()||sent||!booted||!bytes||!target||element!==target||!target.contentWindow)return;
@@ -104,7 +106,7 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
     if(sent){if(value.instance!==instance)fail('Word查看器已重新载入，请重新读取固定版本。');return;}
     instance=value.instance;
     if(value.started){fail('Word查看器已处理上次读取，请点击重新读取Word视觉内容。');return;}
-    booted=true;if(target)send(target);return;
+    booted=true;setViewerLanguage.current();if(target)send(target);return;
    }
    if(!sent)return;
    if(value.protocol!==1||value.token!==token||Object.keys(value).length!==4)return;

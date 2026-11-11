@@ -151,10 +151,9 @@ function findTextSearchMatches(text, query, limit) {
  let closed=false,started=false,zoom=1,sessionToken,visualView,selectionSerial=0,proposal,focusRange,regionController;
  window.addEventListener('message',event=>{
   const value=event.data;
-  if(closed||!started||event.source!==window.parent||event.origin!==parentOrigin||!value||typeof value!=='object'||Array.isArray(value)
-   ||Object.keys(value).sort().join(',')!=='language,protocol,token,type'||value.type!=='jot-docx-language'||value.protocol!==1||value.token!==sessionToken
-   ||!['zh-CN','en'].includes(value.language))return;
-  setLanguage(value.language);
+  if(closed||event.source!==window.parent||event.origin!==parentOrigin||!value||typeof value!=='object'||Array.isArray(value)||value.protocol!==1||!['zh-CN','en'].includes(value.language))return;
+  if(!started&&value.type==='jot-docx-language-preview'&&value.instance===instance&&Object.keys(value).sort().join(',')==='instance,language,protocol,type')setLanguage(value.language);
+  else if(started&&value.type==='jot-docx-language'&&value.token===sessionToken&&Object.keys(value).sort().join(',')==='language,protocol,token,type')setLanguage(value.language);
  });
  const boot=()=>{if(!closed)window.parent.postMessage({type:'jot-docx-boot',protocol:1,started,instance},parentOrigin);};
  window.addEventListener('message',event=>{

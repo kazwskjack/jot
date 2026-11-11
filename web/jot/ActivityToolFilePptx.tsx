@@ -23,7 +23,11 @@ function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:FileViewi
   const dispose=()=>{closed=true;controller.abort();bytes=undefined;window.clearTimeout(timer);window.removeEventListener('message',message);window.document.removeEventListener('securitypolicyviolation',policy);};
   const fail=(message:string)=>{if(closed)return;dispose();setState({phase:'error',message});};
   const arm=()=>{window.clearTimeout(timer);timer=window.setTimeout(()=>fail('幻灯片视觉读取超时，请重读或重新加载Jot页面。'),30000);};
-  setViewerLanguage.current=()=>{if(live()&&sent&&origin)frame.current?.contentWindow?.postMessage({type:'jot-pptx-language',protocol:1,token,language:currentLanguage.current},origin);};
+  setViewerLanguage.current=()=>{
+   if(!live()||!booted||!instance||!origin)return;
+   frame.current?.contentWindow?.postMessage(sent?{type:'jot-pptx-language',protocol:1,token,language:currentLanguage.current}
+    :{type:'jot-pptx-language-preview',protocol:1,instance,language:currentLanguage.current},origin);
+  };
   const send=()=>{
    if(!live()||!booted||sent||!origin||!bytes||!frame.current?.contentWindow)return;
    sent=true;
@@ -38,7 +42,7 @@ function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:FileViewi
     if(sent){if(value.instance!==instance)fail('幻灯片查看器已重新载入，请重新读取固定版本。');return;}
     instance=value.instance;
     if(value.started){fail('幻灯片查看器已处理上次读取，请重新读取。');return;}
-    booted=true;send();return;
+    booted=true;setViewerLanguage.current();send();return;
    }
    if(!sent||value.protocol!==1||value.token!==token||Object.keys(value).length!==4)return;
    if(value.type==='jot-pptx-closed'&&value.reason==='pagehide'){fail('幻灯片查看器页面已离开，请重新读取固定版本。');return;}

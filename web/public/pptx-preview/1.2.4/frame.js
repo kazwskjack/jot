@@ -282,6 +282,8 @@ addEventListener('pagehide',()=>{reportView();if(started&&!closed)report({type:'
 addEventListener('message',async event=>{
  if(closed||event.source!==parent||event.origin!==parentOrigin||!event.data||typeof event.data!=='object'||Array.isArray(event.data))return;
  const value=event.data;
+ if(!started&&value.type==='jot-pptx-language-preview'&&value.protocol===1&&value.instance===instance
+  &&Object.keys(value).sort().join(',')==='instance,language,protocol,type'&&['zh-CN','en'].includes(value.language)){setLanguage(value.language);return;}
  if(started&&value.type==='jot-pptx-language'&&value.protocol===1&&value.token===token
   &&Object.keys(value).sort().join(',')==='language,protocol,token,type'&&['zh-CN','en'].includes(value.language)){setLanguage(value.language);return;}
  if(value.type==='jot-pptx-probe'&&value.protocol===1&&Object.keys(value).length===2){boot();return;}
