@@ -1,3 +1,4 @@
+import {createUpdateTransferControl} from './update-transfer-control.mjs';
 import {randomUUID} from 'node:crypto';
 import {dirname,join,resolve} from 'node:path';
 import {verifyUpdateEnvelope} from './update-envelope.mjs';
@@ -86,9 +87,14 @@ function validateReceipt(staged,envelope){
 export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle,downloader,stateStore,platformSignatureVerifier,candidateProbe,hostLifecycle,
  desktopLifecycle,getHealthUrl,exitForHandoff,fetchEnvelope,relaunch,confirmActivation,probeRestoredRelease,getHostProcessContext}={}){
  const currentHostProcessContext=getHostProcessContext??(({releaseRoot})=>({pid:process.pid,execPath:process.execPath,releaseRoot}));
- let checked=null,checking=false,activeAction=null,cancelPending=false,transfer=null;
- const contexts=new Map(),controllers=new Map(),progressListeners=new Set();
- const commandStatus=(operationId=null)=>({checking,actionPending:activeAction!==null||cancelPending,operationCommands:1,activeCommand:activeAction?.kind??null,cancelPending,transfer:transfer?.operationId===operationId?transfer:null});
+ let checked=null,checking=false,activeAction=null,cancelPending=false,transfer=null,transferCommandPending=false;
+ const contexts=new Map(),controllers=new Map(),transferControls=new Map(),progressListeners=new Set();
+ const commandStatus=(operationId=null)=>{
+  const control=transferControls.get(operationId);
+  return {checking,actionPending:activeAction!==null||cancelPending,operationCommands:1,activeCommand:activeAction?.kind??null,cancelPending,
+   transfer:transfer?.operationId===operationId?transfer:null,downloadControlRevision:downloader?.transferControlRevision===1?1:null,
+   downloadControl:control?Object.freeze({operationId,...control.snapshot(),pending:transferCommandPending}):null};
+ };
  const emitProgress=(operationId,phase)=>{
   const event=Object.freeze({operation_id:operationId,phase});
   for(const listener of progressListeners)try{listener(event);}catch{}
@@ -363,6 +369,20 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
   try{return await (kind==='download'?download({operationId}):activate({operationId}));}
   finally{activeAction=null;}
  }
+ async function controlTransfer(kind,{operationId}={}){
+  assertReady();
+  if(typeof operationId!=='string'||!operationIdPattern.test(operationId))fail('desktop_update_operation_invalid');
+  const control=transferControls.get(operationId);
+  const admitted=()=>!checking&&!cancelPending&&activeAction?.kind==='download'&&activeAction.operationId===operationId&&transferControls.get(operationId)===control;
+  if(!control||transferCommandPending||!admitted())fail('desktop_update_transfer_control_unavailable');
+  transferCommandPending=true;
+  try{
+   const loaded=await stateStore.read(),operation=loaded.state?.operation;
+   if(!loaded.enabled||operation?.id!==operationId||!['available','downloading'].includes(operation.phase)||!admitted())fail('desktop_update_transfer_control_unavailable');
+   if(kind==='pause')control.pause();else control.resume();
+   return Object.freeze({operationId,...control.snapshot()});
+  }finally{transferCommandPending=false;}
+ }
  async function checkCandidate(){
   assertReady();
   const reconciled=await reconcile();if(!reconciled.enabled)fail(reconciled.reason??'desktop_update_state_unavailable');
@@ -409,6 +429,8 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
   if(!context)fail('desktop_update_operation_context_unavailable');
   const operationId=context.operationId,envelope=context.envelope,controller=new AbortController();
   controllers.set(operationId,controller);
+  const control=downloader.transferControlRevision===1?createUpdateTransferControl({signal:controller.signal}):null;
+  if(control)transferControls.set(operationId,control);
   try{
    const state=await stateStore.read(),operation=state.state?.operation;
    if(!state.enabled||operation?.id!==operationId)fail('desktop_update_phase_invalid');
@@ -419,9 +441,12 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
     transfer=Object.freeze({operationId,transferred:value.transferred,total:value.total});
    };
    let downloaded;
-   if(operation.phase==='available')downloaded=await downloader.download({operationId,verifiedEnvelope:envelope,signal:controller.signal,onProgress});
-   else if(['downloading','downloaded'].includes(operation.phase))downloaded=await downloader.resume({operationId,verifiedEnvelope:envelope,signal:controller.signal,onProgress});
-   else fail('desktop_update_phase_invalid');
+   try{
+    const request={operationId,verifiedEnvelope:envelope,signal:controller.signal,onProgress,waitForTransfer:control?.wait};
+    if(operation.phase==='available')downloaded=await downloader.download(request);
+    else if(['downloading','downloaded'].includes(operation.phase))downloaded=await downloader.resume(request);
+    else fail('desktop_update_phase_invalid');
+   }finally{control?.dispose();transferControls.delete(operationId);}
    if(controller.signal.aborted)fail('desktop_update_cancelled');
    if(!downloaded||downloaded.manifestSha256!==envelope.manifestSha256||downloaded.envelopeDigest!==envelope.envelopeDigest||typeof downloaded.packageRoot!=='string')
     fail('desktop_update_download_receipt_invalid');
@@ -486,7 +511,7 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
    emitProgress(operationId,progressPhase);
    contexts.delete(operationId);if(checked?.operationId===operationId)checked=null;
    throw error;
-  }finally{controllers.delete(operationId);}
+  }finally{control?.dispose();transferControls.delete(operationId);controllers.delete(operationId);}
  }
 
  async function cancel({operationId}={}){
@@ -616,6 +641,6 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
   if(typeof listener!=='function')fail('desktop_update_progress_listener_invalid');
   progressListeners.add(listener);return ()=>progressListeners.delete(listener);
  }
- return Object.freeze({status,check,download:args=>updateAction('download',args),cancel:args=>updateAction('cancel',args),activate:args=>updateAction('activate',args),reconcile,prepareStartup,confirmStartup,confirmRestoredStartup,
+ return Object.freeze({status,check,download:args=>updateAction('download',args),pause:args=>controlTransfer('pause',args),resume:args=>controlTransfer('resume',args),cancel:args=>updateAction('cancel',args),activate:args=>updateAction('activate',args),reconcile,prepareStartup,confirmStartup,confirmRestoredStartup,
   handleRestoredStartupFailure,handleStartupFailure,rollbackPrevious,onProgress});
 }

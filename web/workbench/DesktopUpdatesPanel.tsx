@@ -6,13 +6,15 @@ export default function DesktopUpdatesPanel({scopeKey,onPendingChange,canBeginAc
  const [bridge]=useState(desktopUpdatesBridge),[status,setStatus]=useState<DesktopUpdateStatus|null>(null),[receipt,setReceipt]=useState<DesktopUpdateCheck|null>(null);
  const [settled,setSettled]=useState(false),[loading,setLoading]=useState(false),[checking,setChecking]=useState(false),[error,setError]=useState('');
  const [action,setAction]=useState<'download'|'activate'|null>(null),[cancelling,setCancelling]=useState(false),[cancelRequested,setCancelRequested]=useState<string|null>(null);
+ const [transferAction,setTransferAction]=useState<'pause'|'resume'|null>(null);
  const actions=useRef<{refresh:()=>void;check:()=>void;run:(kind:DesktopUpdateAction)=>void}|null>(null);
  useEffect(()=>{
   if(!bridge)return;
   let disposed=false,generation=0,reading=false,localChecking=false,timer:ReturnType<typeof setTimeout>|undefined;
   let last:DesktopUpdateStatus|null=null,lastReceipt:DesktopUpdateCheck|null=null,localAction:'download'|'activate'|null=null,localCancel=false,reported=false,cancellationFor:string|null=null;
+  let localControl:'pause'|'resume'|null=null;
   const current=()=>!disposed&&taskDraftScope()===scopeKey;
-  const syncPending=()=>{const pending=localChecking||localAction!==null||localCancel;if(pending!==reported){reported=pending;onPendingChange(pending);}};
+  const syncPending=()=>{const pending=localChecking||localAction!==null||localCancel||localControl!==null;if(pending!==reported){reported=pending;onPendingChange(pending);}};
   const clearPoll=()=>{if(timer!==undefined)clearTimeout(timer);timer=undefined;};
   const refresh=async()=>{
    if(!current()||reading||localChecking)return;
@@ -24,12 +26,12 @@ export default function DesktopUpdatesPanel({scopeKey,onPendingChange,canBeginAc
     if(cancellationFor&&(next.operationId!==cancellationFor||next.actionPending===false)){cancellationFor=null;setCancelRequested(null);}
     // Events and command replies never synthesize progress or install success.
     // Only native status is displayed; while our command settles, keep reading.
-    if(next.checking===true||next.actionPending===true||localAction!==null||localCancel)timer=setTimeout(()=>void refresh(),1000);
+    if(next.checking===true||next.actionPending===true||localAction!==null||localCancel||localControl!==null)timer=setTimeout(()=>void refresh(),1000);
    }catch{if(current()&&revision===generation){last=null;setStatus(null);setSettled(true);setError('暂时无法读取更新状态。请刷新状态后再操作。');}}
    finally{reading=false;if(current()&&revision===generation)setLoading(false);}
   };
   const check=async()=>{
-   if(!current()||localChecking||localAction!==null||localCancel||reading||!canCheckDesktopUpdate(last))return;
+   if(!current()||localChecking||localAction!==null||localCancel||localControl!==null||reading||!canCheckDesktopUpdate(last))return;
    if(!canBeginAction()){setError('其他设置操作尚未确认，请等待后再检查更新。');return;}
    localChecking=true;generation+=1;clearPoll();setChecking(true);lastReceipt=null;setReceipt(null);setError('');syncPending();
    try{
@@ -40,15 +42,18 @@ export default function DesktopUpdatesPanel({scopeKey,onPendingChange,canBeginAc
   };
   const run=async(kind:DesktopUpdateAction)=>{
    if(!current()||localChecking||!desktopUpdateActionAllowed(last,lastReceipt,kind))return;
-   if(kind!=='cancel'&&!canBeginAction()){setError('其他设置操作尚未确认，请等待后再更新。');return;}
+   if((kind==='download'||kind==='activate')&&!canBeginAction()){setError('其他设置操作尚未确认，请等待后再更新。');return;}
    const operationId=last!.operationId!;
-   const method=kind==='download'?bridge.downloadUpdate:kind==='cancel'?bridge.cancelUpdate:bridge.activateUpdate;
+   const method=kind==='download'?bridge.downloadUpdate:kind==='cancel'?bridge.cancelUpdate:kind==='pause'?bridge.pauseUpdate:kind==='resume'?bridge.resumeUpdate:bridge.activateUpdate;
    if(typeof method!=='function')return;
    if(kind==='cancel'){
     if(localCancel||localAction==='activate'||cancellationFor===operationId)return;
     localCancel=true;cancellationFor=operationId;setCancelling(true);setCancelRequested(operationId);
+   }else if(kind==='pause'||kind==='resume'){
+    if(localControl!==null||localCancel||localAction==='activate')return;
+    localControl=kind;setTransferAction(kind);
    }else{
-    if(reading||localAction!==null||localCancel)return;
+    if(reading||localAction!==null||localCancel||localControl!==null)return;
     localAction=kind;setAction(kind);
    }
    setError('');syncPending();
@@ -63,8 +68,8 @@ export default function DesktopUpdatesPanel({scopeKey,onPendingChange,canBeginAc
      if(kind==='cancel'){cancellationFor=null;setCancelRequested(null);}
     }
    }finally{
-    if(kind==='cancel')localCancel=false;else localAction=null;
-    if(current()){if(kind==='cancel')setCancelling(false);else setAction(null);syncPending();void refresh();}
+    if(kind==='cancel')localCancel=false;else if(kind==='pause'||kind==='resume')localControl=null;else localAction=null;
+    if(current()){if(kind==='cancel')setCancelling(false);else if(kind==='pause'||kind==='resume')setTransferAction(null);else setAction(null);syncPending();void refresh();}
    }
   };
   actions.current={refresh:()=>{setError('');void refresh();},check:()=>void check(),run:kind=>void run(kind)};
@@ -77,11 +82,11 @@ export default function DesktopUpdatesPanel({scopeKey,onPendingChange,canBeginAc
  },[bridge,scopeKey,onPendingChange,canBeginAction]);
  if(!bridge)return null;
  const candidate=receipt?.available&&receipt.operationId===status?.operationId?receipt:null;
- const busy=checking||action!==null||cancelling||status?.checking===true||status?.actionPending===true;
+ const busy=checking||action!==null||cancelling||transferAction!==null||status?.checking===true||status?.actionPending===true;
  const otherPending=!canBeginAction();
  const hasActions=status?.operationCommands===1&&typeof bridge.downloadUpdate==='function'&&typeof bridge.cancelUpdate==='function'&&typeof bridge.activateUpdate==='function';
  const cancellingOperation=!!cancelRequested&&cancelRequested===status?.operationId&&(cancelling||action==='download'||status?.actionPending===true);
- const phaseText=!settled?'正在读取宿主更新状态…':!status?'更新状态未知':!status.enabled?'当前宿主未开放桌面更新':status.operationId&&status.phase?updatePhaseLabel[status.phase]:'尚无待处理操作回执';
+ const phaseText=status?.downloadControl?.paused?(status.downloadControl.waiting?'已暂停在文件写入边界':'已请求暂停，等待写入边界'):!settled?'正在读取宿主更新状态…':!status?'更新状态未知':!status.enabled?'当前宿主未开放桌面更新':status.operationId&&status.phase?updatePhaseLabel[status.phase]:'尚无待处理操作回执';
  return <section className="wb-form" data-desktop-update-panel data-desktop-update-ready={settled?'true':'false'} tabIndex={-1} aria-labelledby="wb-desktop-updates" aria-busy={busy}>
   <h3 id="wb-desktop-updates">桌面更新</h3>
   <p role="status" aria-live="polite">{checking||status?.checking===true?'正在检查更新…':cancellingOperation?'取消请求正在处理，请等待宿主状态确认。':action==='activate'?'正在等待原生确认或宿主处理激活…':phaseText}</p>
@@ -103,6 +108,7 @@ export default function DesktopUpdatesPanel({scopeKey,onPendingChange,canBeginAc
    <button type="button" disabled={loading||checking} onClick={()=>actions.current?.refresh()}>刷新状态</button>
    {hasActions&&<>
     <button type="button" disabled={otherPending||loading||busy||!desktopUpdateActionAllowed(status,receipt,'download')} onClick={()=>actions.current?.run('download')}>{status?.phase==='available'?'下载并准备':'恢复下载与准备'}</button>
+    {status?.downloadControlRevision===1&&typeof bridge.pauseUpdate==='function'&&typeof bridge.resumeUpdate==='function'&&<button type="button" disabled={transferAction!==null||cancelling||cancellingOperation||!desktopUpdateActionAllowed(status,receipt,status.downloadControl?.paused?'resume':'pause')} onClick={()=>actions.current?.run(status.downloadControl?.paused?'resume':'pause')}>{transferAction==='pause'?'正在请求暂停…':transferAction==='resume'?'正在请求继续…':status.downloadControl?.paused?'继续当前下载':'暂停当前下载'}</button>}
     <button type="button" disabled={checking||cancelling||action==='activate'||cancellingOperation||!desktopUpdateActionAllowed(status,receipt,'cancel')} onClick={()=>actions.current?.run('cancel')}>取消此更新</button>
     <button type="button" disabled={otherPending||loading||busy||!desktopUpdateActionAllowed(status,receipt,'activate')} onClick={()=>actions.current?.run('activate')}>激活并重启</button>
    </>}

@@ -90,11 +90,17 @@ async function requestHttps(url,{headers,signal}={}){
 function responseLengthHeaders(response,expected){
  requireIdentity(response.headers);requireContentLength(response.headers,expected);
 }
-async function collectManifest(response,expected,signal){
+async function transferBoundary(signal,waitForTransfer){
+ if(signal?.aborted)fail('desktop_update_cancelled');
+ if(typeof waitForTransfer==='function')await waitForTransfer();
+ if(signal?.aborted)fail('desktop_update_cancelled');
+}
+async function collectManifest(response,expected,signal,waitForTransfer){
  try{
   requireStatus(response,200);responseLengthHeaders(response,expected);
   const chunks=[];let total=0;
   for await(const raw of responseBody(response)){
+   await transferBoundary(signal,waitForTransfer);
    if(signal?.aborted)fail('desktop_update_cancelled');
    const chunk=Buffer.from(raw);total+=chunk.length;
    if(total>expected||total>maxManifestBytes)fail('desktop_update_manifest_length_mismatch');
@@ -272,7 +278,7 @@ export function createUpdateDownloader({policy,transport={request:requestHttps},
  if(!transport||typeof transport.request!=='function'||!fs||typeof fs.open!=='function'||typeof fs.lstat!=='function'||!isAbsolute(root??''))
   fail('desktop_update_downloader_invalid');
 
- async function execute({operationId,verifiedEnvelope,signal,allowStart,onProgress}){
+ async function execute({operationId,verifiedEnvelope,signal,allowStart,onProgress,waitForTransfer}){
   if(typeof operationId!=='string'||!/^([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.test(operationId))fail('desktop_update_operation_invalid');
   let state=await readStore(stateStore),operation=state.operation;
   if(!operation||operation.id!==operationId)fail('desktop_update_operation_mismatch');
@@ -283,16 +289,18 @@ export function createUpdateDownloader({policy,transport={request:requestHttps},
   if(operation.phase!=='downloading')fail('desktop_update_phase_invalid');
   if(signal?.aborted)fail('desktop_update_cancelled');
 
+  await transferBoundary(signal,waitForTransfer);
   let manifestResponse;
   try{manifestResponse=await transport.request(verifiedEnvelope.manifestUrl,{headers:{'accept-encoding':'identity','accept':'application/json'},signal});}
   catch(error){if(signal?.aborted)fail('desktop_update_cancelled');throw error;}
-  const manifestRaw=await collectManifest(manifestResponse,verifiedEnvelope.manifestBytes,signal);
+  const manifestRaw=await collectManifest(manifestResponse,verifiedEnvelope.manifestBytes,signal,waitForTransfer);
   const manifest=verifyUpdateManifest({rawBytes:manifestRaw,envelope:verifiedEnvelope});
   const profile=verifiedEnvelope.profile??'standalone',manifestName=profile==='desktop-electron'?'portable-package-manifest.json':'release-manifest.json';
   const files=validateManifestPaths(manifest,profile),operationRoot=await ensureOperationRoot(fs,root,operationId);
   const reportTransfer=transferReporter(files,onProgress);let completedBytes=0;reportTransfer(0);
 
   for(const file of files){
+   await transferBoundary(signal,waitForTransfer);
    if(signal?.aborted)fail('desktop_update_cancelled');
    const finalPath=await ensureFileParents(fs,operationRoot,file.path),partPath=finalPath+'.part';
    let finalInfo=await lstatIfExists(fs,finalPath);
@@ -347,6 +355,7 @@ export function createUpdateDownloader({policy,transport={request:requestHttps},
     }else handle=await fs.open(partPath,'wx',0o600);
     let received=0;
     for await(const raw of responseBody(response)){
+     await transferBoundary(signal,waitForTransfer);
      if(signal?.aborted)fail('desktop_update_cancelled');
      const chunk=Buffer.from(raw);
      if(chunk.length>file.bytes-offset)fail('desktop_update_body_too_long');
@@ -359,12 +368,14 @@ export function createUpdateDownloader({policy,transport={request:requestHttps},
     }
     if(received!==file.bytes-(checkpoint?.offset??0))fail('desktop_update_body_length_mismatch');
    }finally{if(handle)await handle.close();}
+   await transferBoundary(signal,waitForTransfer);
    const actual=await hashFile(fs,partPath);
    if(actual.bytes!==file.bytes||actual.sha256!==file.sha256)fail('desktop_update_file_digest_mismatch');
    await fs.rename(partPath,finalPath);await syncDirectory(fs,dirname(finalPath));
    completedBytes+=file.bytes;reportTransfer(completedBytes);
   }
 
+  await transferBoundary(signal,waitForTransfer);
   const manifestPath=join(operationRoot,manifestName),manifestInfo=await lstatIfExists(fs,manifestPath);
   if(manifestInfo){
    if(manifestInfo.isSymbolicLink()||!manifestInfo.isFile()||!Buffer.from(await fs.readFile(manifestPath)).equals(manifestRaw))fail('desktop_update_manifest_file_mismatch');
@@ -385,6 +396,7 @@ export function createUpdateDownloader({policy,transport={request:requestHttps},
    }
   }
   await verifyPackageInventory(fs,operationRoot,files,profile);
+  await transferBoundary(signal,waitForTransfer);
   await stateStore.setPhase(operationId,'downloaded');
   return Object.freeze({packageRoot:operationRoot,manifestSha256:verifiedEnvelope.manifestSha256,envelopeDigest:verifiedEnvelope.envelopeDigest,
    manifest,verifiedFiles:Object.freeze(files.map(file=>Object.freeze({path:file.path,bytes:file.bytes,sha256:file.sha256})))});
@@ -402,11 +414,11 @@ export function createUpdateDownloader({policy,transport={request:requestHttps},
    throw error;
   }
  }
- async function download({operationId,verifiedEnvelope,signal,onProgress}={}){
-  return withFailureState(operationId,signal,()=>execute({operationId,verifiedEnvelope,signal,allowStart:true,onProgress}));
+ async function download({operationId,verifiedEnvelope,signal,onProgress,waitForTransfer}={}){
+  return withFailureState(operationId,signal,()=>execute({operationId,verifiedEnvelope,signal,allowStart:true,onProgress,waitForTransfer}));
  }
- async function resume({operationId,verifiedEnvelope,signal,onProgress}={}){
-  return withFailureState(operationId,signal,()=>execute({operationId,verifiedEnvelope,signal,allowStart:false,onProgress}));
+ async function resume({operationId,verifiedEnvelope,signal,onProgress,waitForTransfer}={}){
+  return withFailureState(operationId,signal,()=>execute({operationId,verifiedEnvelope,signal,allowStart:false,onProgress,waitForTransfer}));
  }
- return Object.freeze({download,resume});
+ return Object.freeze({download,resume,transferControlRevision:1});
 }

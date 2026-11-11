@@ -60,6 +60,8 @@ const bridge=Object.freeze({
  getUpdateStatus:()=>invoke('update.status'),
  checkForUpdate:()=>invoke('update.check'),
  downloadUpdate:operationId=>operationId===undefined?invoke('update.download'):invoke('update.download',{operation_id:operationId}),
+ pauseUpdate:operationId=>invoke('update.pause',{operation_id:operationId}),
+ resumeUpdate:operationId=>invoke('update.resume',{operation_id:operationId}),
  cancelUpdate:operationId=>invoke('update.cancel',{operation_id:operationId}),
  activateUpdate:operationId=>invoke('update.activate',{operation_id:operationId}),
  onUpdateProgress(listener){

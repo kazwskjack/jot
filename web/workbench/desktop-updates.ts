@@ -2,10 +2,11 @@
 export const updatePhases=['available','downloading','downloaded','verified','staged','awaiting-activation','activating','active','cancelled','failed','unknown'] as const;
 export type UpdatePhase=typeof updatePhases[number];
 export type DesktopUpdateTransfer={operationId:string;transferred:number;total:number};
-export type DesktopUpdateStatus={enabled:boolean;reason:string|null;phase:UpdatePhase|null;operationId:string|null;checking:boolean|null;actionPending:boolean|null;operationCommands:1|null;activeCommand:'download'|'activate'|null;cancelPending:boolean|null;transfer:DesktopUpdateTransfer|null};
+export type DesktopDownloadControl={operationId:string;paused:boolean;waiting:boolean;pending:boolean};
+export type DesktopUpdateStatus={enabled:boolean;reason:string|null;phase:UpdatePhase|null;operationId:string|null;checking:boolean|null;actionPending:boolean|null;operationCommands:1|null;activeCommand:'download'|'activate'|null;cancelPending:boolean|null;transfer:DesktopUpdateTransfer|null;downloadControlRevision:1|null;downloadControl:DesktopDownloadControl|null};
 export type DesktopUpdateCheck={available:boolean;operationId:string|null;phase:UpdatePhase|null;version:string;sequence:string;channel:string;platform:string;arch:string};
-export type DesktopUpdateAction='download'|'cancel'|'activate';
-export type DesktopUpdatesBridge={getUpdateStatus:()=>Promise<unknown>;checkForUpdate:()=>Promise<unknown>;downloadUpdate?:(operationId:string)=>Promise<unknown>;cancelUpdate?:(operationId:string)=>Promise<unknown>;activateUpdate?:(operationId:string)=>Promise<unknown>;onUpdateProgress?:(listener:(event:unknown)=>void)=>()=>void};
+export type DesktopUpdateAction='download'|'cancel'|'activate'|'pause'|'resume';
+export type DesktopUpdatesBridge={getUpdateStatus:()=>Promise<unknown>;checkForUpdate:()=>Promise<unknown>;downloadUpdate?:(operationId:string)=>Promise<unknown>;cancelUpdate?:(operationId:string)=>Promise<unknown>;pauseUpdate?:(operationId:string)=>Promise<unknown>;resumeUpdate?:(operationId:string)=>Promise<unknown>;activateUpdate?:(operationId:string)=>Promise<unknown>;onUpdateProgress?:(listener:(event:unknown)=>void)=>()=>void};
 const row=(value:unknown):Record<string,unknown>|null=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null;
 const uuid=(value:unknown):value is string=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const code=(value:unknown):value is string=>typeof value==='string'&&/^[a-z][a-z0-9_]{0,127}$/.test(value);
@@ -23,19 +24,28 @@ function desktopUpdateTransfer(value:unknown,operationId:unknown):DesktopUpdateT
   typeof r.transferred!=='number'||!Number.isSafeInteger(r.transferred)||r.transferred<0||typeof r.total!=='number'||!Number.isSafeInteger(r.total)||r.total<r.transferred)throw Error('desktop_update_transfer_invalid');
  return {operationId:r.operationId,transferred:r.transferred,total:r.total};
 }
+function desktopDownloadControl(value:unknown,r:Record<string,unknown>):DesktopDownloadControl|null{
+ if(value===undefined||value===null)return null;
+ const c=row(value);
+ if(r.downloadControlRevision!==1||r.activeCommand!=='download'||r.actionPending!==true||!c||!keys(c,['operationId','paused','waiting','pending'])||
+  !uuid(c.operationId)||c.operationId!==r.operationId||typeof c.paused!=='boolean'||typeof c.waiting!=='boolean'||typeof c.pending!=='boolean'||c.waiting&&!c.paused)throw Error('desktop_update_download_control_invalid');
+ return {operationId:c.operationId,paused:c.paused,waiting:c.waiting,pending:c.pending};
+}
 export function desktopUpdateStatus(value:unknown):DesktopUpdateStatus{
  const r=row(value);
- if(!r||!keys(r,['enabled','reason','phase','operationId','checking','actionPending','operationCommands','activeCommand','cancelPending','transfer'])||typeof r.enabled!=='boolean'||
+ if(!r||!keys(r,['enabled','reason','phase','operationId','checking','actionPending','operationCommands','activeCommand','cancelPending','transfer','downloadControlRevision','downloadControl'])||typeof r.enabled!=='boolean'||
   (r.enabled?r.reason!==null:!code(r.reason))||(r.phase!==null&&!phase(r.phase))||
   (r.operationId!==undefined&&r.operationId!==null&&!uuid(r.operationId))||
   (r.checking!==undefined&&typeof r.checking!=='boolean')||(r.actionPending!==undefined&&typeof r.actionPending!=='boolean')||
+  (r.downloadControlRevision!==undefined&&r.downloadControlRevision!==null&&r.downloadControlRevision!==1)||
   (r.operationCommands!==undefined&&r.operationCommands!==1)||(r.activeCommand!==undefined&&r.activeCommand!==null&&r.activeCommand!=='download'&&r.activeCommand!=='activate')||
   (r.cancelPending!==undefined&&typeof r.cancelPending!=='boolean')||
   (r.operationCommands===1&&(typeof r.checking!=='boolean'||typeof r.actionPending!=='boolean'||r.activeCommand===undefined||typeof r.cancelPending!=='boolean'||
    r.actionPending!==(r.activeCommand!==null||r.cancelPending===true)||(r.checking===true&&r.actionPending===true))))throw Error('desktop_update_status_invalid');
  return {enabled:r.enabled,reason:r.reason as string|null,phase:r.phase as UpdatePhase|null,operationId:uuid(r.operationId)?r.operationId:null,
   checking:typeof r.checking==='boolean'?r.checking:null,actionPending:typeof r.actionPending==='boolean'?r.actionPending:null,operationCommands:r.operationCommands===1?1:null,
-  activeCommand:r.activeCommand==='download'||r.activeCommand==='activate'?r.activeCommand:null,cancelPending:typeof r.cancelPending==='boolean'?r.cancelPending:null,transfer:desktopUpdateTransfer(r.transfer,r.operationId)};
+  activeCommand:r.activeCommand==='download'||r.activeCommand==='activate'?r.activeCommand:null,cancelPending:typeof r.cancelPending==='boolean'?r.cancelPending:null,transfer:desktopUpdateTransfer(r.transfer,r.operationId),
+  downloadControlRevision:r.downloadControlRevision===1?1:null,downloadControl:desktopDownloadControl(r.downloadControl,r)};
 }
 export function desktopUpdateCheck(value:unknown):DesktopUpdateCheck{
  const r=row(value);
@@ -54,6 +64,9 @@ export const canCheckDesktopUpdate=(status:DesktopUpdateStatus|null)=>status?.en
 
 export function desktopUpdateActionAllowed(status:DesktopUpdateStatus|null,receipt:DesktopUpdateCheck|null,kind:DesktopUpdateAction):boolean{
  if(!status?.enabled||status.operationCommands!==1||status.checking!==false||status.cancelPending!==false||!status.operationId||!status.phase)return false;
+ if(kind==='pause'||kind==='resume')return status.downloadControlRevision===1&&status.activeCommand==='download'&&
+  ['available','downloading'].includes(status.phase)&&status.downloadControl?.operationId===status.operationId&&status.downloadControl.pending===false&&
+  (kind==='pause'?!status.downloadControl.paused:status.downloadControl.paused);
  if(kind==='cancel')return (status.activeCommand===null||status.activeCommand==='download')&&
   ['available','downloading','downloaded','verified','staged','awaiting-activation'].includes(status.phase);
  if(status.actionPending!==false||!receipt?.available||receipt.operationId!==status.operationId)return false;

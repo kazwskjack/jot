@@ -35,6 +35,8 @@ export function registerDesktopIpcHandlers({ipcMain,appOrigin,getWindow,stateSto
   ['update.status',async()=>updateLifecycle?.status?updateLifecycle.status():Object.freeze({enabled:false,reason:'desktop_update_host_policy_missing',phase:null,checking:false,actionPending:false,operationCommands:1,activeCommand:null,cancelPending:false})],
   ['update.check',async()=>requireUpdateMethod('check')()],
   ['update.download',async(_event,payload)=>requireUpdateMethod('download')(payload)],
+  ['update.pause',async(_event,payload)=>requireUpdateMethod('pause')(payload)],
+  ['update.resume',async(_event,payload)=>requireUpdateMethod('resume')(payload)],
   ['update.cancel',async(_event,payload)=>requireUpdateMethod('cancel')(payload)],
   ['update.activate',async(_event,payload)=>requireUpdateMethod('activate')(payload)]
  ]);
