@@ -1,6 +1,10 @@
 // Fixed owned conversation UI failures; unknown/raw content stays unchanged.
 import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
 const english:Record<string,string>={
+ "文件原版本或命中内容尚未确认": "The original file version or matching content is unconfirmed.",
+ "原文件正文读取失败": "Reading the original file body failed.",
+ "成果目录来源尚未确认": "The artifact catalog source is unconfirmed.",
+ "成果分页来源尚未确认": "The artifact page source is unconfirmed.",
  "分卷文件引用尚未确认": "The part-file reference is unconfirmed.",
  "文件引用尚未确认": "The file reference is unconfirmed.",
  "文件版本或来源尚未确认": "The file version or source is unconfirmed.",

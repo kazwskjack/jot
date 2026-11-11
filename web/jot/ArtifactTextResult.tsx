@@ -1,8 +1,11 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import React,{useEffect,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
 import type {ArtifactTextMatch,ArtifactTextPage} from './types';
 
 export default function ArtifactTextResult({conversationId,runId,target}:{conversationId:string;runId?:string;target:ArtifactTextMatch}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,target]);
  const region=useRef<HTMLElement>(null);
  const [cursor,setCursor]=useState<{identity:string;offset:number;previous:number[]}>({identity,offset:target.offset_chars,previous:[]});
@@ -31,28 +34,28 @@ export default function ArtifactTextResult({conversationId,runId,target}:{conver
  },[identity,offset,revision]);
  const current=state?.identity===identity&&state.offset===offset?state:undefined,page=current?.page;
  const at=target.match_offset_chars-offset,marked=page&&at>=0&&page.text.slice(at,at+target.match_text.length)===target.match_text;
- return <section ref={region} tabIndex={-1} className="jot-activity-content" aria-label="已选原文件正文">
-  <h4>{page?.file_name??target.file_name} · 版本 {target.version}{target.part_index===undefined?'':` · 第 ${target.part_index} 卷`}{target.document_job_id?(target.document_operation==='document.read'?' · 已保存原读取结果':' · 已保存文档预览'):''}</h4>
-  {(!current||!page&&!current.error)&&<p role="status">正在读取并核对原文件…</p>}
+ return <section lang={language} ref={region} tabIndex={-1} className="jot-activity-content" aria-label={t('已选原文件正文','Selected Original File Body')}>
+  <h4>{page?.file_name??target.file_name} · {t('版本','Version')} {target.version}{target.part_index===undefined?'':t(` · 第 ${target.part_index} 卷`,` · Part ${target.part_index}`)}{target.document_job_id?(target.document_operation==='document.read'?t(' · 已保存原读取结果',' · Saved Original Read Result'):t(' · 已保存文档预览',' · Saved Document Preview')):''}</h4>
+  {(!current||!page&&!current.error)&&<p role="status">{t('正在读取并核对原文件…','Reading and verifying the original file…')}</p>}
   {page&&<>
    <section data-chat-search-content={JSON.stringify(['artifact-text',identity,offset])}>
     <pre>{marked?<>{page.text.slice(0,at)}<mark>{target.match_text}</mark>{page.text.slice(at+target.match_text.length)}</>:page.text}</pre>
    </section>
    {page.document_operation==='document.read'&&page.document_read_revision!==1
-    ?<p role="status">该历史读取结果未记录解析版本，其文档覆盖范围尚未确认。</p>
-    :page.source_truncated&&<p role="status">已保存文档文本含覆盖缺口或显示截断，当前显示其留存文本。</p>}
-   <nav aria-label="原文件正文翻页" data-chat-search-ignore>
+    ?<p role="status">{t('该历史读取结果未记录解析版本，其文档覆盖范围尚未确认。','This historical read result does not record a parser revision. Its document coverage is unconfirmed.')}</p>
+    :page.source_truncated&&<p role="status">{t('已保存文档文本含覆盖缺口或显示截断，当前显示其留存文本。','The saved document text has coverage gaps or display truncation. Its retained text is shown.')}</p>}
+   <nav aria-label={t('原文件正文翻页','Original File Body Pages')} data-chat-search-ignore>
     <button type="button" disabled={!currentCursor.previous.length} onClick={()=>{
      const previous=currentCursor.previous.slice(0,-1),prior=currentCursor.previous.at(-1)!;
      setCursor({identity,offset:prior,previous});
-    }}>上一页正文</button>
-    <span>{Math.min(offset+1,page.total_chars)}–{offset+page.text.length} / {page.total_chars}（UTF-16 位置）</span>
+    }}>{t('上一页正文','Previous Text Page')}</button>
+    <span>{Math.min(offset+1,page.total_chars)}–{offset+page.text.length} / {page.total_chars}{t('（UTF-16 位置）',' (UTF-16 positions)')}</span>
     <button type="button" disabled={page.next_offset_chars===undefined} onClick={()=>{
      if(page.next_offset_chars!==undefined)setCursor({identity,offset:page.next_offset_chars,previous:[...currentCursor.previous,offset]});
-    }}>下一页正文</button>
-    {offset>0&&<button type="button" onClick={()=>setCursor({identity,offset:0,previous:[]})}>从正文开头阅读</button>}
+    }}>{t('下一页正文','Next Text Page')}</button>
+    {offset>0&&<button type="button" onClick={()=>setCursor({identity,offset:0,previous:[]})}>{t('从正文开头阅读','Read from the Beginning of the Text')}</button>}
    </nav>
   </>}
-  {current?.error&&<p role="alert">{current.error} <button type="button" onClick={()=>setRevision(value=>value+1)}>重试读取</button></p>}
+  {current?.error&&<p role="alert">{conversationUiError(current.error,language)} <button type="button" onClick={()=>setRevision(value=>value+1)}>{t('重试读取','Retry Reading')}</button></p>}
  </section>;
 }
