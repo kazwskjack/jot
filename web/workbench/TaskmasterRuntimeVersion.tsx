@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
+import {taskUiMessage} from './task-ui-messages';
 import React,{useEffect,useRef,useState} from 'react';
 import {request} from '../jot/client';
 import {prdMessage} from './task-prd.mjs';
@@ -7,6 +9,8 @@ const reasons={cli_failed:'CLI 退出码未成功',version_output_unconfirmed:'�
 export default function TaskmasterRuntimeVersion({taskId,taskVersion,installation,locked,onBusyChange}:{
  taskId:string;taskVersion:number;installation:TaskmasterInstallation|null;locked:boolean;onBusyChange:(busy:boolean)=>void;
 }){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const message=(value:string)=>taskUiMessage(value,language);
  const [confirmed,setConfirmed]=useState(false),[busy,setBusy]=useState(false),[result,setResult]=useState<TaskPrdRuntimeVersion|null>(null),[error,setError]=useState('');
  const pending=useRef<AbortController|null>(null);
  const identity=`${taskId}:${taskVersion}:${installation?.profile_id??''}:${installation?.manifest_sha256??''}:${installation?.cli_entry_sha256??''}`;
@@ -30,15 +34,15 @@ export default function TaskmasterRuntimeVersion({taskId,taskVersion,installatio
   }catch(e){if(!controller.signal.aborted&&pending.current===controller)setError(prdMessage(e instanceof Error?e.message:'PRD_TASKMASTER_RUNTIME_UNAVAILABLE'));}
   finally{if(pending.current===controller){pending.current=null;setBusy(false);onBusyChange(false);setConfirmed(false);}}
  }
- return <section aria-label="Taskmaster 实际运行版本">
-  <p className="wb-hint">此操作会启动当前用户已安装且哈希匹配的 Node CLI 入口，固定传入 --version。观察限制为 15 秒、64 KiB 合并输出，离页会取消。</p>
-  <label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked||busy||installation?.status!=='available'} onChange={event=>setConfirmed(event.target.checked)}/>确认运行已观察入口的 --version。</label>
-  <button type="button" disabled={locked||busy||!confirmed||installation?.status!=='available'} onClick={()=>void observe()}>{busy?'正在观察 CLI 版本…':'观察实际运行版本'}</button>
+ return <section lang={language} aria-label={message('Taskmaster 实际运行版本')}>
+  <p className="wb-hint">{message('此操作会启动当前用户已安装且哈希匹配的 Node CLI 入口，固定传入 --version。观察限制为 15 秒、64 KiB 合并输出，离页会取消。')}</p>
+  <label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={locked||busy||installation?.status!=='available'} onChange={event=>setConfirmed(event.target.checked)}/>{message('确认运行已观察入口的 --version。')}</label>
+  <button type="button" disabled={locked||busy||!confirmed||installation?.status!=='available'} onClick={()=>void observe()}>{message(busy?'正在观察 CLI 版本…':'观察实际运行版本')}</button>
   {result&&<div role="status">
-   <p>包声明版本 {result.runtime.declared_version} · 实际运行版本 {result.runtime.runtime_version??'待确认'}</p>
-   {result.runtime.reason_code&&<p>{reasons[result.runtime.reason_code]}</p>}
-   <p>退出码 {result.runtime.exit_code??'未返回'} · 观察时间 {result.runtime.observed_at}</p>
+   <p>{t('包声明版本 ','Declared Package Version ')}{result.runtime.declared_version} · {t('实际运行版本 ','Runtime Version ')}{result.runtime.runtime_version??message('待确认')}</p>
+   {result.runtime.reason_code&&<p>{message(reasons[result.runtime.reason_code])}</p>}
+   <p>{t('退出码 ','Exit Code ')}{result.runtime.exit_code??message('未返回')} · {t('观察时间 ','Observed At ')}{result.runtime.observed_at}</p>
   </div>}
-  {error&&<p role="alert">{error}</p>}
+  {error&&<p role="alert">{message(error)}</p>}
  </section>;
 }

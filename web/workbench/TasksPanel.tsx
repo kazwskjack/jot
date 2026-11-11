@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
+import {taskUiMessage} from './task-ui-messages';
 import TaskReplyPolicyPanel from './TaskReplyPolicyPanel';
 import TaskReplyHistoryPanel from './TaskReplyHistoryPanel';
 import ReplyPolicyFields from './ReplyPolicyFields';
@@ -179,6 +181,8 @@ export default function TasksPanel({caps,agents,onConversation,taskSource,onTask
  </div>;
 }
 function OccurrencePanel({task,agents,replyEnabled,replyExecution,notificationsEnabled,bindingsEnabled,emailBindingsEnabled,wecomBindingsEnabled,webPushBindingsEnabled,onTaskUpdated,membersEnabled,readinessEnabled,budgetEnabled,resumeEnabled,prdEnabled,executionReady,desktopOpenTask,onDesktopOpenTaskResolved,onClose,onConversation}:{task:Task;agents:Agent[];replyEnabled:boolean;replyExecution:boolean;notificationsEnabled:boolean;bindingsEnabled:boolean;emailBindingsEnabled:boolean;wecomBindingsEnabled:boolean;webPushBindingsEnabled:boolean;onTaskUpdated:()=>void;membersEnabled:boolean;readinessEnabled:boolean;budgetEnabled:boolean;resumeEnabled:boolean;prdEnabled:boolean;executionReady:boolean;desktopOpenTask?:DesktopOpenTaskIdentity|null;onDesktopOpenTaskResolved?:()=>void;onClose:()=>void;onConversation:(id:string)=>void}){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const message=(value:string)=>taskUiMessage(value,language);
  const [publicationBusy,setPublicationBusy]=useState(false),reportPending=useContext(MutationPending);
  const publicationPending=useCallback((value:boolean)=>{setPublicationBusy(value);reportPending(value)},[reportPending]);
  const completionLabels={awaiting_completion:'已验收，等待收尾',finalizing:'正在确认完成',reconciliation_pending:'完成状态待核对',completed:'已验收完成'};
@@ -209,26 +213,26 @@ function OccurrencePanel({task,agents,replyEnabled,replyExecution,notificationsE
    onDesktopOpenTaskResolved?.();
   },[desktopOpenTask,task.task_id,resource.loading,resource.error,resource.data,resource.reload,onDesktopOpenTaskResolved]);
  useEffect(()=>{const timer=setInterval(()=>{if(!document.hidden){resource.reload();if(selected?.run_id)run.reload();}},10000);return()=>clearInterval(timer);},[selected?.run_id]);
-  return <div className="wb-detail-overlay"><section className="wb-detail" role="dialog" aria-modal="true" aria-label={`${task.title}执行记录`} tabIndex={-1} onKeyDown={e=>{if(e.key==='Escape'&&!publicationBusy){onClose();return;}if(e.key!=='Tab')return;const focusable=Array.from(e.currentTarget.querySelectorAll<HTMLElement>('a[href],button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"]),[contenteditable="true"]')).filter(element=>!element.closest('[hidden],[aria-hidden="true"],[inert]')&&element.getClientRects().length>0);if(!focusable.length){e.preventDefault();e.currentTarget.focus();return;}const target=dialogTabBoundaryTarget(document.activeElement,focusable,e.shiftKey);if(target){e.preventDefault();target.focus();}}}>
-  <div className="wb-form-head"><div><small>执行记录</small><h3>{task.title}</h3></div><button autoFocus disabled={publicationBusy} onClick={onClose} aria-label="关闭执行记录"><LucideIcon name="x"/></button></div>
-   {budgetEnabled&&<TaskBudgetPanel taskId={task.task_id}/>} {readinessEnabled?<TaskLedgerPanel taskId={task.task_id} taskStatus={task.status}/>:<Empty>服务器尚未接入准备度详情。</Empty>}
-  {prdEnabled&&<TaskPrdPanel key={`prd:${task.task_id}`} task={task} executionReady={executionReady} onBound={()=>{resource.reload();onTaskUpdated();}}/>}
+  return <div lang={language} className="wb-detail-overlay"><section className="wb-detail" role="dialog" aria-modal="true" aria-label={t(`${task.title}执行记录`,`${task.title} Execution Records`)} tabIndex={-1} onKeyDown={e=>{if(e.key==='Escape'&&!publicationBusy){onClose();return;}if(e.key!=='Tab')return;const focusable=Array.from(e.currentTarget.querySelectorAll<HTMLElement>('a[href],button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"]),[contenteditable="true"]')).filter(element=>!element.closest('[hidden],[aria-hidden="true"],[inert]')&&element.getClientRects().length>0);if(!focusable.length){e.preventDefault();e.currentTarget.focus();return;}const target=dialogTabBoundaryTarget(document.activeElement,focusable,e.shiftKey);if(target){e.preventDefault();target.focus();}}}>
+  <div className="wb-form-head"><div><small>{message('执行记录')}</small><h3>{task.title}</h3></div><button autoFocus disabled={publicationBusy} onClick={onClose} aria-label={message('关闭执行记录')}><LucideIcon name="x"/></button></div>
+   {budgetEnabled&&<TaskBudgetPanel taskId={task.task_id}/>} {readinessEnabled?<TaskLedgerPanel taskId={task.task_id} taskStatus={task.status}/>:<Empty>{message('服务器尚未接入准备度详情。')}</Empty>}
+  {prdEnabled&&<div lang="zh-CN"><TaskPrdPanel key={`prd:${task.task_id}`} task={task} executionReady={executionReady} onBound={()=>{resource.reload();onTaskUpdated();}}/></div>}
   {membersEnabled&&<TaskCollaborationPanel key={task.task_id} task={task} agents={agents}/>}
-  <div ref={occurrenceStatus}><ResourceStatus {...resource} onRetry={resource.reload}/></div>{notice&&<p className="wb-status" role="status">{notice}</p>}
-  {!resource.loading&&!resource.error&&!resource.data?.items.length&&<Empty>尚未产生执行记录。</Empty>}
+  <div ref={occurrenceStatus}><ResourceStatus {...resource} error={message(resource.error)} onRetry={resource.reload}/></div>{notice&&<p className="wb-status" role="status">{message(notice)}</p>}
+  {!resource.loading&&!resource.error&&!resource.data?.items.length&&<Empty>{message('尚未产生执行记录。')}</Empty>}
   {replyEnabled&&<TaskReplyHistoryPanel key={`reply-history:${task.task_id}`} taskId={task.task_id} onConversation={onConversation}/>}
-  <div className="wb-occurrences">{resource.data?.items.map(item=><button key={item.occurrence_id} disabled={publicationBusy} aria-pressed={selectedId===item.occurrence_id} onClick={()=>{setSelectedId(item.occurrence_id);setNotice('');}}><span>{scheduleTime(item.scheduled_for,task.trigger.timezone)}</span><span>{item.completion_state?completionLabels[item.completion_state]:states[item.status]??item.status}</span></button>)}</div>
+  <div className="wb-occurrences">{resource.data?.items.map(item=><button key={item.occurrence_id} disabled={publicationBusy} aria-pressed={selectedId===item.occurrence_id} onClick={()=>{setSelectedId(item.occurrence_id);setNotice('');}}><span>{scheduleTime(item.scheduled_for,task.trigger.timezone)}</span><span>{item.completion_state?message(completionLabels[item.completion_state]):states[item.status]?message(states[item.status]):item.status}</span></button>)}</div>
   {replyEnabled&&<TaskReplyPolicyPanel key={task.task_id} taskId={task.task_id} workspaceId={agents.find(agent=>agent.agent_id===task.agent_id)?.workspace_id} projectId={agents.find(agent=>agent.agent_id===task.agent_id)?.project_id} bindingsEnabled={bindingsEnabled} executionEnabled={replyExecution} canEdit={task.status!=='archived'&&!!resource.data&&!resource.loading&&!resource.error&&resource.data.items.every(item=>['succeeded','partial','failed','cancelled','interrupted'].includes(item.status))} onSaved={()=>{resource.reload();onTaskUpdated();}}/>}
   {notificationsEnabled&&<TaskNotificationsPanel taskId={task.task_id} occurrenceId={selected?.occurrence_id} bindingsEnabled={bindingsEnabled} emailBindingsEnabled={emailBindingsEnabled} wecomBindingsEnabled={wecomBindingsEnabled} webPushBindingsEnabled={webPushBindingsEnabled} canEdit={task.status!=='archived'&&!!resource.data&&!resource.loading&&!resource.error&&resource.data.items.every(item=>['succeeded','partial','failed','cancelled','interrupted'].includes(item.status))} onSaved={notificationsSaved}/>}
-  {selected&&<div className="wb-run-detail"><p>业务状态：{states[selected.business_state]??selected.business_state??'—'}</p>{selected.conversation_id&&<button disabled={publicationBusy} onClick={()=>onConversation(selected.conversation_id!)}>查看本次对话 ↗</button>}
-   {selected.completion_state&&<p role="status">{completionLabels[selected.completion_state]}</p>}
-   <ResourceStatus {...run} onRetry={run.reload}/>
-   {run.data?.run_id===selected.run_id&&<><dl><dt>运行状态</dt><dd>{states[run.data!.status]??run.data!.status}</dd><dt>创建时间</dt><dd>{run.data!.created_at}</dd><dt>更新时间</dt><dd>{run.data!.updated_at}</dd></dl>
+  {selected&&<div className="wb-run-detail"><p>{t('业务状态：','Business State: ')}{states[selected.business_state]?message(states[selected.business_state]):selected.business_state??'—'}</p>{selected.conversation_id&&<button disabled={publicationBusy} onClick={()=>onConversation(selected.conversation_id!)}>{message('查看本次对话 ↗')}</button>}
+   {selected.completion_state&&<p role="status">{message(completionLabels[selected.completion_state])}</p>}
+   <ResourceStatus {...run} error={message(run.error)} onRetry={run.reload}/>
+   {run.data?.run_id===selected.run_id&&<><dl><dt>{message('运行状态')}</dt><dd>{states[run.data!.status]?message(states[run.data!.status]):run.data!.status}</dd><dt>{message('创建时间')}</dt><dd>{run.data!.created_at}</dd><dt>{message('更新时间')}</dt><dd>{run.data!.updated_at}</dd></dl>
     <TaskRunControls key={selected.run_id} run={run.data!} expectedRunId={selected.run_id!} enabled={resumeEnabled&&!run.error&&!resource.error} loading={run.loading||resource.loading} onRefresh={()=>{run.reload();resource.reload();}} onResumed={()=>{setNotice('恢复请求已接收；继续沿用本次执行的进度和额度。');resource.reload();run.reload();}}/>
    </>}
-   {publication&&<WorkPublicationPanel key={`${publication.taskId}:${publication.runId}`} {...publication} onBusy={publicationPending}/>}
+   {publication&&<div lang="zh-CN"><WorkPublicationPanel key={`${publication.taskId}:${publication.runId}`} {...publication} onBusy={publicationPending}/></div>}
    <TaskMembersPanel key={selected.occurrence_id} task={task} agents={agents} occurrence={selected} run={run.data?.run_id===selected.run_id?run.data:null} enabled={membersEnabled&&!resource.error&&!run.error}/>
-   {Boolean(selected.evidence)&&<><h4>检查证据</h4><pre>{JSON.stringify(selected.evidence,null,2)}</pre></>}
+   {Boolean(selected.evidence)&&<><h4>{message('检查证据')}</h4><pre>{JSON.stringify(selected.evidence,null,2)}</pre></>}
   </div>}
  </section></div>;
 }
