@@ -10,7 +10,8 @@ import {projectTerminalFrame,validateTerminalAttached,validateTerminalQueued} fr
 import type {TerminalOptions} from '../../packages/gateway/src/terminal/control.js';
 import type {TerminalInfo} from '../../packages/gateway/src/terminal/inventory.js';
 
-type Props={conversationId:string;runId:string;terminal:TerminalInfo;options:TerminalOptions;
+export type NativeTerminalScope={conversationId:string;runId:string;admissionId?:never}|{admissionId:string;conversationId?:never;runId?:never};
+type Props=NativeTerminalScope&{terminal:TerminalInfo;options:TerminalOptions;
   onClose:()=>void;onNotice:(message:string)=>void;onPendingChange:(value:boolean)=>void;onActiveChange:(value:boolean)=>void};
 type Live={abort:AbortController;terminal:TerminalApi;sender?:TerminalInputSender;writable:boolean;fit:()=>void;hintVersion:number;clearPrompt:()=>void};
 type PromptView=TerminalPrompt&{connection:Live;hintVersion:number};
@@ -48,7 +49,9 @@ function renderText(terminal:TerminalApi,text:string,signal:AbortSignal) {
 /** Browser rendering follows the native screen, ownership and provider acknowledgements. */
 export default function NativeTerminalView(props:Props) {
   const language=useApplicationLanguage(),t=useApplicationText();
-  const {conversationId,runId,terminal,options}=props;
+  const {terminal,options}=props;
+  const path=props.admissionId!==undefined?`/standalone-terminals/admissions/${encodeURIComponent(props.admissionId)}/terminals/${encodeURIComponent(terminal.id)}`
+    :`/conversations/${encodeURIComponent(props.conversationId)}/runs/${encodeURIComponent(props.runId)}/terminals/${encodeURIComponent(terminal.id)}`;
   const callbacks=useRef(props);callbacks.current=props;
   const host=useRef<HTMLDivElement>(null),live=useRef<Live|undefined>(undefined);
   const modifiers=useRef({ctrl:false,alt:false});
@@ -171,7 +174,6 @@ export default function NativeTerminalView(props:Props) {
         const text=data.length===1&&data.charCodeAt(0)>=32?actions.current.applyKeys(data):data;
         active.sender?.write(text);
       });
-      const path=`/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/terminals/${encodeURIComponent(terminal.id)}`;
       const packet={attachment_id:crypto.randomUUID(),host_instance:options.host_instance};
       let attached=false,baseline=false,sequence=0,requestedSize='';
       active.fit=()=>{
@@ -222,7 +224,7 @@ export default function NativeTerminalView(props:Props) {
       });
     })().catch(reason=>{if(!signal.aborted)fail(reason instanceof Error?reason.message:'无法连接原生终端');});
     return dispose;
-  },[conversationId,runId,terminal.id,options,revision]);
+  },[path,terminal.id,options,revision]);
   function sendKey(data:string){const current=live.current;if(current?.writable&&!current.abort.signal.aborted){current.clearPrompt();current.sender?.write(applyKeys(data));current.terminal.focus();}}
   function sendProviderCommand(command:string){
     const current=live.current;

@@ -1,19 +1,25 @@
 // Settings terminal entry adapts PilotDeck ProviderLoginModal/StandaloneShell; AGPL-3.0.
-import {useCallback,useContext,useState} from 'react';
+import {useCallback,useContext,useEffect,useRef,useState} from 'react';
 import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
 import {request,taskDraftScope} from '../jot/client';
 import ConversationTerminals from '../jot/ConversationTerminals';
+import StandaloneTerminals from '../jot/StandaloneTerminals';
+import type {Caps} from './types';
 import ConversationDisplayBoundary from '../jot/ConversationDisplayBoundary';
 import {validateTerminalSessionCatalog,type TerminalSessionChoice} from '../../packages/gateway/src/terminal/session-catalog';
 import {useResource} from './useResource';
 import {MutationPendingState} from './useMutationReceipt';
 
-export default function SettingsTerminalPanel({scopeKey,onPendingChange}:{scopeKey:string;onPendingChange:(value:boolean)=>void}){
+export default function SettingsTerminalPanel({scopeKey,workspaces,onPendingChange}:{scopeKey:string;workspaces:Caps['workspaces'];onPendingChange:(value:boolean)=>void}){
  const language=useApplicationLanguage(),t=useApplicationText();
  const [opened,setOpened]=useState(false),[cursors,setCursors]=useState<Array<string|null>>([null]),[page,setPage]=useState(0);
  const [target,setTarget]=useState<{scope:string;value:TerminalSessionChoice}>(),[inputPending,setInputPending]=useState(false);
- const pending=useContext(MutationPendingState),locked=pending||inputPending,before=cursors[page]??null;
- const reportInput=useCallback((value:boolean)=>{setInputPending(value);onPendingChange(value);},[onPendingChange]);
+ const [standaloneInputPending,setStandaloneInputPending]=useState(false);
+ const pending=useContext(MutationPendingState),locked=pending||inputPending||standaloneInputPending,before=cursors[page]??null;
+ const pendingInputs=useRef({conversation:false,standalone:false});
+ const reportInput=useCallback((value:boolean)=>{pendingInputs.current.conversation=value;setInputPending(value);onPendingChange(value||pendingInputs.current.standalone);},[onPendingChange]);
+ const reportStandaloneInput=useCallback((value:boolean)=>{pendingInputs.current.standalone=value;setStandaloneInputPending(value);onPendingChange(value||pendingInputs.current.conversation);},[onPendingChange]);
+ useEffect(()=>()=>onPendingChange(false),[onPendingChange]);
  const catalog=useResource(async signal=>{
   if(taskDraftScope()!==scopeKey)throw Error('terminal_session_scope_changed');
   const value=validateTerminalSessionCatalog(await request<unknown>('/terminal-sessions'+(before?'?before_run_id='+encodeURIComponent(before):''),'GET',undefined,undefined,signal),before);
@@ -25,6 +31,7 @@ export default function SettingsTerminalPanel({scopeKey,onPendingChange}:{scopeK
  return <section lang={language} className="wb-form" aria-label={t('提供方登录终端','Provider Login Terminal')}>
   <h3>{t('提供方登录终端','Provider Login Terminal')}</h3>
   <p>{t('选择已有会话，在其原生终端中运行提供方登录或配置命令。打开目录不会创建会话或运行命令。','Choose an existing conversation to run provider login or configuration commands in its native terminal. Opening the catalog does not create a session or run a command.')}</p>
+  <StandaloneTerminals scopeKey={scopeKey} workspaces={workspaces} onInputPendingChange={reportStandaloneInput}/>
   <details open={opened} onToggle={event=>{if(event.target===event.currentTarget)setOpened(event.currentTarget.open);}}>
    <summary>{t('选择已有原生会话','Choose an Existing Native Session')}</summary>
    {catalog.loading&&<p role="status">{t('正在读取会话目录…','Reading session catalog…')}</p>}

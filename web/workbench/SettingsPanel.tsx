@@ -223,7 +223,7 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
    </section>
    {caps.workbench?.plugin_profiles===true&&<PluginProfilesPanel key={currentTaskScope} scopeKey={currentTaskScope} onPendingChange={reportPluginPending}/>}
    {settingsReadEnabled&&<HostCredentialsPanel client={client} scopeKey={currentTaskScope}/>}
-   <SettingsTerminalPanel key={currentTaskScope} scopeKey={currentTaskScope} onPendingChange={reportTerminalPending}/>
+   <SettingsTerminalPanel key={currentTaskScope} scopeKey={currentTaskScope} workspaces={caps.workspaces} onPendingChange={reportTerminalPending}/>
    <HostReadinessPanel enabled={readinessEnabled} namespaces={caps.workbench?.host_settings_read_namespaces} client={client} jotCapabilities={caps} scopeKey={currentTaskScope} onReadiness={setReadiness}/>
    <HostSettingsReadPanel enabled={settingsReadEnabled} namespaces={caps.workbench?.host_settings_read_namespaces} client={client} scopeKey={currentTaskScope}/>
    <HostSettingsPanel enabled={settingsEnabled} state={settings} readiness={null} onDraftChange={draft=>setSettings(state=>hostSettingsDraftChanged(state,draft))} onUseHostValues={()=>setSettings(state=>hostSettingsUseServerSnapshot(state))} onReload={()=>void reloadSettings()} onSave={()=>void saveSettings()}/>

@@ -1,12 +1,11 @@
 import {validateTerminalCommand} from '../../packages/gateway/src/terminal/control.js';
 
 /** Same-tab recovery keeps the original owner-scoped command before dispatch. */
-export class TerminalCommandStore {
-  constructor(storage,scope,conversationId,runId) {
-    if(typeof scope!=='string'||!/^[a-f0-9]{64}$/.test(scope)||![conversationId,runId].every(id=>typeof id==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(id)))
-      throw Error('terminal_storage_scope_invalid');
+class TerminalCommandJournal {
+  constructor(storage,scope,path) {
+    if(typeof scope!=='string'||!/^[a-f0-9]{64}$/.test(scope))throw Error('terminal_storage_scope_invalid');
     this.storage=storage;
-    this.path=`/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/terminals/commands`;
+    this.path=path;
     this.key=`jot-terminal-command/v1/${scope}${this.path}`;
   }
   validate(command) {
@@ -50,6 +49,19 @@ export class TerminalCommandStore {
     const current=this.read()?.command;
     if(expected&&current?.key!==expected.key)throw Error('terminal_storage_conflict');
     this.storage.removeItem(this.key);
+  }
+}
+
+export class TerminalCommandStore extends TerminalCommandJournal {
+  constructor(storage,scope,conversationId,runId){
+    if(![conversationId,runId].every(id=>typeof id==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(id)))throw Error('terminal_storage_scope_invalid');
+    super(storage,scope,`/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/terminals/commands`);
+  }
+}
+export class StandaloneTerminalCommandStore extends TerminalCommandJournal {
+  constructor(storage,scope,admissionId){
+    if(typeof admissionId!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(admissionId))throw Error('terminal_storage_scope_invalid');
+    super(storage,scope,`/standalone-terminals/admissions/${encodeURIComponent(admissionId)}/terminals/commands`);
   }
 }
 

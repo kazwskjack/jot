@@ -3,10 +3,10 @@ import {terminalUiMessage} from './terminal-ui-messages';
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {ApiError,request,taskDraftScope} from './client';
 import {useMutationReceipt} from '../workbench/useMutationReceipt';
-import {TerminalCommandStore,pendingTerminalRuns} from './terminal-command-store.mjs';
+import {TerminalCommandStore,StandaloneTerminalCommandStore,pendingTerminalRuns} from './terminal-command-store.mjs';
 import {validateTerminalInventory,type TerminalInventory} from '../../packages/gateway/src/terminal/inventory.js';
 import {validateTerminalOptions,validateTerminalCommand,validateTerminalReceipt,type TerminalOptions,type TerminalCommand,type TerminalReceipt} from '../../packages/gateway/src/terminal/control.js';
-import NativeTerminalView from './NativeTerminalView';
+import NativeTerminalView,{type NativeTerminalScope} from './NativeTerminalView';
 
 /** Native user terminals retain their original Session ownership and command receipts. */
 export default function ConversationTerminals({conversationId,runId,onInputPendingChange}:{conversationId:string;runId:string;onInputPendingChange?:(value:boolean)=>void}) {
@@ -34,8 +34,13 @@ export default function ConversationTerminals({conversationId,runId,onInputPendi
   </>;
 }
 
-function TerminalPanel({conversationId,runId,historical=false,onSettled,onActiveChange,onInputPendingChange}:{conversationId:string;runId:string;historical?:boolean;onSettled:(message?:string)=>void;
-  onActiveChange:(runId:string,value:boolean)=>void;onInputPendingChange:(runId:string,value:boolean)=>void}) {
+export function TerminalPanel(props:(NativeTerminalScope&{expectedSessionId?:string;historical?:boolean;onSettled:(message?:string)=>void;
+  onActiveChange:(scopeId:string,value:boolean)=>void;onInputPendingChange:(scopeId:string,value:boolean)=>void})) {
+  const {historical=false,onSettled,onActiveChange,onInputPendingChange,expectedSessionId}=props;
+  const nativeScope:NativeTerminalScope=props.admissionId!==undefined?{admissionId:props.admissionId}:{conversationId:props.conversationId,runId:props.runId};
+  const scopeId=props.admissionId!==undefined?props.admissionId:props.runId;
+  const path=props.admissionId!==undefined?`/standalone-terminals/admissions/${encodeURIComponent(props.admissionId)}/terminals`
+    :`/conversations/${encodeURIComponent(props.conversationId)}/runs/${encodeURIComponent(props.runId)}/terminals`;
   const language=useApplicationLanguage(),t=useApplicationText();
   const states={running:t('运行中','Running'),exited:t('已退出','Exited'),failed:t('失败','Failed')};
   const [open,setOpen]=useState(false),[revision,setRevision]=useState(0);
@@ -43,12 +48,13 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled,onActive
   const [options,setOptions]=useState<TerminalOptions>(),[optionsError,setOptionsError]=useState('');
   const [recovering,setRecovering]=useState(false),recoveryAbort=useRef<AbortController|null>(null);
   const [selected,setSelected]=useState('');
-  const activeChanged=useCallback((value:boolean)=>onActiveChange(runId,value),[runId,onActiveChange]);
-  const inputChanged=useCallback((value:boolean)=>onInputPendingChange(runId,value),[runId,onInputPendingChange]);
+  const activeChanged=useCallback((value:boolean)=>onActiveChange(scopeId,value),[scopeId,onActiveChange]);
+  const inputChanged=useCallback((value:boolean)=>onInputPendingChange(scopeId,value),[scopeId,onInputPendingChange]);
   const [shell,setShell]=useState(''),[cols,setCols]=useState(80),[rows,setRows]=useState(24),[busy,setBusy]=useState(false),[commandError,setCommandError]=useState('');
   const [journal]=useState(()=>{
     try {
-      const store=new TerminalCommandStore(window.sessionStorage,taskDraftScope(),conversationId,runId);
+      const store=props.admissionId!==undefined?new StandaloneTerminalCommandStore(window.sessionStorage,taskDraftScope(),props.admissionId)
+        :new TerminalCommandStore(window.sessionStorage,taskDraftScope(),props.conversationId,props.runId);
       const saved=store.read();
       return {store,error:'',endingWait:saved?.endingWait??false,pending:saved?.command.body as TerminalCommand|undefined};
     }catch(reason){return {store:null,error:reason instanceof Error?reason.message:'无法保留原终端请求',endingWait:false,pending:undefined};}
@@ -77,7 +83,6 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled,onActive
     }
     throw Error(receipt.state==='pending'?'原终端操作仍在处理中，请稍后核对。':'原终端操作结果仍未知，原请求已保留。');
   });
-  const path=`/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/terminals`;
   function acceptOptions(value:TerminalOptions) {
     setOptions(value);setInventory(value.inventory);
     setCols(current=>Math.min(current,value.environment.maxCols));setRows(current=>Math.min(current,value.environment.maxRows));
@@ -90,8 +95,8 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled,onActive
     if(!open)return;
     const abort=new AbortController();
     void Promise.allSettled([
-      request<TerminalInventory>(path,'GET',undefined,undefined,abort.signal).then(value=>validateTerminalInventory(value,value?.session_id)),
-      request<TerminalOptions>(path+'/options','GET',undefined,undefined,abort.signal).then(value=>validateTerminalOptions(value,value?.session_id)),
+      request<TerminalInventory>(path,'GET',undefined,undefined,abort.signal).then(value=>validateTerminalInventory(value,expectedSessionId??value?.session_id)),
+      request<TerminalOptions>(path+'/options','GET',undefined,undefined,abort.signal).then(value=>validateTerminalOptions(value,expectedSessionId??value?.session_id)),
     ]).then(([listed,configured])=>{
       if(abort.signal.aborted)return;
       if(listed.status==='fulfilled')setInventory(listed.value);
@@ -102,14 +107,14 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled,onActive
       setLoading(false);
     });
     return()=>abort.abort();
-  },[open,revision,path]);
+  },[open,revision,path,expectedSessionId]);
   async function recover() {
     if(!open||loading||recovering||recoveryAbort.current)return;
     const abort=new AbortController();recoveryAbort.current=abort;setRecovering(true);setOptionsError('');
     try{
       const value=await request<TerminalOptions>(path+'/recover','POST',{},crypto.randomUUID(),abort.signal);
       if(abort.signal.aborted||recoveryAbort.current!==abort||!alive.current)return;
-      acceptOptions(validateTerminalOptions(value,inventory?.session_id??value?.session_id));
+      acceptOptions(validateTerminalOptions(value,expectedSessionId??inventory?.session_id??value?.session_id));
       setError('');
       onSettled('原会话执行环境已加载，清单展示当前 Host 实际保留的终端。');
     }catch(reason){
@@ -154,7 +159,7 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled,onActive
   const dimensionsValid=Boolean(options&&Number.isSafeInteger(cols)&&cols>=2&&cols<=options.environment.maxCols
     &&Number.isSafeInteger(rows)&&rows>0&&rows<=options.environment.maxRows);
   return <details lang={language} onToggle={event=>setOpen(event.currentTarget.open)}>
-    <summary>{historical?t(`历史运行终端 · ${runId}`,`Historical Run Terminals · ${runId}`):t('会话终端','Conversation Terminals')}</summary>
+    <summary>{props.admissionId!==undefined?t('独立终端','Standalone Terminals'):historical?t(`历史运行终端 · ${props.runId}`,`Historical Run Terminals · ${props.runId}`):t('会话终端','Conversation Terminals')}</summary>
     <button type="button" disabled={loading||recovering} onClick={()=>setRevision(value=>value+1)}>{t("刷新终端清单","Refresh Terminal List")}</button>
     {loading&&<p role="status">{t("正在读取原生终端…","Reading Native Terminals…")}</p>}
     {error&&<p role="alert">{terminalUiMessage(error,language)}</p>}
@@ -201,7 +206,7 @@ function TerminalPanel({conversationId,runId,historical=false,onSettled,onActive
       </li>)}</ul>
     </>}
     {open&&options&&inventory?.terminals.filter(item=>item.id===selected).map(item=><NativeTerminalView key={item.id}
-      conversationId={conversationId} runId={runId} terminal={item} options={options} onClose={()=>setSelected('')}
+      {...nativeScope} terminal={item} options={options} onClose={()=>setSelected('')}
       onNotice={onSettled} onPendingChange={inputChanged} onActiveChange={activeChanged}/>)}
   </details>;
 }

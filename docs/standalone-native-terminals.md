@@ -1,6 +1,6 @@
 # 独立原生 Session 接入
 
-当前源码已连接 Gateway 的准备、读取、派发、取消、观察流程与原生 Host 的身份、创建、只读观察实现。已确认独立 Session 的终端清单也已接入源码；独立终端的 shell/尺寸选项和显式恢复已接入源码；创建/关闭及回执已接入源码；PTY 输入/输出已接入源码，产品界面尚未接通；`ready` 只表示观察到原持久 Session，不表示终端进程已启动或 CLI 已登录。
+当前源码已连接 Gateway 的准备、读取、派发、取消、观察流程与原生 Host 的身份、创建、只读观察实现。已确认独立 Session 的终端清单也已接入源码；独立终端的 shell/尺寸选项和显式恢复已接入源码；创建/关闭及回执已接入源码；PTY 输入/输出已接入源码，设置中的独立会话与终端界面已接入源码，服务端完整会话目录仍待接入；`ready` 只表示观察到原持久 Session，不表示终端进程已启动或 CLI 已登录。
 
 ## 显式配置
 
@@ -33,7 +33,7 @@ Linux Host 使用它本机的绝对目录。工作区 ID 必须同时在 Gateway
 
 `GET /v1/standalone-terminals/admissions/:requestId/terminals` 只读取当前账户、当前配置工作区内已达到 ready 的独立 Session。Host 在读取原生终端 controller 前后核对持久 Session 身份及原确认摘要，Gateway 返回前复核 admission 状态。响应沿用既有 TerminalInventory 公共字段，不含终端输出或私有日志。
 
-此读取不会恢复 Agent、创建 Session 或终端，也不表示 CLI 已登录。独立终端操作已接入源码，PTY 数据流已接入源码，尚未完成产品界面；原生能力缺失会返回不可用，不伪造空清单。
+此读取不会恢复 Agent、创建 Session 或终端，也不表示 CLI 已登录。独立终端操作已接入源码，PTY 数据流已接入源码，已连接设置界面，尚未完成服务端完整会话目录；原生能力缺失会返回不可用，不伪造空清单。
 
 ## 终端选项与显式恢复
 
@@ -41,7 +41,7 @@ Linux Host 使用它本机的绝对目录。工作区 ID 必须同时在 Gateway
 
 `POST /v1/standalone-terminals/admissions/:requestId/terminals/recover` 接受空对象和请求键，由用户显式调用原终端恢复路径。它只解析已确认的持久 Session，不创建缺失 Session、终端或提交提示词/CLI 命令；沿用原 SDK 的 Agent 恢复行为。缺失、忙碌或无法核对身份时返回不可用，不创建替代 Session。恢复期间断开或超时不会触发自动重试；后续可先重读选项。
 
-两条路径都需要当前账户、已配置工作区和 ready admission，Host 在操作前后验证 profile、目录、Session header、注册表及终端 controller，Gateway 返回前重读 admission。创建/关闭及命令回执已接入源码，PTY 输入/输出已接入源码，产品界面仍待接入。
+两条路径都需要当前账户、已配置工作区和 ready admission，Host 在操作前后验证 profile、目录、Session header、注册表及终端 controller，Gateway 返回前重读 admission。创建/关闭及命令回执已接入源码，PTY 输入/输出已接入源码，设置界面已接入，服务端完整会话目录仍待接入。
 
 ## 创建、关闭与原操作回执
 
@@ -53,7 +53,7 @@ Gateway 在发送前持久保存 owner、admission、原命令及状态摘要；
 
 `POST .../:requestId/terminals/commands/:commandId/end-wait` 接收原命令，保存不可改写的等待结束结果。它阻止同一请求以后派发，不取消已经获准或正在执行的命令，也不关闭终端；结束等待后可读取清单了解实际终端状态。已保存的最终结果优先，后到结果不覆盖它。
 
-上述路径仍须账户、工作区、ready admission、CSRF 和匹配的请求键。数据库安装源码已补齐，本次没有实际执行 SQL、原生终端或测试；PTY 接入已连接源码，产品界面仍未完成。
+上述路径仍须账户、工作区、ready admission、CSRF 和匹配的请求键。数据库安装源码已补齐，本次没有实际执行 SQL、原生终端或测试；PTY 接入已连接源码，设置界面已接入，服务端完整会话目录仍未完成。
 
 ## 原生输出与输入
 
@@ -63,4 +63,12 @@ Host 在接入前后核对持久 Session 身份，并在持续输出时核对原
 
 `POST .../:requestId/terminals/:terminalId/attachments/:attachmentId/input` 沿用原 host_instance、attachment、窗口限制及严格递增 sequence；write/resize 进入原有有界队列。queued 只表示已入队，执行结果须等待原生 ack/refusal。输入不保存到命令回执，不自动重放；入队后响应或身份不确定时保留未知。
 
-Gateway 返回前复核原 admission，输入有 10 秒请求界限，接入首帧沿用 30 秒界限。两条路径均使用原账户/CSRF 与 transient route 权限；终端故障日志只保留错误码。产品界面仍待接入，实际运行行为尚未验证。
+Gateway 返回前复核原 admission，输入有 10 秒请求界限，接入首帧沿用 30 秒界限。两条路径均使用原账户/CSRF 与 transient route 权限；终端故障日志只保留错误码。设置界面已接入，服务端完整会话目录仍待接入，实际运行行为尚未验证。
+
+## 设置中的独立终端入口
+
+提供方登录终端设置内新增独立会话入口，使用既有可读写工作区列表。准备新请求前先将 request_id/workspace_id 写入当前账户作用域的 sessionStorage；保存失败不发请求。准备只核对原生配置，随后须显式建立原 Session。未启动请求可取消，已派发或未知请求只能观察原结果，不自动重放创建。
+
+已确认 Session 复用原 TerminalPanel/NativeTerminalView、终端 assets、输入队列、命令回执、原请求核对和结束等待。独立路径以 admission ID 绑定，原会话路径和原记录键保持不变。命令在发送前保留于原账户作用域的请求记录，重载优先显示未确认操作；输入保护合并原会话与独立终端，避免一方清除另一方的待确认状态。提供方命令仍须显式发送，不根据界面或命令文本推断登录成功。
+
+当前列表只保留本标签页最多 64 个请求身份，sessionStorage 关闭后不会代表服务端目录。服务端会话目录、跨标签页重新发现及本地记录管理仍需继续接入，不把此部分声明为完整 StandaloneShell。未运行浏览器、构建、类型检查或测试。
