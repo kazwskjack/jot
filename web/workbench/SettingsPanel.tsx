@@ -6,6 +6,7 @@ import {createHostSettingsSaveAttempt,hostSettingsSaveCommand} from './host-sett
 import {createHostSettingsRecovery} from './host-settings-recovery.mjs';
 import {useLayoutDisplayPreferences,useMessageDisplayPreferences,useToolDisplayPreference} from '../jot/useToolDisplayPreference';
 import HostCredentialsPanel from './HostCredentialsPanel';
+import SettingsTerminalPanel from './SettingsTerminalPanel';
 import PluginProfilesPanel from './PluginProfilesPanel';
 import DesktopUpdatesPanel from './DesktopUpdatesPanel';
 import DesktopAboutPanel from './DesktopAboutPanel';
@@ -52,6 +53,12 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
  const reportPluginPending=useCallback((pending:boolean)=>{
   if(pluginPending.current===pending)return;
   pluginPending.current=pending;
+  if(pending)beginMutation();else endMutation();
+ },[beginMutation,endMutation]);
+ const terminalPending=useRef(false);
+ const reportTerminalPending=useCallback((pending:boolean)=>{
+  if(terminalPending.current===pending)return;
+  terminalPending.current=pending;
   if(pending)beginMutation();else endMutation();
  },[beginMutation,endMutation]);
  const [settings,setSettings]=useState(initialHostSettingsState);
@@ -215,6 +222,7 @@ export default function SettingsPanel({caps,client}:{caps:Caps;client:HostAdminC
    </section>
    {caps.workbench?.plugin_profiles===true&&<PluginProfilesPanel key={currentTaskScope} scopeKey={currentTaskScope} onPendingChange={reportPluginPending}/>}
    {settingsReadEnabled&&<HostCredentialsPanel client={client} scopeKey={currentTaskScope}/>}
+   <SettingsTerminalPanel key={currentTaskScope} scopeKey={currentTaskScope} onPendingChange={reportTerminalPending}/>
    <HostReadinessPanel enabled={readinessEnabled} namespaces={caps.workbench?.host_settings_read_namespaces} client={client} jotCapabilities={caps} scopeKey={currentTaskScope} onReadiness={setReadiness}/>
    <HostSettingsReadPanel enabled={settingsReadEnabled} namespaces={caps.workbench?.host_settings_read_namespaces} client={client} scopeKey={currentTaskScope}/>
    <HostSettingsPanel enabled={settingsEnabled} state={settings} readiness={null} onDraftChange={draft=>setSettings(state=>hostSettingsDraftChanged(state,draft))} onUseHostValues={()=>setSettings(state=>hostSettingsUseServerSnapshot(state))} onReload={()=>void reloadSettings()} onSave={()=>void saveSettings()}/>

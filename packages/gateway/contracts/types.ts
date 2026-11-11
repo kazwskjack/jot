@@ -878,3 +878,6 @@ export type NativeMemberOfficeDocumentPage={retained?:boolean;
  document:import('../src/artifacts/document-preview-content.ts').OfficeDocumentPreview;
  engine:{name:string;version:string};execution_authorized:false;
 };
+
+export type TerminalSessionChoice=import('../src/terminal/session-catalog').TerminalSessionChoice;
+export type TerminalSessionCatalog=import('../src/terminal/session-catalog').TerminalSessionCatalog;

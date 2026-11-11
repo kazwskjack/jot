@@ -2,6 +2,7 @@ import type {FastifyInstance} from 'fastify';
 import type {DatabaseSync} from 'node:sqlite';
 import {withReadTransaction} from '../db/database.ts';
 import {validateTerminalInventory,type TerminalInventory} from './inventory.js';
+import {validateTerminalSessionCatalog,type TerminalSessionChoice} from './session-catalog.ts';
 
 export interface TerminalInventoryClient {
   listTerminals(ownerId:string,sessionId:string,signal?:AbortSignal):Promise<TerminalInventory>;
@@ -21,6 +22,26 @@ export function registerTerminalInventoryRoutes(app:FastifyInstance,options:{
   client?:TerminalInventoryClient|undefined;
 }) {
   const {db,actor,client}=options;
+  app.get('/v1/terminal-sessions',async(request,reply)=>{
+    reply.header('cache-control','private, no-store');
+    try{
+      const owner=actor(request),query=request.query as Record<string,unknown>,before=query.before_run_id??null;
+      if(Object.keys(query).some(key=>key!=='before_run_id')||before!==null&&(typeof before!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(before)))
+        return reply.code(422).send({error:{code:'TERMINAL_INPUT_INVALID'}});
+      return withReadTransaction(db,()=>{
+        const rows=db.prepare(`SELECT c.id AS conversation_id,c.title,c.workspace_id,r.id AS run_id,r.created_at
+          FROM ga_run_native_sessions s JOIN ga_runs r ON r.id=s.run_id AND r.conversation_id=s.conversation_id
+          JOIN ga_conversations c ON c.id=r.conversation_id AND c.owner_id=s.owner_id
+          WHERE s.owner_id=? AND c.owner_id=? AND c.archived_at IS NULL AND (? IS NULL OR s.run_id<?)
+          ORDER BY s.run_id DESC LIMIT 51`).all(owner,owner,before,before) as TerminalSessionChoice[];
+        const items=rows.slice(0,50);
+        return validateTerminalSessionCatalog({protocol:1,items,before_run_id:before,
+          next_before_run_id:rows.length>50?items.at(-1)!.run_id:null,execution_authorized:false},before as string|null);
+      });
+    }catch(error){
+      return reply.code((error as Error)?.message==='unauthorized'?401:503).send({error:{code:(error as Error)?.message==='unauthorized'?'UNAUTHORIZED':'TERMINAL_SESSION_CATALOG_UNAVAILABLE'}});
+    }
+  });
   app.get('/v1/conversations/:conversationId/runs/:runId/terminals',async(request,reply)=>{
     reply.header('cache-control','private, no-store');
     const abort=new AbortController(),disconnected=()=>abort.abort();
