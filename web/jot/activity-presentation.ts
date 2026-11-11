@@ -151,6 +151,31 @@ export function activityIsActive(activity:ToolActivity,run?:ActivityRun){
  return ['pending','running','waiting'].includes(activityDisplayStatus(activity,run));
 }
 
+export type ActivityProgress={total:number;active:number;succeeded:number;failed:number;cancelled:number;partial:number;unknown:number;latest?:ToolActivity};
+/** Aggregate the existing flattened forest without rescanning every descendant for each parent. */
+export function activityTreeProgress(rows:ActivityRow[],run?:ActivityRun){
+ const empty=():ActivityProgress=>({total:0,active:0,succeeded:0,failed:0,cancelled:0,partial:0,unknown:0});
+ const newer=(a:ToolActivity|undefined,b:ToolActivity|undefined)=>!a?b:!b?a:b.started_at>a.started_at||b.started_at===a.started_at&&b.activity_id>a.activity_id?b:a;
+ const merge=(target:ActivityProgress,value:ActivityProgress)=>{
+  for(const key of ['total','active','succeeded','failed','cancelled','partial','unknown'] as const)target[key]+=value[key];
+  const latest=newer(target.latest,value.latest);if(latest)target.latest=latest;
+ };
+ const add=(target:ActivityProgress,activity:ToolActivity)=>{
+  target.total++;const status=activityDisplayStatus(activity,run);
+  if(['pending','running','waiting'].includes(status)){target.active++;const latest=newer(target.latest,activity);if(latest)target.latest=latest;}
+  else if(['succeeded','failed','cancelled','partial'].includes(status))target[status as 'succeeded'|'failed'|'cancelled'|'partial']++;
+  else target.unknown++;
+ };
+ const total=empty(),descendants=new Map<string,ActivityProgress>(),pending:Array<{depth:number;progress:ActivityProgress}>=[];
+ for(let index=rows.length-1;index>=0;index--){
+  const row=rows[index]!,nested=empty();
+  while(pending.length&&pending.at(-1)!.depth>row.depth)merge(nested,pending.pop()!.progress);
+  descendants.set(row.activity.activity_id,nested);
+  const subtree={...nested};add(subtree,row.activity);add(total,row.activity);pending.push({depth:row.depth,progress:subtree});
+ }
+ return {total,descendants};
+}
+
 export function visibleActivityRows(rows:ActivityRow[],expanded:Record<string,boolean>,run?:ActivityRun){
  const visible:ActivityRow[]=[];
  let hiddenDepth:number|undefined;

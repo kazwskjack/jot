@@ -1,13 +1,18 @@
 import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 // Phase grouping and expandable nested tool history adapt PilotDeck 783499ff,
 // AgentTimeline.tsx/SubagentContainer.tsx. Adapted portions retain AGPL-3.0 terms.
-import React,{useEffect,useMemo,useRef,useState} from 'react';
+import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import type {Activity} from './types';
 import type {NativeMemberTarget} from './native-member-execution';
-import {activityArtifactTargets,type ActivityArtifactTarget,activityDetailRows,activityDisplayStatus,activityForest,activityIsActive as running,visibleActivityRows,activityKindLabels,activityStatusLabels,type ActivityRow,type ToolActivity,type ActivityReveal,type ActivityRun} from './activity-presentation';
+import {activityArtifactTargets,type ActivityArtifactTarget,activityDetailRows,activityDisplayStatus,activityForest,activityTreeProgress,type ActivityProgress,activityIsActive as running,visibleActivityRows,activityKindLabels,activityStatusLabels,type ActivityRow,type ToolActivity,type ActivityReveal,type ActivityRun} from './activity-presentation';
 import ActivityArtifactDetails from './ActivityArtifactDetails';
 import ActivityToolResult from './ActivityToolResult';
 import './activity-timeline.css';
+
+function progressText(value:ActivityProgress){
+ return [`${value.total} 个已加载步骤`,value.active&&`${value.active} 个进行中`,value.succeeded&&`${value.succeeded} 个已完成`,value.failed&&`${value.failed} 个失败`,
+  value.cancelled&&`${value.cancelled} 个已取消`,value.partial&&`${value.partial} 个部分完成`,value.unknown&&`${value.unknown} 个状态待确认`].filter(Boolean).join(' · ');
+}
 
 type Group={id:string;kind:ToolActivity['kind'];rows:ActivityRow[]};
 type ToolResultAction={onOpenToolResult:(activity:ToolActivity,nativeSource?:boolean)=>void};
@@ -15,34 +20,41 @@ type ArtifactAction={onOpenArtifact:(activity:ToolActivity,target:ActivityArtifa
 type MemberDetailsAction={onOpenMember?:(target:NativeMemberTarget)=>void};
 
 function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,onOpenArtifact,onOpenToolResult}:{group:Group;run?:ActivityRun;onSelectRun:(id:string)=>void;availableRuns:Set<string>;reveal?:ActivityReveal}&MemberDetailsAction&ArtifactAction&ToolResultAction){
- const active=group.rows.filter(row=>running(row.activity,run)).length;
- const failed=group.rows.filter(row=>activityDisplayStatus(row.activity,run)==='failed').length;
- const unconfirmed=group.rows.filter(row=>activityDisplayStatus(row.activity,run)==='unknown').length;
+ const progress=useMemo(()=>activityTreeProgress(group.rows,run),[group.rows,run]),active=progress.total.active;
+ const region=useRef<HTMLDetailsElement>(null),pendingFocus=useRef<string>();
  const [open,setOpen]=useState(active>0),[expanded,setExpanded]=useState<Record<string,boolean>>({}),[page,setPage]=useState(0);
  const [artifactPages,setArtifactPages]=useState(()=>new Map<string,number>());
  const expandedRef=useRef(expanded),appliedReveal=useRef('');
  expandedRef.current=expanded;
- useEffect(()=>{
-  if(!reveal||appliedReveal.current===reveal.key)return;
-  const targetIndex=group.rows.findIndex(row=>row.activity.activity_id===reveal.activityId);
-  if(targetIndex<0)return;
-  const target=group.rows[targetIndex]!,next={...expandedRef.current,[reveal.activityId]:true};
+ const revealStep=useCallback((activityId:string)=>{
+  const targetIndex=group.rows.findIndex(row=>row.activity.activity_id===activityId);
+  if(targetIndex<0)return false;
+  const target=group.rows[targetIndex]!,next={...expandedRef.current,[activityId]:true};
   let depth=target.depth;
   for(let index=targetIndex-1;index>=0&&depth>0;index--){
    const ancestor=group.rows[index]!;
    if(ancestor.depth<depth){next[ancestor.activity.activity_id]=true;depth=ancestor.depth;}
   }
   const visible=visibleActivityRows(group.rows,next,run);
-  const index=visible.findIndex(row=>row.activity.activity_id===reveal.activityId);
+  const index=visible.findIndex(row=>row.activity.activity_id===activityId);
   setExpanded(next);setOpen(true);setPage(Math.max(0,Math.floor(index/50)));
-  appliedReveal.current=reveal.key;
- },[reveal,group.rows,run]);
+  return true;
+ },[group.rows,run]);
+ useEffect(()=>{if(reveal&&appliedReveal.current!==reveal.key&&revealStep(reveal.activityId))appliedReveal.current=reveal.key;},[reveal,revealStep]);
+ const locate=(activityId:string)=>{pendingFocus.current=activityId;if(!revealStep(activityId))pendingFocus.current=undefined;};
  const visible=visibleActivityRows(group.rows,expanded,run);
  const pageCount=Math.max(1,Math.ceil(visible.length/50)),currentPage=Math.min(page,pageCount-1);
- return <details className="jot-activity-group" open={open} onToggle={event=>setOpen(event.currentTarget.open)}>
-  <summary>{activityKindLabels[group.kind]} · {group.rows.length} 个步骤{active>0?` · ${active} 个进行中`:''}{failed>0?` · ${failed} 个失败`:''}{unconfirmed>0?` · ${unconfirmed} 个状态待确认`:''}</summary>
+ useEffect(()=>{
+  const id=pendingFocus.current;if(!id||!open)return;
+  const row=Array.from(region.current?.querySelectorAll<HTMLElement>('[data-chat-search-activity]')??[]).find(element=>element.dataset.chatSearchActivity===id);
+  if(!row)return;pendingFocus.current=undefined;row.querySelector<HTMLButtonElement>(':scope > button')?.focus();row.scrollIntoView({block:'nearest'});
+ },[open,expanded,currentPage,group.rows]);
+ return <details ref={region} className="jot-activity-group" open={open} onToggle={event=>{if(!event.currentTarget.open)pendingFocus.current=undefined;setOpen(event.currentTarget.open);}}>
+  <summary>{activityKindLabels[group.kind]} · {progressText(progress.total)}{progress.total.latest&&<span> · 最近活动：{progress.total.latest.detail.tool_name??activityKindLabels[progress.total.latest.kind]} · {progress.total.latest.title} · {activityStatusLabels[activityDisplayStatus(progress.total.latest,run)]??activityStatusLabels.unknown}</span>}</summary>
   {open&&<>
+   {progress.total.latest&&<button type="button" data-chat-search-ignore onClick={()=>locate(progress.total.latest!.activity_id)}>定位最近活动步骤</button>}
    <ol start={currentPage*50+1}>{visible.slice(currentPage*50,currentPage*50+50).map(row=>{
+    const nested=progress.descendants.get(row.activity.activity_id);
     const activity=row.activity,status=activityDisplayStatus(activity,run),isExpanded=expanded[activity.activity_id]??running(activity,run);
     const targets=isExpanded?activityArtifactTargets(activity):[],targetPageCount=Math.max(1,Math.ceil(targets.length/10));
     const targetPage=Math.min(artifactPages.get(activity.activity_id)??0,targetPageCount-1);
@@ -55,6 +67,10 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,
      <button type="button" aria-expanded={isExpanded} onClick={()=>setExpanded(prior=>({...prior,[activity.activity_id]:!isExpanded}))}>
       <span aria-hidden="true">{isExpanded?'收起':'展开'} </span>{activityKindLabels[activity.kind]} · {activity.title} · {activityStatusLabels[status]??activityStatusLabels.unknown}<span data-chat-search-ignore>{row.children>0?` · ${row.children} 个子步骤`:''}</span>
      </button>
+     {nested&&nested.total>0&&<div data-chat-search-ignore><small>嵌套步骤 · {progressText(nested)}</small>
+      {nested.latest&&<p>最近活动：<code>{nested.latest.detail.tool_name??activityKindLabels[nested.latest.kind]}</code> · {nested.latest.title} · {activityStatusLabels[activityDisplayStatus(nested.latest,run)]??activityStatusLabels.unknown}{' '}
+       <button type="button" onClick={()=>locate(nested.latest!.activity_id)}>定位活动子步骤</button></p>}
+     </div>}
      {row.depth>0&&<small data-chat-search-ignore>层级 {row.depth+1} · 父步骤 {activity.parent_activity_id}</small>}
      {row.issue&&<p role="status" data-chat-search-ignore>{row.issue}</p>}
      {isExpanded&&<>
