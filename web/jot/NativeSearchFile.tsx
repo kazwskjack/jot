@@ -73,6 +73,7 @@ export default function NativeSearchFile({source,expected,printPin,focus,officeF
   {structured&&office?.native&&<ConversationDisplayBoundary label="原生Office结构化预览"><Suspense fallback={<p role="status">正在载入Office结构化查看器…</p>}><NativeSearchOfficeDocument source={source} expectedOpenSha={sourceOpenSha} expectedOpenProof={sourceOpenProof} expectedFile={expected} officeFocus={officeFocus} officeTextFocus={officeTextFocus} onOpened={captureOpen}/></Suspense></ConversationDisplayBoundary>}
   {!structured&&!printMode&&(!current||!opened&&!current.error)&&<p role="status">正在读取并核对完整打开内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'本次读取已取消。'});}}>取消读取</button></p>}
   {opened&&<>
+   {opened.retained!==undefined&&<p role="status">{opened.retained?'已留存本次打开内容，可按原版本重新打开。':'本次打开内容未留存，需要的内容可下载保存。'}</p>}
    <p>打开时内容 · {opened.size} 字节 · SHA-256 <code>{opened.sha256}</code></p>
    <nav aria-label="打开内容查看方式" data-chat-search-ignore>
     <button type="button" disabled={!raw&&!structured&&!printMode} onClick={()=>{setPrintMode(false);setStructured(false);setRaw(false);}}>查看内容</button>

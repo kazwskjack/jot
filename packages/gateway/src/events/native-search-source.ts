@@ -1,3 +1,4 @@
+import {readRetainedNativeFile,loadRetainedNativeFile,retainNativeFile} from '../artifacts/native-file-store.ts';
 import type {NativeFileProofSource,NativeFileProofPdf} from '../messages/native-file-proof.ts';
 import {OFFICE_SOURCE_MAX_BYTES,officePreviewFormat} from '../artifacts/office-preview-format.js';
 import type {PinnedByteSource} from '../artifacts/pinned-byte-source.ts';
@@ -182,8 +183,8 @@ export async function searchNativeActivitySources(db:DatabaseSync,owner:string,b
   return {...base,items,unsearched_results:unsearched};
 }
 
-export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,client,snapshotRoot,inspectOffice,renderOffice,nativeProofs}:{
-  db:DatabaseSync;actor(request:{headers:Record<string,unknown>}):string;client?:NativeSearchSourceClient|undefined;snapshotRoot?:string;
+export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,client,snapshotRoot,retainedRoot,inspectOffice,renderOffice,nativeProofs}:{
+  db:DatabaseSync;actor(request:{headers:Record<string,unknown>}):string;client?:NativeSearchSourceClient|undefined;snapshotRoot?:string;retainedRoot?:string;
   nativeProofs?:{sign:(owner:string,source:NativeFileProofSource,pdf?:NativeFileProofPdf)=>string;
     assert:(owner:string,source:NativeFileProofSource,proof:string,pdf?:NativeFileProofPdf)=>void};
   renderOffice?:(source:PinnedByteSource,name:string,binding:string,signal:AbortSignal,expected?:{sha256:string;size:number;pageCount:number})=>Promise<{pdf:{bytes:Buffer;sha256:string;size:number;page_count:number};engine:{name:string;version:string}}>;
@@ -237,118 +238,150 @@ export function registerNativeSearchSourceRoutes(app:FastifyInstance,{db,actor,c
       const requestedLimit = query.max_bytes === undefined ? operationLimit : Number(query.max_bytes);
       if (query.max_bytes !== undefined && (typeof query.max_bytes !== 'string' || !/^[1-9]\d{0,8}$/.test(query.max_bytes)
         || !Number.isSafeInteger(requestedLimit) || requestedLimit > operationLimit)) throw Error('invalid_activity_tool_result_query');
-      if (!snapshotRoot || !client?.readNativeSearchMemberFileRange || !client.readNativeFileRange)
+      if(operation==='document'&&!inspectOffice||operation==='print'&&!renderOffice)throw Error('activity_tool_result_source_invalid');
+      if (!snapshotRoot)
         throw Error('activity_tool_result_source_invalid');
       if (downloads.size >= 4) return reply.code(429).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_CAPACITY'}});
       downloads.add(reservation);
       const original = source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined);
-      const memberInput:NativeSearchMembersRequest = {call_seq:original.callSeq,tool_name:original.tool,
-        offset_members:Number(memberIndex),members_sha256:query.members_sha256 as string};
-      const membership = await readMembers(client,owner,original,memberInput,signal);
-      if (memberResultHash(original,membership) !== query.result_sha256 || membership.items[0]?.index !== Number(memberIndex))
-        throw Error('activity_tool_result_source_changed');
-      if(operation==='document'&&!inspectOffice)throw Error('activity_tool_result_source_invalid');
-      if(operation==='print'&&!renderOffice)throw Error('activity_tool_result_source_invalid');
-      if(operation==='print'&&!officePreviewFormat(membership.items[0]!.path))throw Error('UNSUPPORTED_FORMAT_OPERATION');
-      if(operation==='document'&&!officePreviewFormat(membership.items[0]!.path)?.native)throw Error('UNSUPPORTED_FORMAT_OPERATION');
-      const input:NativeSearchMemberRangeRequest = {member:{call_seq:original.callSeq,tool_name:original.tool,index:Number(memberIndex),
-        members_sha256:membership.members_sha256,call_sha256:membership.call_sha256,result_sha256:membership.result_sha256},
-        range:{offset_bytes:0,length_bytes:65536}};
-      const first = validateNativeSearchMemberRange(await client.readNativeSearchMemberFileRange(owner,original.sessionId,input,signal),original.sessionId,input).range;
-      signal.throwIfAborted();
-      const limit = first.file_size_bytes ?? requestedLimit;
-      if (limit > requestedLimit) throw Error('activity_tool_result_file_unsupported');
-      if ([...downloads].reduce((sum,value)=>sum+value.bytes,0)+limit > downloadBudget)
-        return reply.code(429).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_CAPACITY'}});
-      reservation.bytes = limit;
-      store = createPinnedByteStore(snapshotRoot);
-      const writer = await store.beginStream(limit,signal);
-      let range = first, offset = 0;
-      for (;;) {
+      let openedSource:PinnedByteSource,proofSource:NativeFileProofSource,verifyPreviewAuthority:()=>Promise<void>,retained=false;
+      const retentionBinding=(opened:string)=>hash({protocol:'jot-retained-native-file/v1',owner,activity:original.identity,opened});
+      const saved=retainedRoot&&query.open_sha256!==undefined?await readRetainedNativeFile(retainedRoot,retentionBinding(query.open_sha256 as string),signal):undefined;
+      if(saved){
+        const prior=saved.source;
+        if(prior.conversationId!==conversationId||prior.runId!==runId||prior.activityId!==activityId||prior.resultSha!==query.result_sha256
+          ||prior.membersSha!==query.members_sha256||prior.memberIndex!==Number(memberIndex)||prior.openSha!==query.open_sha256||prior.asOfSeq!==asOfSeq)
+          throw Error('activity_tool_result_source_changed');
+        if(operation==='print'&&!officePreviewFormat(prior.path)||operation==='document'&&!officePreviewFormat(prior.path)?.native)throw Error('UNSUPPORTED_FORMAT_OPERATION');
+        if(prior.size>requestedLimit)throw Error('activity_tool_result_file_unsupported');
+        if([...downloads].reduce((sum,value)=>sum+value.bytes,0)+prior.size>downloadBudget)
+          return reply.code(429).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_CAPACITY'}});
+        reservation.bytes=prior.size;store=createPinnedByteStore(snapshotRoot);
+        const writer=await store.begin(prior.sha256,prior.size,signal);await loadRetainedNativeFile(retainedRoot!,saved,writer,signal);
+        openedSource=writer.source;proofSource=prior;retained=true;
+        verifyPreviewAuthority=async()=>{signal.throwIfAborted();if(source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined).identity!==original.identity)throw Error('activity_tool_result_source_changed');};
+      }else{
+        if(!client?.readNativeSearchMemberFileRange||!client.readNativeFileRange)throw Error('activity_tool_result_source_invalid');
+        const memberInput:NativeSearchMembersRequest = {call_seq:original.callSeq,tool_name:original.tool,
+          offset_members:Number(memberIndex),members_sha256:query.members_sha256 as string};
+        const membership = await readMembers(client,owner,original,memberInput,signal);
+        if (memberResultHash(original,membership) !== query.result_sha256 || membership.items[0]?.index !== Number(memberIndex))
+          throw Error('activity_tool_result_source_changed');
+        if(operation==='print'&&!officePreviewFormat(membership.items[0]!.path))throw Error('UNSUPPORTED_FORMAT_OPERATION');
+        if(operation==='document'&&!officePreviewFormat(membership.items[0]!.path)?.native)throw Error('UNSUPPORTED_FORMAT_OPERATION');
+        const input:NativeSearchMemberRangeRequest = {member:{call_seq:original.callSeq,tool_name:original.tool,index:Number(memberIndex),
+          members_sha256:membership.members_sha256,call_sha256:membership.call_sha256,result_sha256:membership.result_sha256},
+          range:{offset_bytes:0,length_bytes:65536}};
+        const first = validateNativeSearchMemberRange(await client.readNativeSearchMemberFileRange(owner,original.sessionId,input,signal),original.sessionId,input).range;
         signal.throwIfAborted();
-        const data = Buffer.from(range.data_base64,'base64');
-        if (offset+data.length > limit) throw Error('activity_tool_result_file_unsupported');
-        await writer.append(data);
-        offset += data.length;
-        if (range.eof) break;
-        const next:NativeFileRangeRequest = {path:first.absolute_path,offset_bytes:offset,length_bytes:Math.min(65536,limit-offset+1),
-          absolute_path:first.absolute_path,version:first.version,session_sha256:first.session_sha256,file_size_bytes:first.file_size_bytes};
-        range = validateNativeFileRange(await client.readNativeFileRange(owner,original.sessionId,next,signal),original.sessionId,next);
-        if (range.profile_id !== first.profile_id) throw Error('activity_tool_result_source_changed');
+        const limit = first.file_size_bytes ?? requestedLimit;
+        if (limit > requestedLimit) throw Error('activity_tool_result_file_unsupported');
+        if ([...downloads].reduce((sum,value)=>sum+value.bytes,0)+limit > downloadBudget)
+          return reply.code(429).send({error:{code:'ACTIVITY_TOOL_RESULT_SOURCE_CAPACITY'}});
+        reservation.bytes = limit;
+        store = createPinnedByteStore(snapshotRoot);
+        const writer = await store.beginStream(limit,signal);
+        let range = first, offset = 0;
+        for (;;) {
+          signal.throwIfAborted();
+          const data = Buffer.from(range.data_base64,'base64');
+          if (offset+data.length > limit) throw Error('activity_tool_result_file_unsupported');
+          await writer.append(data);
+          offset += data.length;
+          if (range.eof) break;
+          const next:NativeFileRangeRequest = {path:first.absolute_path,offset_bytes:offset,length_bytes:Math.min(65536,limit-offset+1),
+            absolute_path:first.absolute_path,version:first.version,session_sha256:first.session_sha256,file_size_bytes:first.file_size_bytes};
+          range = validateNativeFileRange(await client.readNativeFileRange(owner,original.sessionId,next,signal),original.sessionId,next);
+          if (range.profile_id !== first.profile_id) throw Error('activity_tool_result_source_changed');
+        }
+        await writer.seal();
+        const current = await readMembers(client,owner,original,memberInput,signal);
+        if (hash(current) !== hash(membership)
+          || source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined).identity !== original.identity)
+          throw Error('activity_tool_result_source_changed');
+        signal.throwIfAborted();
+        const openedSha = hash({activity:query.result_sha256,members:membership.members_sha256,index:Number(memberIndex),
+          profile:first.profile_id,session:first.session_sha256,path:first.absolute_path,version:first.version,
+          reportedSize:first.file_size_bytes,size:writer.source.sizeBytes,content:writer.source.sha256});
+        if(query.open_sha256!==undefined&&query.open_sha256!==openedSha)throw Error('activity_tool_result_source_changed');
+        proofSource={conversationId,runId,activityId,resultSha:query.result_sha256 as string,
+          membersSha:membership.members_sha256,memberIndex:Number(memberIndex),path:membership.items[0]!.path,
+          openSha:openedSha,sha256:writer.source.sha256,size:writer.source.sizeBytes,...(asOfSeq!==undefined?{asOfSeq:asOfSeq as string}:{})};
+        openedSource=writer.source;
+        verifyPreviewAuthority=async()=>{
+          signal.throwIfAborted();
+          const final=await readMembers(client,owner,original,memberInput,signal);
+          if(hash(final)!==hash(membership)||source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined).identity!==original.identity)
+            throw Error('activity_tool_result_source_changed');
+        };
       }
-      await writer.seal();
-      const current = await readMembers(client,owner,original,memberInput,signal);
-      if (hash(current) !== hash(membership)
-        || source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined).identity !== original.identity)
-        throw Error('activity_tool_result_source_changed');
-      signal.throwIfAborted();
-      const openedSha = hash({activity:query.result_sha256,members:membership.members_sha256,index:Number(memberIndex),
-        profile:first.profile_id,session:first.session_sha256,path:first.absolute_path,version:first.version,
-        reportedSize:first.file_size_bytes,size:writer.source.sizeBytes,content:writer.source.sha256});
-      if(query.open_sha256!==undefined&&query.open_sha256!==openedSha)throw Error('activity_tool_result_source_changed');
-      const proofSource:NativeFileProofSource={conversationId,runId,activityId,resultSha:query.result_sha256 as string,
-        membersSha:membership.members_sha256,memberIndex:Number(memberIndex),path:membership.items[0]!.path,
-        openSha:openedSha,sha256:writer.source.sha256,size:writer.source.sizeBytes,...(asOfSeq!==undefined?{asOfSeq:asOfSeq as string}:{})};
+      if(saved)await verifyPreviewAuthority();
+      const openedSha=proofSource.openSha;
       if(query.open_proof!==undefined){
         if(!nativeProofs)throw Error('native_file_reference_unproven');
         nativeProofs.assert(owner,proofSource,query.open_proof as string);
       }
       const openProof=nativeProofs?.sign(owner,proofSource);
-      const verifyPreviewAuthority=async()=>{
-        signal.throwIfAborted();
-        const final=await readMembers(client,owner,original,memberInput,signal);
-        if(hash(final)!==hash(membership)||source(db,owner,conversationId,runId,activityId,asOfSeq as string|undefined).identity!==original.identity)
-          throw Error('activity_tool_result_source_changed');
+      const retainOpened=async()=>{
+        if(!retained&&retainedRoot){
+          try{retained=await retainNativeFile(db,retainedRoot,retentionBinding(openedSha),proofSource,openedSource,signal);}
+          catch(error){signal.throwIfAborted();app.log.warn({err:error},'Native opened source was not retained');}
+        }
+        await verifyPreviewAuthority();
       };
       if(operation==='document'){
-        const value=await inspectOffice!(writer.source,membership.items[0]!.path,signal);
-        await verifyPreviewAuthority();
-        const result:NativeMemberOfficeDocumentPage={document_protocol:1,conversation_id:conversationId,run_id:runId,activity_id:activityId,
-          member_index:Number(memberIndex),path:membership.items[0]!.path,result_sha256:query.result_sha256 as string,
-          members_sha256:membership.members_sha256,open_sha256:openedSha,sha256:writer.source.sha256,size_bytes:writer.source.sizeBytes,
+        const value=await inspectOffice!(openedSource,proofSource.path,signal);
+        await retainOpened();
+        const result:NativeMemberOfficeDocumentPage={document_protocol:1,retained,conversation_id:conversationId,run_id:runId,activity_id:activityId,
+          member_index:Number(memberIndex),path:proofSource.path,result_sha256:query.result_sha256 as string,
+          members_sha256:proofSource.membersSha,open_sha256:openedSha,sha256:openedSource.sha256,size_bytes:openedSource.sizeBytes,
           ...(openProof?{open_proof:openProof}:{}),
           ...(asOfSeq!==undefined?{as_of_seq:asOfSeq as string}:{}),media_type:value.media_type,document:value.document,engine:value.engine,execution_authorized:false};
         return reply.header('x-content-type-options','nosniff').send(result);
       }
       if(operation==='print'){
         const binding=hash({protocol:'jot-native-office-print/v1',owner,activity:original.identity,opened:openedSha});
-        const value=await renderOffice!(writer.source,membership.items[0]!.path,binding,signal,expectedPdf);
-        await verifyPreviewAuthority();
+        const value=await renderOffice!(openedSource,proofSource.path,binding,signal,expectedPdf);
+        await retainOpened();
         const derived={sha256:value.pdf.sha256,size:value.pdf.size,pageCount:value.pdf.page_count};
         if(query.preview_proof!==undefined){
           if(!nativeProofs)throw Error('native_file_reference_unproven');
           nativeProofs.assert(owner,proofSource,query.preview_proof as string,derived);
         }
         const previewProof=nativeProofs?.sign(owner,proofSource,derived);
+        reply.header('x-activity-native-retained',String(retained));
         if(openProof)reply.header('x-activity-native-open-proof',openProof);
         if(previewProof)reply.header('x-jot-native-preview-proof',previewProof);
         stream=Readable.from([value.pdf.bytes]);
         stream.once('close',()=>{void cleanup().catch(error=>app.log.error({err:error},'Native Office PDF cleanup failed'));});
         return reply.type('application/octet-stream').header('content-length',String(value.pdf.size))
           .header('content-disposition','attachment; filename="office-preview.pdf"').header('x-content-type-options','nosniff')
-          .header('x-activity-file-sha256',writer.source.sha256).header('x-activity-file-size',String(writer.source.sizeBytes))
-          .header('x-activity-tool-result-sha256',query.result_sha256).header('x-activity-search-members-sha256',membership.members_sha256)
+          .header('x-activity-file-sha256',openedSource.sha256).header('x-activity-file-size',String(openedSource.sizeBytes))
+          .header('x-activity-tool-result-sha256',query.result_sha256).header('x-activity-search-members-sha256',proofSource.membersSha)
           .header('x-activity-native-open-sha256',openedSha).header('x-activity-native-member-index',memberIndex)
-          .header('x-activity-native-member-path-sha256',createHash('sha256').update(membership.items[0]!.path).digest('hex'))
+          .header('x-activity-native-member-path-sha256',createHash('sha256').update(proofSource.path).digest('hex'))
           .header('x-jot-preview-protocol','1').header('x-jot-preview-renderer','libreoffice').header('x-jot-preview-media-type','application/pdf')
           .header('x-jot-preview-sha256',value.pdf.sha256).header('x-jot-preview-size',String(value.pdf.size))
           .header('x-jot-preview-pages',String(value.pdf.page_count)).header('x-jot-execution-authorized','false').send(stream);
       }
+      await retainOpened();
       if(openProof)reply.header('x-activity-native-open-proof',openProof);
-      const name = Buffer.from((membership.items[0]!.path.split(/[\\/]/).at(-1) || 'file').slice(0,200)).toString('utf8');
-      async function* content(){try{yield* writer.source.stream(signal);}finally{await cleanup();}}
+      reply.header('x-activity-native-retained',String(retained));
+      const name = Buffer.from((proofSource.path.split(/[\\/]/).at(-1) || 'file').slice(0,200)).toString('utf8');
+      async function* content(){try{yield* openedSource.stream(signal);}finally{await cleanup();}}
       stream = Readable.from(content());
       stream.once('close',()=>{void cleanup().catch(error=>app.log.error({err:error},'Native member download cleanup failed'));});
-      reply.type('application/octet-stream').header('content-length',String(writer.source.sizeBytes))
+      reply.type('application/octet-stream').header('content-length',String(openedSource.sizeBytes))
         .header('content-disposition',`attachment; filename*=UTF-8''${encodeURIComponent(name).replace(/['()*]/g,char=>'%'+char.charCodeAt(0).toString(16))}`)
-        .header('x-content-type-options','nosniff').header('x-activity-file-sha256',writer.source.sha256)
-        .header('x-activity-file-size',String(writer.source.sizeBytes)).header('x-activity-tool-result-sha256',query.result_sha256)
-        .header('x-activity-search-members-sha256',membership.members_sha256).header('x-activity-native-open-sha256',openedSha)
-        .header('x-activity-native-member-path-sha256',createHash('sha256').update(membership.items[0]!.path).digest('hex'))
+        .header('x-content-type-options','nosniff').header('x-activity-file-sha256',openedSource.sha256)
+        .header('x-activity-file-size',String(openedSource.sizeBytes)).header('x-activity-tool-result-sha256',query.result_sha256)
+        .header('x-activity-search-members-sha256',proofSource.membersSha).header('x-activity-native-open-sha256',openedSha)
+        .header('x-activity-native-member-path-sha256',createHash('sha256').update(proofSource.path).digest('hex'))
         .header('x-activity-native-member-index',memberIndex).header('x-jot-execution-authorized','false');
       return reply.send(stream);
     } catch (error) {
       if (stream) {stream.destroy();await cleanup();}
+      if(error instanceof Error&&error.message==='native_file_retained_invalid')return reply.code(409).send({error:{code:'NATIVE_FILE_RETAINED_INVALID'}});
       if(error instanceof Error&&error.message==='native_file_reference_unproven')return reply.code(409).send({error:{code:'NATIVE_FILE_REFERENCE_UNPROVEN'}});
       if(error instanceof Error&&error.message==='DOCUMENT_PREVIEW_BUSY')return reply.code(429).header('retry-after','1').send({error:{code:'DOCUMENT_PREVIEW_BUSY'}});
       if (error instanceof SessionAdapterError) return reply.code(error.status === 404 ? 404 : error.status === 429 ? 429 : error.status === 409 ? 409 : 503)

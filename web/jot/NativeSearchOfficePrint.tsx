@@ -1,5 +1,5 @@
 import type {PdfReferenceFocus} from './pdf-file-view-state';
-import {nativeMemberReferenceSource} from './activity-file-preview-client';
+import {nativeMemberReferenceSource,nativeMemberDownloadUrl} from './activity-file-preview-client';
 import React,{lazy,Suspense,useEffect,useRef,useState} from 'react';
 import {ApiError,taskDraftScope} from './client';
 import {artifactPreviewErrorMessage} from './artifact-preview-bytes.mjs';
@@ -27,7 +27,8 @@ export default function NativeSearchOfficePrint({source,expectedOpenSha,expected
   };
   void load().catch(error=>{
    if(controller.signal.aborted||taskDraftScope()!==owner)return;
-   const message=error instanceof ApiError&&error.status===409?'原打开来源已变化，请重新打开文件。'
+   const message=error instanceof ApiError&&error.message==='NATIVE_FILE_RETAINED_INVALID'?artifactPreviewErrorMessage(error)
+    :error instanceof ApiError&&error.status===409?'原打开来源已变化，请重新打开文件。'
     :error instanceof ApiError&&error.status===429?'文档转换器正在处理另一个文件，请稍后重试。':artifactPreviewErrorMessage(error);
    setState({identity,error:message});
   }).finally(()=>window.clearTimeout(timer));
@@ -45,6 +46,8 @@ export default function NativeSearchOfficePrint({source,expectedOpenSha,expected
   <p>源文件上限100 MiB，转换PDF上限20 MiB。转换沿原配置服务和原打开来源核对。</p>
   {(!current||!preview&&!current.error)&&<p role="status">正在读取打开来源并转换PDF… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'本次转换读取已取消。'});}}>取消转换读取</button></p>}
   {preview&&<>
+   {preview.retained!==undefined&&<p role="status">{preview.retained?'已留存原文件打开内容，可按原版本重新打开。':'原文件打开内容未留存，需要的内容可下载保存。'}</p>}
+   <a href={nativeMemberDownloadUrl(source)+'&open_sha256='+preview.openSha+(preview.openProof?'&open_proof='+preview.openProof:'')} download={source.member.path.split(/[\\/]/).at(-1)||'file'} onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载此转换所用原文件</a>
    <p>原文件 {preview.sourceSize} 字节 · 源SHA-256 <code>{preview.sourceSha}</code></p>
    <p>PDF {preview.size} 字节 · {preview.pageCount} 页 · SHA-256 <code>{preview.sha256}</code></p>
    {download?.preview===preview&&<a href={download.url} download="office-preview.pdf" onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载此转换PDF</a>}

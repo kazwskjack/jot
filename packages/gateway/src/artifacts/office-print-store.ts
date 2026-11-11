@@ -1,4 +1,5 @@
-import {constants,existsSync,lstatSync,readdirSync,renameSync} from 'node:fs';
+import {assertRetainedFileCapacity} from './retained-file-quota.ts';
+import {constants,existsSync,renameSync} from 'node:fs';
 import {mkdir,mkdtemp,lstat,open,rm} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {isAbsolute,join} from 'node:path';
@@ -7,7 +8,7 @@ import {withImmediateTransaction} from '../db/database.ts';
 
 type ExpectedPdf={sha256:string;size:number;pageCount:number};
 type RetainedOfficePdf={pdf:{bytes:Buffer;sha256:string;size:number;page_count:number};engine:{name:string;version:string}};
-const maxBytes=512*1024*1024,maxEntries=128,pdfLimit=20*1024*1024;
+const pdfLimit=20*1024*1024;
 const hash=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const invalid=()=>Error('office_print_retained_invalid');
 
@@ -61,17 +62,7 @@ export async function retainOfficePdf(db:DatabaseSync,root:string,jobDirectory:s
   withImmediateTransaction(db,()=>{
    signal.throwIfAborted();
    if(existsSync(destination))return;
-   const entries=readdirSync(folder);let used=0;
-   if(entries.length>=maxEntries)throw Error('office_print_retention_full');
-   for(const name of entries){
-    if(!/^[a-f0-9]{64}-[a-f0-9]{64}$/.test(name))throw invalid();
-    const path=join(folder,name),entry=lstatSync(path);
-    if(!entry.isDirectory()||entry.isSymbolicLink())throw invalid();
-    for(const file of ['source.json','preview.pdf']){
-     const stat=lstatSync(join(path,file));if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1)throw invalid();used+=stat.size;
-    }
-   }
-   if(used+value.pdf.bytes.length+Buffer.byteLength(JSON.stringify(metadata))>maxBytes)throw Error('office_print_retention_full');
+   assertRetainedFileCapacity(root,value.pdf.bytes.length+Buffer.byteLength(JSON.stringify(metadata)),'office_print_retention_full');
    renameSync(stage,destination);
   });
   // Also validates an identical entry published by another gateway process.

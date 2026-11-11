@@ -869,7 +869,7 @@ export type ActivityNativeSearchMembersPage={
   items:readonly Readonly<{index:number;path:string}>[];next_offset_members?:number;execution_authorized:false;
 };
 
-export type NativeMemberOfficeDocumentPage={
+export type NativeMemberOfficeDocumentPage={retained?:boolean;
  document_protocol:1;conversation_id:string;run_id:string;activity_id:string;member_index:number;path:string;as_of_seq?:string;
  result_sha256:string;members_sha256:string;open_sha256:string;open_proof?:string;sha256:string;size_bytes:number;media_type:string;
  document:import('../src/artifacts/document-preview-content.ts').OfficeDocumentPreview;

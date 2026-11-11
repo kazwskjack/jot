@@ -3,7 +3,7 @@ import {nativeMemberDownloadUrl,type NativeMemberPreviewSource} from './activity
 import {readVerifiedPreviewBytes} from './artifact-preview-bytes.mjs';
 
 export type NativeOfficePrintPin={openSha:string;sourceSha:string;sourceSize:number;sha256:string;size:number;pageCount:number;openProof?:string;pdfProof?:string};
-export type NativeOfficePrintPreview=NativeOfficePrintPin&{bytes:Uint8Array};
+export type NativeOfficePrintPreview=NativeOfficePrintPin&{retained?:boolean;bytes:Uint8Array};
 export async function readNativeOfficePdf(source:NativeMemberPreviewSource,owner:string,signal:AbortSignal,openSha?:string,expected?:NativeOfficePrintPin,openProof?:string):Promise<NativeOfficePrintPreview>{
  const check=()=>{signal.throwIfAborted();if(taskDraftScope()!==owner)throw Error('文件所属账户已变化');};
  check();
@@ -19,12 +19,13 @@ export async function readNativeOfficePdf(source:NativeMemberPreviewSource,owner
   check();
   if(!response.ok){const value=await response.json().catch(()=>({}));throw new ApiError(response.status,value.error?.code??'PDF转换预览暂不可用');}
   const header=(name:string)=>response.headers.get(name);
+  const retention=header('x-activity-native-retained');
   const sourceSha=header('x-activity-file-sha256'),opened=header('x-activity-native-open-sha256'),sha256=header('x-jot-preview-sha256');
   const receivedProof=header('x-activity-native-open-proof')??undefined,pdfProof=header('x-jot-native-preview-proof')??undefined;
   const sourceSize=Number(header('x-activity-file-size')),size=Number(header('x-jot-preview-size')),pageCount=Number(header('x-jot-preview-pages'));
   const pathSha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(source.member.path))),byte=>byte.toString(16).padStart(2,'0')).join('');
   check();
-  if(!response.body||header('content-type')?.split(';')[0]!=='application/octet-stream'||header('x-jot-preview-protocol')!=='1'
+  if(retention!==null&&!['true','false'].includes(retention)||!response.body||header('content-type')?.split(';')[0]!=='application/octet-stream'||header('x-jot-preview-protocol')!=='1'
    ||header('x-jot-preview-renderer')!=='libreoffice'||header('x-jot-preview-media-type')!=='application/pdf'||header('x-jot-execution-authorized')!=='false'
    ||header('x-activity-tool-result-sha256')!==source.resultSha||header('x-activity-search-members-sha256')!==source.membersSha
    ||header('x-activity-native-member-index')!==String(source.member.index)||header('x-activity-native-member-path-sha256')!==pathSha
@@ -39,6 +40,6 @@ export async function readNativeOfficePdf(source:NativeMemberPreviewSource,owner
   const bytes=await readVerifiedPreviewBytes(response,{sha256,size_bytes:size},signal);
   check();
   if(new TextDecoder('ascii').decode(bytes.subarray(0,5))!=='%PDF-')throw Error('转换PDF文件头尚未确认');
-  return {bytes,openSha:opened,sourceSha,sourceSize,sha256,size,pageCount,...(receivedProof?{openProof:receivedProof}:{}),...(pdfProof?{pdfProof}:{})};
+  return {bytes,openSha:opened,sourceSha,sourceSize,sha256,size,pageCount,...(retention!==null?{retained:retention==='true'}:{}),...(receivedProof?{openProof:receivedProof}:{}),...(pdfProof?{pdfProof}:{})};
  }catch(error){await response.body?.cancel().catch(()=>{});throw error;}
 }

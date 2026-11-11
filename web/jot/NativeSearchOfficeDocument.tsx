@@ -28,7 +28,7 @@ export default function NativeSearchOfficeDocument({source,expectedOpenSha,expec
     ||page.result_sha256!==source.resultSha||page.members_sha256!==source.membersSha||page.execution_authorized!==false
     ||typeof page.open_sha256!=='string'||!/^[a-f0-9]{64}$/.test(page.open_sha256)||pin!==undefined&&page.open_sha256!==pin
     ||page.open_proof!==undefined&&(typeof page.open_proof!=='string'||page.open_proof.length!==43||!/^[A-Za-z0-9_-]{43}$/.test(page.open_proof))
-    ||proof!==undefined&&page.open_proof!==proof
+    ||proof!==undefined&&page.open_proof!==proof||page.retained!==undefined&&typeof page.retained!=='boolean'
     ||typeof page.sha256!=='string'||!/^[a-f0-9]{64}$/.test(page.sha256)||!Number.isSafeInteger(page.size_bytes)||page.size_bytes<0||page.size_bytes>100*1024*1024
     ||page.media_type!==format.mediaType||page.document?.kind!==format.kind||!page.engine||typeof page.engine.name!=='string'||page.engine.name.length>200
     ||typeof page.engine.version!=='string'||page.engine.version.length>200)throw Error('原生Office结构化来源尚未确认');
@@ -40,7 +40,8 @@ export default function NativeSearchOfficeDocument({source,expectedOpenSha,expec
   };
   void load().catch(error=>{
    if(controller.signal.aborted||taskDraftScope()!==owner)return;
-   const message=error instanceof ApiError&&error.status===409?'本次打开来源已变化，请重新打开文件。'
+   const message=error instanceof ApiError&&error.message==='NATIVE_FILE_RETAINED_INVALID'?artifactPreviewErrorMessage(error)
+    :error instanceof ApiError&&error.status===409?'本次打开来源已变化，请重新打开文件。'
     :error instanceof ApiError&&error.status===429?'文档引擎正在处理另一个文件，请稍后重试。'
     :error instanceof ApiError&&error.message==='ACTIVITY_TOOL_RESULT_FILE_UNSUPPORTED'?'文件超过100 MiB结构化来源范围。'
     :artifactPreviewErrorMessage(error);
@@ -54,6 +55,7 @@ export default function NativeSearchOfficeDocument({source,expectedOpenSha,expec
   <p>最多读取100 MiB原生成员来源。文字和单元格沿原解析范围显示。</p>
   {(!current||!page&&!current.error)&&<p role="status">正在核对打开来源并解析Office…</p>}
   {page&&<>
+   {page.retained!==undefined&&<p role="status">{page.retained?'已留存本次打开内容，可按原版本重新打开。':'本次打开内容未留存，需要的内容可下载保存。'}</p>}
    <p>{page.size_bytes} 字节 · SHA-256 <code>{page.sha256}</code></p>
    <a href={nativeMemberDownloadUrl(source)+'&open_sha256='+page.open_sha256+(page.open_proof?'&open_proof='+page.open_proof:'')} download={source.member.path.split(/[\\/]/).at(-1)||'file'} onClick={event=>{if(taskDraftScope()!==owner)event.preventDefault();}}>下载此结构化来源</a>
    {page.document.truncated&&<p role="status">当前解析结果存在截断，请对照完整打开文件。</p>}

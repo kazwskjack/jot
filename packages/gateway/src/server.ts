@@ -1068,7 +1068,7 @@ export async function buildServer(config: {
   registerDiscoveryHistoryRoutes(app,{history:new DiscoveryHistory(db),actor,role:(owner,id)=>workbench.getAgent(owner,id)});
   const officePrintRoot=join(dirname(resolve(config.databasePath)),'.jot-office-print-'+createHash('sha256').update(resolve(config.databasePath)).digest('hex').slice(0,16));
   let documentPreviewBusy=false;
-  registerNativeSearchSourceRoutes(app,{db,actor,client:config.nativeSearchSourceClient,snapshotRoot:join(dirname(resolve(config.databasePath)),'.jot-downloads'),
+  registerNativeSearchSourceRoutes(app,{db,actor,client:config.nativeSearchSourceClient,snapshotRoot:join(dirname(resolve(config.databasePath)),'.jot-downloads'),retainedRoot:officePrintRoot,
     ...(officePrintReferencesReady?{nativeProofs:{
       sign:(owner:string,source:NativeFileProofSource,pdf?:NativeFileProofPdf)=>signNativeFileProof(config.internalChannelToken!,owner,source,pdf),
       assert:(owner:string,source:NativeFileProofSource,proof:string,pdf?:NativeFileProofPdf)=>assertNativeFileProof(config.internalChannelToken,owner,source,proof,pdf),

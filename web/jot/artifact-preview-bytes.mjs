@@ -3,6 +3,7 @@ const RASTER_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'ima
 const TEXT_TYPES = new Set(['application/json', 'application/xml']);
 const ARTIFACT_ID = /^[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$/;
 const PREVIEW_ERRORS = new Map([
+  ['NATIVE_FILE_RETAINED_INVALID', '留存的原文件未通过完整性核对，无法重新打开'],
   ['artifact_preview_metadata_invalid', '附件信息无效，无法预览'],
   ['artifact_preview_format_unsupported', '此文件格式暂不支持预览，请下载查看'],
   ['artifact_preview_too_large', '文件过大，暂不支持预览，请下载查看'],
