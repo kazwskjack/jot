@@ -100,7 +100,8 @@ export default function DesktopUpdatesPanel({scopeKey,onPendingChange,canBeginAc
   {status?.transfer&&<div>
    <p>文件数据进度：{status.transfer.transferred.toLocaleString()} / {status.transfer.total.toLocaleString()} 字节</p>
    {status.transfer.total>0&&<progress max={status.transfer.total} value={status.transfer.transferred} aria-label="更新文件数据进度"/>}
-   <p className="wb-settings-note">仅统计已写入或重新核对的文件数据，不表示签名校验、准备或安装已完成。</p>
+   <p>下载速率：{status.downloadControl?.paused?'已暂停':status.transfer.bytesPerSecond===null?'暂无有效样本':`${status.transfer.bytesPerSecond.toLocaleString(undefined,{maximumFractionDigits:1})} 字节/秒`}</p>
+   <p className="wb-settings-note">仅统计已写入或重新核对的文件数据，不表示签名校验、准备或安装已完成。速率仅来自本次新下载并写入的数据。</p>
   </div>}
   {error&&<p role="alert">{error}</p>}
   <div className="wb-actions">

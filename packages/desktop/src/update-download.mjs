@@ -236,9 +236,11 @@ async function inspectExistingFile(fs,root,filePath){
 function transferReporter(files,onProgress){
  const total=files.reduce((sum,file)=>sum+file.bytes,0);
  if(!Number.isSafeInteger(total)||total<0)fail('desktop_update_manifest_size_invalid');
- return transferred=>{
-  if(!Number.isSafeInteger(transferred)||transferred<0||transferred>total)fail('desktop_update_transfer_invalid');
-  if(typeof onProgress==='function')try{onProgress(Object.freeze({transferred,total}));}catch{}
+ let received=0;
+ return (transferred,newBytes=0)=>{
+  if(!Number.isSafeInteger(transferred)||transferred<0||transferred>total||!Number.isSafeInteger(newBytes)||newBytes<0||newBytes>total-received)fail('desktop_update_transfer_invalid');
+  received+=newBytes;
+  if(typeof onProgress==='function')try{onProgress(Object.freeze({transferred,total,received}));}catch{}
  };
 }
 async function loadExistingPackage({fs,root,operationId,envelope,signal,onProgress}){
@@ -363,7 +365,7 @@ export function createUpdateDownloader({policy,transport={request:requestHttps},
       await writeChunk(handle,chunk);received+=chunk.length;offset+=chunk.length;
       await handle.sync();
       await stateStore.recordDownloadProgress(operationId,file.path,offset,etag);
-      reportTransfer(completedBytes+offset);
+      reportTransfer(completedBytes+offset,chunk.length);
      }
     }
     if(received!==file.bytes-(checkpoint?.offset??0))fail('desktop_update_body_length_mismatch');

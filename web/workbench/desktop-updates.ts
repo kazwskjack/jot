@@ -1,7 +1,7 @@
 // Adapts PilotDeck 783499ff desktopUpdates; AGPL-3.0. Native Jot receipts remain authoritative.
 export const updatePhases=['available','downloading','downloaded','verified','staged','awaiting-activation','activating','active','cancelled','failed','unknown'] as const;
 export type UpdatePhase=typeof updatePhases[number];
-export type DesktopUpdateTransfer={operationId:string;transferred:number;total:number};
+export type DesktopUpdateTransfer={operationId:string;transferred:number;total:number;bytesPerSecond:number|null};
 export type DesktopDownloadControl={operationId:string;paused:boolean;waiting:boolean;pending:boolean};
 export type DesktopUpdateStatus={enabled:boolean;reason:string|null;phase:UpdatePhase|null;operationId:string|null;checking:boolean|null;actionPending:boolean|null;operationCommands:1|null;activeCommand:'download'|'activate'|null;cancelPending:boolean|null;transfer:DesktopUpdateTransfer|null;downloadControlRevision:1|null;downloadControl:DesktopDownloadControl|null};
 export type DesktopUpdateCheck={available:boolean;operationId:string|null;phase:UpdatePhase|null;version:string;sequence:string;channel:string;platform:string;arch:string};
@@ -20,9 +20,10 @@ export function desktopUpdatesBridge():DesktopUpdatesBridge|null{
 function desktopUpdateTransfer(value:unknown,operationId:unknown):DesktopUpdateTransfer|null{
  if(value===undefined||value===null)return null;
  const r=row(value);
- if(!r||!keys(r,['operationId','transferred','total'])||!uuid(r.operationId)||r.operationId!==operationId||
-  typeof r.transferred!=='number'||!Number.isSafeInteger(r.transferred)||r.transferred<0||typeof r.total!=='number'||!Number.isSafeInteger(r.total)||r.total<r.transferred)throw Error('desktop_update_transfer_invalid');
- return {operationId:r.operationId,transferred:r.transferred,total:r.total};
+ if(!r||!keys(r,['operationId','transferred','total','bytesPerSecond'])||!uuid(r.operationId)||r.operationId!==operationId||
+  typeof r.transferred!=='number'||!Number.isSafeInteger(r.transferred)||r.transferred<0||typeof r.total!=='number'||!Number.isSafeInteger(r.total)||r.total<r.transferred||
+  (r.bytesPerSecond!==undefined&&r.bytesPerSecond!==null&&(typeof r.bytesPerSecond!=='number'||!Number.isFinite(r.bytesPerSecond)||r.bytesPerSecond<0||r.bytesPerSecond>Number.MAX_SAFE_INTEGER)))throw Error('desktop_update_transfer_invalid');
+ return {operationId:r.operationId,transferred:r.transferred,total:r.total,bytesPerSecond:typeof r.bytesPerSecond==='number'?r.bytesPerSecond:null};
 }
 function desktopDownloadControl(value:unknown,r:Record<string,unknown>):DesktopDownloadControl|null{
  if(value===undefined||value===null)return null;

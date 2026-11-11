@@ -1,3 +1,4 @@
+import {createUpdateTransferRate} from './update-transfer-rate.mjs';
 import {createUpdateTransferControl} from './update-transfer-control.mjs';
 import {randomUUID} from 'node:crypto';
 import {dirname,join,resolve} from 'node:path';
@@ -87,12 +88,13 @@ function validateReceipt(staged,envelope){
 export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle,downloader,stateStore,platformSignatureVerifier,candidateProbe,hostLifecycle,
  desktopLifecycle,getHealthUrl,exitForHandoff,fetchEnvelope,relaunch,confirmActivation,probeRestoredRelease,getHostProcessContext}={}){
  const currentHostProcessContext=getHostProcessContext??(({releaseRoot})=>({pid:process.pid,execPath:process.execPath,releaseRoot}));
- let checked=null,checking=false,activeAction=null,cancelPending=false,transfer=null,transferCommandPending=false;
+ let checked=null,checking=false,activeAction=null,cancelPending=false,transfer=null,transferCommandPending=false,transferRate=null;
  const contexts=new Map(),controllers=new Map(),transferControls=new Map(),progressListeners=new Set();
  const commandStatus=(operationId=null)=>{
-  const control=transferControls.get(operationId);
+  const control=transferControls.get(operationId),controlState=control?.snapshot();
+  const bytesPerSecond=control&&!controlState.paused&&!cancelPending&&!controllers.get(operationId)?.signal.aborted&&transferRate?.operationId===operationId?transferRate.sampler.read():null;
   return {checking,actionPending:activeAction!==null||cancelPending,operationCommands:1,activeCommand:activeAction?.kind??null,cancelPending,
-   transfer:transfer?.operationId===operationId?transfer:null,downloadControlRevision:downloader?.transferControlRevision===1?1:null,
+   transfer:transfer?.operationId===operationId?Object.freeze({...transfer,bytesPerSecond}):null,downloadControlRevision:downloader?.transferControlRevision===1?1:null,
    downloadControl:control?Object.freeze({operationId,...control.snapshot(),pending:transferCommandPending}):null};
  };
  const emitProgress=(operationId,phase)=>{
@@ -380,6 +382,7 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
    const loaded=await stateStore.read(),operation=loaded.state?.operation;
    if(!loaded.enabled||operation?.id!==operationId||!['available','downloading'].includes(operation.phase)||!admitted())fail('desktop_update_transfer_control_unavailable');
    if(kind==='pause')control.pause();else control.resume();
+   if(transferRate?.operationId===operationId)transferRate.sampler.reset();
    return Object.freeze({operationId,...control.snapshot()});
   }finally{transferCommandPending=false;}
  }
@@ -431,6 +434,7 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
   controllers.set(operationId,controller);
   const control=downloader.transferControlRevision===1?createUpdateTransferControl({signal:controller.signal}):null;
   if(control)transferControls.set(operationId,control);
+  const sampler=createUpdateTransferRate();transferRate={operationId,sampler};
   try{
    const state=await stateStore.read(),operation=state.state?.operation;
    if(!state.enabled||operation?.id!==operationId)fail('desktop_update_phase_invalid');
@@ -439,6 +443,7 @@ export function createDesktopUpdateLifecycle({policy,releaseOps,packageLifecycle
     if(activeAction?.kind!=='download'||activeAction.operationId!==operationId||contexts.get(operationId)!==context)return;
     if(!value||!Number.isSafeInteger(value.transferred)||!Number.isSafeInteger(value.total)||value.transferred<0||value.total<value.transferred)return;
     transfer=Object.freeze({operationId,transferred:value.transferred,total:value.total});
+    if(Number.isSafeInteger(value.received)&&value.received>=0&&value.received<=value.transferred)sampler.observe(value.received);else sampler.reset();
    };
    let downloaded;
    try{
