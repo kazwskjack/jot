@@ -881,3 +881,5 @@ export type NativeMemberOfficeDocumentPage={retained?:boolean;
 
 export type TerminalSessionChoice=import('../src/terminal/session-catalog').TerminalSessionChoice;
 export type TerminalSessionCatalog=import('../src/terminal/session-catalog').TerminalSessionCatalog;
+
+export type StandaloneTerminalAdmission=import('../src/terminal/standalone-admissions').StandaloneTerminalAdmission;

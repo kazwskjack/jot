@@ -71,6 +71,8 @@ import {registerTerminalStreamRoutes,type TerminalStreamClient} from './terminal
 import {registerTerminalReceiptRoutes} from './terminal/receipt-routes.ts';
 import {registerTerminalControlRoutes,type TerminalControlClient} from './terminal/control-routes.ts';
 import {registerTerminalInventoryRoutes,type TerminalInventoryClient} from './terminal/inventory-routes.ts';
+import {registerStandaloneTerminalAdmissionRoutes} from './terminal/standalone-routes.ts';
+import type {StandaloneTerminalClient} from './terminal/standalone-service.ts';
 import { EventStore, ExpiredCursorError, FutureCursorError } from './events/event-store.ts';
 import { RunRepository } from './runs/repository.ts';
 import {readRunRuntimeDiagnostics} from './events/runtime-diagnostics.ts';
@@ -232,6 +234,7 @@ export async function buildServer(config: {
   nativeMemberClient?:NativeMemberControlClient;
   nativeSearchSourceClient?:NativeSearchSourceClient;
   terminalInventoryClient?:TerminalInventoryClient;
+  standaloneTerminalClient?:StandaloneTerminalClient;
   terminalControlClient?:TerminalControlClient;
   terminalStreamClient?:TerminalStreamClient;
   taskmasterInstallationClient?:TaskmasterInstallationClient;
@@ -1094,6 +1097,7 @@ export async function buildServer(config: {
       finally{documentPreviewBusy=false;}
     }});
   registerTerminalInventoryRoutes(app,{db,actor,client:config.terminalInventoryClient});
+  registerStandaloneTerminalAdmissionRoutes(app,{db,actor,workspaces:config.workspaces,client:config.standaloneTerminalClient});
   registerTerminalControlRoutes(app,{db,actor,client:config.terminalControlClient});
   registerTerminalReceiptRoutes(app,{db,actor,client:config.terminalControlClient});
   registerTerminalStreamRoutes(app,{db,actor,client:config.terminalStreamClient});
