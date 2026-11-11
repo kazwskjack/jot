@@ -67,10 +67,52 @@ const english:Record<string,string>={
   "字节内容相同。": "Byte Content Is Identical.",
   "文件超过 1 MiB 文本差异预览上限，请核对当前与目标的字节摘要、大小和版本。": "The file exceeds the 1 MiB text diff preview limit. Check current and target byte digests, sizes and versions.",
   "当前版本字节缺失或校验失败，完整差异无法生成。目标快照已按原审阅摘要核对，请核对路径、版本、摘要和大小后决定恢复。": "Current version bytes are missing or failed verification, so a complete diff is unavailable. The target snapshot matches the original review digest. Check path, versions, digests and sizes before deciding to restore.",
-  "二进制内容无法显示文本差异，请核对当前与目标的字节摘要、大小和版本。": "Binary content cannot be shown as a text diff. Check current and target byte digests, sizes and versions."
+  "二进制内容无法显示文本差异，请核对当前与目标的字节摘要、大小和版本。": "Binary content cannot be shown as a text diff. Check current and target byte digests, sizes and versions.",
+  "目录包含无效或重复的相对路径，未继续导入或导出。": "The directory contains invalid or duplicate relative paths. Import/export was not continued.",
+  "项目中存在文件与目录路径冲突，未继续导入或导出。": "The project has conflicting file/directory paths. Import/export was not continued.",
+  "项目当前有需要协调的工作，暂不能导入目录。": "The project has work requiring coordination. Directory import is temporarily unavailable.",
+  "单个文件超过 100 MiB，未导入。": "A file exceeds 100 MiB and was not imported.",
+  "服务端回执与所选文件的路径、来源、大小或 SHA-256 不一致；请刷新文件列表核对后再操作。": "The server receipt does not match the selected file path, source, size or SHA-256. Refresh and check the file list before continuing.",
+  "下载字节与所选版本的 SHA-256 或大小不一致，未写入目标目录。": "Downloaded bytes do not match the selected version SHA-256 or size. Nothing was written to the target directory.",
+  "项目文件清单无效或分页游标重复，已停止操作。": "The project file list is invalid or has a repeated page cursor. The operation stopped.",
+  "目录文件操作未完成": "Directory File Operation Incomplete",
+  "此浏览器不支持目录写入；可逐个使用“下载原始文件”。": "This browser cannot write directories. Use Download Original File individually.",
+  "浏览器无法保存会话草稿；当前页面中的编辑内容仍保留。": "The browser cannot save the session draft. Edits on the current page are retained.",
+  "本地草稿尚未成功保存；请先复制编辑内容或重试，暂不能切换文件。": "The local draft has not been saved successfully. Copy the edits or retry before switching files.",
+  "会话草稿正在保存，请稍后再切换文件。": "The session draft is being saved. Wait before switching files.",
+  "已知版本号超出范围": "Known Version Number Out of Range",
+  "操作历史游标与当前项目不匹配，请刷新。": "The operation history cursor does not match the current project. Refresh.",
+  "读取文件操作历史失败": "Reading File Operation History Failed",
+  "历史回执与文件路径或摘要不匹配，未读取内容。": "The historical receipt does not match the file path or digest. Content was not read.",
+  "请在路径冲突提示中明确选择恢复目标或丢弃目标并继续改名。": "In the path conflict notice, explicitly choose to restore the target or discard it and continue renaming.",
+  "目标草稿未能丢弃；两份草稿均已保留。": "The target draft could not be discarded. Both drafts are retained.",
+  "文件草稿超过 1 MiB 上限": "File Draft Exceeds the 1 MiB Limit",
+  "文件草稿无效": "Invalid File Draft",
+  "版本冲突：本地草稿已保留，请比较服务端最新版本。": "Version conflict: the local draft is retained. Compare the latest server version.",
+  "文件未保存": "File Not Saved",
+  "没有可保存的修改": "No Changes to Save",
+  "请先查看修改摘要": "Review the Change Summary First",
+  "本地草稿尚未成功保存；请先复制编辑内容或重试，暂不能关闭。": "The local draft has not been saved successfully. Copy the edits or retry before closing.",
+  "会话草稿正在保存，请稍后再关闭。": "The session draft is being saved. Wait before closing.",
+  "未能载入最新版本": "Could Not Load Latest Version",
+  "未能保留本地草稿": "Could Not Retain Local Draft",
+  "文件列表响应冲突，请刷新后重试。": "File List Response Conflict. Refresh and Retry.",
+  "文件列表已变化或分页已失效，请刷新后重新加载。": "The file list changed or paging expired. Refresh and reload.",
+  "文件列表读取失败": "Reading File List Failed"
 };
 
 // Map owned UI notices only; member messages, memory bodies and unknown errors stay original.
 export function workspaceUiMessage(value:string,language:ApplicationLanguage){
- return language==='en'&&Object.hasOwn(english,value)?english[value]!:memoryUiMessage(value,language);
+ if(language!=='en')return value;
+ if(Object.hasOwn(english,value))return english[value]!;
+ for(const [prefix,translated] of [
+  ['草稿恢复失败：','Draft Restore Failed: '],
+  ['版本冲突，草稿已保留；读取最新版本失败：','Version Conflict; Draft Retained. Reading Latest Version Failed: '],
+ ] as const){
+  if(value.startsWith(prefix)){
+   const detail=value.slice(prefix.length);
+   return translated+(Object.hasOwn(english,detail)?english[detail]!:detail);
+  }
+ }
+ return memoryUiMessage(value,language);
 }
