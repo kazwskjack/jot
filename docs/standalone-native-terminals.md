@@ -1,6 +1,6 @@
 # 独立原生 Session 接入
 
-当前源码已连接 Gateway 的准备、读取、派发、取消、观察流程与原生 Host 的身份、创建、只读观察实现。独立终端的 inventory、control、PTY stream 和产品界面尚未接通；`ready` 只表示观察到原持久 Session，不表示终端进程已启动或 CLI 已登录。
+当前源码已连接 Gateway 的准备、读取、派发、取消、观察流程与原生 Host 的身份、创建、只读观察实现。已确认独立 Session 的终端清单也已接入源码；独立终端的 control、PTY stream 和产品界面尚未接通；`ready` 只表示观察到原持久 Session，不表示终端进程已启动或 CLI 已登录。
 
 ## 显式配置
 
@@ -28,3 +28,9 @@ Linux Host 使用它本机的绝对目录。工作区 ID 必须同时在 Gateway
 6. 超时、断连和无法核对的结果保持未知；观察不会重放创建。所有原生身份确认仍须来自已认证通道，持久摘要本身不是授权。
 
 本次开发没有运行产品、数据库安装逻辑、原生 Session、CLI 或测试，也没有更改部署环境。
+
+## 独立终端清单
+
+`GET /v1/standalone-terminals/admissions/:requestId/terminals` 只读取当前账户、当前配置工作区内已达到 ready 的独立 Session。Host 在读取原生终端 controller 前后核对持久 Session 身份及原确认摘要，Gateway 返回前复核 admission 状态。响应沿用既有 TerminalInventory 公共字段，不含终端输出或私有日志。
+
+此读取不会恢复 Agent、创建 Session 或终端，也不表示 CLI 已登录。尚未完成独立终端操作、PTY 数据流及界面；原生能力缺失会返回不可用，不伪造空清单。

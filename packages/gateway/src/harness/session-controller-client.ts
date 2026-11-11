@@ -277,6 +277,9 @@ export class SessionControllerClient {
   createSession(admission:StandaloneTerminalAdmission,signal:AbortSignal){
     return this.standaloneTerminalPost('/v1/standalone-terminals/create',admission,signal);
   }
+  readInventory(admission:StandaloneTerminalAdmission,signal:AbortSignal){
+    return this.standaloneTerminalPost('/v1/standalone-terminals/inventory',admission,signal);
+  }
   observeSession(admission:StandaloneTerminalAdmission,signal:AbortSignal){
     return this.standaloneTerminalPost('/v1/standalone-terminals/observe',admission,signal);
   }

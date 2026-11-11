@@ -192,7 +192,7 @@ export function registerWorkbenchProxy(app,config,localCsrf){
   }
   const terminalSessionCatalog=req.method==='GET'&&suffix==='/v1/terminal-sessions';
   const standaloneId='[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}';
-  const standaloneTerminalAdmission=req.method==='GET'&&new RegExp('^/v1/standalone-terminals/admissions/'+standaloneId+'$').test(suffix)
+  const standaloneTerminalAdmission=req.method==='GET'&&new RegExp('^/v1/standalone-terminals/admissions/'+standaloneId+'(?:/terminals)?$').test(suffix)
    ||req.method==='POST'&&(suffix==='/v1/standalone-terminals/admissions'||new RegExp('^/v1/standalone-terminals/admissions/'+standaloneId+'/control$').test(suffix));
   const officePreviewRead=req.method==='GET'&&['/v1/office-preview/status','/v1/office-preview/candidates','/v1/office-preview/configuration'].includes(suffix);
   const officePreviewWrite=req.method==='PATCH'&&suffix==='/v1/office-preview/configuration';

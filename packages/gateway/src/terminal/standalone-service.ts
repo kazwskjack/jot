@@ -1,4 +1,5 @@
 import type {DatabaseSync} from 'node:sqlite';
+import {validateTerminalInventory} from './inventory.js';
 import {prepareStandaloneTerminalAdmission,readStandaloneTerminalAdmission,claimStandaloneTerminalAdmission,cancelStandaloneTerminalAdmission,
  markStandaloneTerminalUnknown,confirmStandaloneTerminalAdmission,type StandaloneTerminalAdmission} from './standalone-admissions.ts';
 
@@ -9,6 +10,7 @@ export interface StandaloneTerminalClient{
  readAuthority(owner:string,workspace:string,signal:AbortSignal):Promise<unknown>;
  createSession(admission:StandaloneTerminalAdmission,signal:AbortSignal):Promise<unknown>;
  observeSession(admission:StandaloneTerminalAdmission,signal:AbortSignal):Promise<unknown>;
+ readInventory?(admission:StandaloneTerminalAdmission,signal:AbortSignal):Promise<unknown>;
 }
 export type StandaloneTerminalExpected={request_id:string;expected_version:number;expected_state_sha256:string};
 const hash=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
@@ -95,6 +97,16 @@ export class StandaloneTerminalAdmissions{
    const value=await nativeCall(signal,bounded=>this.client!.createSession(claimed,bounded));signal.throwIfAborted();
    return this.confirm(owner,claimed,value);
   }catch{return this.unknown(owner,claimed.request_id);}
+ }
+ async inventory(owner:string,request:string,signal:AbortSignal){
+  signal.throwIfAborted();const row=this.read(owner,request);
+  if(!row)throw Error('standalone_terminal_admission_missing');
+  if(row.state!=='ready')throw Error('standalone_terminal_transition_invalid');
+  if(typeof this.client?.readInventory!=='function')throw Error('standalone_terminal_native_unavailable');
+  const value=validateTerminalInventory(await nativeCall(signal,bounded=>this.client!.readInventory!(row,bounded)),row.session_id);
+  signal.throwIfAborted();const current=this.read(owner,request);
+  if(!current||current.state_sha256!==row.state_sha256)throw Error('standalone_terminal_state_changed');
+  return value;
  }
  async observe(owner:string,input:StandaloneTerminalExpected,signal:AbortSignal){
   signal.throwIfAborted();const row=this.current(owner,input);

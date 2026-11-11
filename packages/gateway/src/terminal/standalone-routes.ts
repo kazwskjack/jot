@@ -41,6 +41,17 @@ export function registerStandaloneTerminalAdmissionRoutes(app:FastifyInstance,op
    const value=service.read(owner,id);if(!value)throw Error('standalone_terminal_admission_missing');return value;
   }catch(error){const result=failure(error);return reply.code(result.status).send({error:{code:result.code}});}
  });
+ app.get(path+'/:requestId/terminals',async(request,reply)=>{
+  reply.header('cache-control','private, no-store');
+  const abort=new AbortController(),close=()=>abort.abort();request.raw.once('aborted',close);reply.raw.once('close',close);
+  if(request.raw.aborted||reply.raw.destroyed)close();
+  try{
+   const owner=options.actor(request),id=(request.params as {requestId:string}).requestId;
+   if(!uuid(id)||Object.keys(request.query as object).length)throw Error('standalone_terminal_input_invalid');
+   return await service.inventory(owner,id,abort.signal);
+  }catch(error){const result=failure(error);return reply.code(result.status).send({error:{code:result.code}});}
+  finally{request.raw.off('aborted',close);reply.raw.off('close',close);abort.abort();}
+ });
  for(const control of [false,true])app.post(path+(control?'/:requestId/control':''),{config:{terminalStreamCommand:true},bodyLimit:32*1024},async(request,reply)=>{
   reply.header('cache-control','private, no-store');
   const abort=new AbortController(),close=()=>abort.abort();request.raw.once('aborted',close);reply.raw.once('close',close);
