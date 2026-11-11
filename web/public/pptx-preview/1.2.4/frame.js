@@ -12,6 +12,32 @@ let thumbnailOpen=false,thumbnailPage=0,thumbnailGeneration=0,thumbnailHandles=[
 let viewer,token,started=false,closed=false,busy=false,rendering=false,partial=false,chain=Promise.resolve(),matches=[],matchIndex=0,highlights=[],highlightGeneration=0,needsHighlights=false,searchGeneration=0,searchTimer;
 let searchBatch=0,searchStarts=[{slideIndex:0,entryIndex:0,offset:0}],hasNextSearchBatch=false;
 const report=(message,transfer=[])=>{if(!closed)parent.postMessage({protocol:1,token,...message},parentOrigin,transfer);};
+let viewEnabled=false,viewTimer,restoreScroll,viewGeneration=0;
+const bounded=value=>Math.max(0,Math.min(33554432,value));
+const validView=view=>view&&Object.keys(view).sort().join(',')==='kind,left,pageLeft,pageTop,protocol,slide,thumbnailPage,thumbnails,top,zoom'&&view.protocol===1&&view.kind==='pptx'
+ &&Number.isSafeInteger(view.slide)&&view.slide>=1&&view.slide<=50000&&typeof view.zoom==='number'&&Number.isFinite(view.zoom)&&view.zoom>=25&&view.zoom<=300
+ &&typeof view.thumbnails==='boolean'&&Number.isSafeInteger(view.thumbnailPage)&&view.thumbnailPage>=0&&view.thumbnailPage<=12499
+ &&['pageTop','pageLeft','top','left'].every(key=>typeof view[key]==='number'&&Number.isFinite(view[key])&&view[key]>=0&&view[key]<=33554432);
+const reportView=()=>{
+ clearTimeout(viewTimer);if(!viewEnabled||closed||!viewer||busy||rendering)return;
+ if(restoreScroll){const view=restoreScroll;restoreScroll=undefined;content.scrollTo({top:view.top,left:view.left});window.scrollTo({top:view.pageTop,left:view.pageLeft});}
+ report({type:'jot-pptx-view',view:{protocol:1,kind:'pptx',slide:viewer.currentSlideIndex+1,zoom:viewer.zoomPercent,thumbnails:thumbnailOpen,thumbnailPage,
+  pageTop:bounded(window.scrollY),pageLeft:bounded(window.scrollX),top:bounded(content.scrollTop),left:bounded(content.scrollLeft)}});
+};
+const scheduleView=()=>{clearTimeout(viewTimer);if(viewEnabled)viewTimer=setTimeout(reportView,160);};
+window.addEventListener('scroll',scheduleView,true);window.addEventListener('blur',reportView);
+const cancelViewRestore=event=>{if(event.isTrusted){viewGeneration++;restoreScroll=undefined;}};
+for(const type of ['pointerdown','wheel','keydown'])window.addEventListener(type,cancelViewRestore,{capture:true,passive:true});
+const restoreView=view=>{
+ const generation=++viewGeneration;viewEnabled=true;restoreScroll=undefined;if(!validView(view)){reportView();return;}
+ run(async()=>{
+  if(generation!==viewGeneration)return;
+  await viewer.setZoom(view.zoom);if(closed||generation!==viewGeneration)return;await viewer.goToSlide(Math.min(view.slide,viewer.slideCount)-1);if(closed||generation!==viewGeneration)return;
+  thumbnailOpen=view.thumbnails;thumbnailPage=Math.min(view.thumbnailPage,Math.ceil(viewer.slideCount/4)-1);
+  if(thumbnailOpen)renderThumbnailPage(thumbnailPage);else clearThumbnails();
+  restoreScroll=view;
+ });
+};
 const reportWork=()=>{if(!closed)report({type:'jot-pptx-work',busy:busy||rendering});};
 const instance=crypto.randomUUID();
 const boot=()=>{if(!closed)parent.postMessage({type:'jot-pptx-boot',protocol:1,started,instance},parentOrigin);};
@@ -26,7 +52,7 @@ const clearHighlights=()=>{
  for(const handle of highlights)handle.dispose();
  highlights=[];viewer?.clearSearchHighlights();
 };
-const dispose=()=>{closed=true;searchGeneration++;searchStarts=[];controller.abort();clearTimeout(searchTimer);slideObserver?.disconnect();region?.dispose();clearThumbnails();clearHighlights();viewer?.destroy();viewer=undefined;matches=[];content.replaceChildren();};
+const dispose=()=>{clearTimeout(viewTimer);viewGeneration++;restoreScroll=undefined;window.removeEventListener('scroll',scheduleView,true);window.removeEventListener('blur',reportView);for(const type of ['pointerdown','wheel','keydown'])window.removeEventListener(type,cancelViewRestore,true);closed=true;searchGeneration++;searchStarts=[];controller.abort();clearTimeout(searchTimer);slideObserver?.disconnect();region?.dispose();clearThumbnails();clearHighlights();viewer?.destroy();viewer=undefined;matches=[];content.replaceChildren();};
 const fail=()=>{if(closed)return;report({type:'jot-pptx-error',code:'PPTX_RENDER_FAILED'});dispose();status.textContent='幻灯片视觉读取失败';};
 const controls=()=>{
  const ready=!!viewer&&!closed,working=busy||rendering;slide.disabled=!ready||working;query.disabled=!ready;
@@ -46,7 +72,7 @@ const controls=()=>{
   button.setAttribute('aria-current',ready&&Number(button.dataset.slideIndex)===viewer.currentSlideIndex?'page':'false');
  }
  if(ready){slide.value=String(viewer.currentSlideIndex+1);slide.max=String(viewer.slideCount);document.getElementById('count').textContent='/ '+viewer.slideCount;document.getElementById('zoom').textContent=viewer.zoomPercent+'%';}
- region?.controls();
+ region?.controls();scheduleView();
 };
 const run=action=>{
  chain=chain.then(async()=>{
@@ -217,12 +243,12 @@ document.addEventListener('keydown',event=>{
 });
 content.addEventListener('click',event=>{if(event.target instanceof Element&&event.target.closest('a'))event.preventDefault();},true);
 document.addEventListener('submit',event=>event.preventDefault(),true);
-addEventListener('pagehide',()=>{if(started&&!closed)report({type:'jot-pptx-closed',reason:'pagehide'});dispose();},{once:true});
+addEventListener('pagehide',()=>{reportView();if(started&&!closed)report({type:'jot-pptx-closed',reason:'pagehide'});dispose();},{once:true});
 addEventListener('message',async event=>{
  if(closed||event.source!==parent||event.origin!==parentOrigin||!event.data||typeof event.data!=='object'||Array.isArray(event.data))return;
  const value=event.data;
  if(value.type==='jot-pptx-probe'&&value.protocol===1&&Object.keys(value).length===2){boot();return;}
- if(started&&value.protocol===1&&value.token===token&&Object.keys(value).length===4){region?.command(value);return;}
+ if(started&&value.protocol===1&&value.token===token&&Object.keys(value).length===4){if(value.type==='jot-pptx-view-probe'&&viewer)restoreView(value.view);else region?.command(value);return;}
  if(started||value.type!=='jot-pptx-init'||value.protocol!==1||typeof value.token!=='string'||!/^[a-f0-9-]{36}$/.test(value.token)||Object.keys(value).length!==4
   ||!(value.bytes instanceof ArrayBuffer)||value.bytes.byteLength>32*1024*1024)return;
  started=true;token=value.token;status.textContent='正在读取原幻灯片…';

@@ -342,3 +342,5 @@ Native structured Office DOCX/PPTX text and XLSX saved-cell/range references reu
 Signed native Office openings also reuse the original isolated Word visual text, XLSX native cell-view2 and DOCX/PPTX/XLSX region PNG reference controllers. The viewer receives one private copy of the same verified native bytes; original window/origin/token, commit/focus, bounded matrix/PNG and upload recovery checks apply.
 
 Signed native PDF and retained Office-PDF openings reuse the original complete Jot/PilotDeck PDF controller, including virtual continuous pages, thumbnails, outline/search, fullscreen, source references and owner-scoped bounded view-state retention. Native state identities bind original member/opened-source and optional derived PDF metadata.
+
+Office viewer state adaptation uses the existing Word/PPTX/Univer position and zoom APIs and fixed-origin session protocol. The parent keeps32 bounded owner/source-specific states; quote focus takes priority over saved regular view state. Original third-party assets, upstream hashes and AGPL attribution remain in the individual SOURCES.json records.

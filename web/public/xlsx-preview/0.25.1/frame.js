@@ -14,6 +14,40 @@ let searchBatch=0,searchStarts=[{sheetIndex:0,rowIndex:0,columnIndex:0}],hasNext
 let token,started=false,closed=false,busy=false,univer,api,book,selectionListener,activeSheetListener,chain=Promise.resolve();
 let workbookData,matches=[],matchIndex=0,searchGeneration=0,searchTimer,zoomPercent=100,cellReferences,region;
 const report=(message,transfer=[])=>{if(!closed)parent.postMessage({protocol:1,token,...message},parentOrigin,transfer);};
+let viewEnabled=false,viewTimer,viewScrollListener,viewGeneration=0;
+const validView=view=>view&&Object.keys(view).sort().join(',')==='kind,protocol,scroll,sheetId,sheetName,zoom'&&view.protocol===1&&view.kind==='xlsx'
+ &&typeof view.sheetId==='string'&&view.sheetId.length>0&&view.sheetId.length<=192&&typeof view.sheetName==='string'&&view.sheetName.length>0&&view.sheetName.length<=512
+ &&typeof view.zoom==='number'&&Number.isFinite(view.zoom)&&view.zoom>=0.1&&view.zoom<=4&&view.scroll&&Object.keys(view.scroll).sort().join(',')==='offsetX,offsetY,sheetViewStartColumn,sheetViewStartRow'
+ &&Number.isSafeInteger(view.scroll.sheetViewStartRow)&&view.scroll.sheetViewStartRow>=-1048576&&view.scroll.sheetViewStartRow<=1048575
+ &&Number.isSafeInteger(view.scroll.sheetViewStartColumn)&&view.scroll.sheetViewStartColumn>=-16384&&view.scroll.sheetViewStartColumn<=16383
+ &&['offsetX','offsetY'].every(key=>typeof view.scroll[key]==='number'&&Number.isFinite(view.scroll[key])&&Math.abs(view.scroll[key])<=33554432);
+const reportView=()=>{
+ clearTimeout(viewTimer);if(!viewEnabled||closed||!book||busy)return;
+ const sheet=book.getActiveSheet(),scroll=sheet.getScrollState();
+ const view={protocol:1,kind:'xlsx',sheetId:sheet.getSheetId(),sheetName:sheet.getSheetName(),zoom:sheet.getZoom(),
+  scroll:{sheetViewStartRow:scroll.sheetViewStartRow,sheetViewStartColumn:scroll.sheetViewStartColumn,offsetX:scroll.offsetX,offsetY:scroll.offsetY}};
+ if(validView(view))report({type:'jot-xlsx-view',view});
+};
+const scheduleView=()=>{clearTimeout(viewTimer);if(viewEnabled)viewTimer=setTimeout(reportView,160);};
+const observeViewScroll=()=>{viewScrollListener?.dispose();viewScrollListener=book.getActiveSheet().onScroll(scheduleView);scheduleView();};
+window.addEventListener('blur',reportView);
+const cancelViewRestore=event=>{if(event.isTrusted){viewGeneration++;}};
+for(const type of ['pointerdown','wheel','keydown'])window.addEventListener(type,cancelViewRestore,{capture:true,passive:true});
+const restoreView=view=>{
+ const generation=++viewGeneration;viewEnabled=true;if(!validView(view)){reportView();return;}
+ run(async()=>{
+  try{
+   if(generation!==viewGeneration)return;
+   const sheet=book.getSheetBySheetId(view.sheetId);if(!sheet||sheet.getSheetName()!==view.sheetName)return;
+   book.setActiveSheet(sheet);
+   if(!await api.executeCommand('sheet.command.set-zoom-ratio',{unitId:book.getId(),subUnitId:view.sheetId,zoomRatio:view.zoom}))throw Error('VIEW_ZOOM_UNCONFIRMED');
+   if(closed||generation!==viewGeneration)return;
+   if(!await api.executeCommand('sheet.operation.set-scroll',{unitId:book.getId(),sheetId:view.sheetId,...view.scroll,duration:0}))throw Error('VIEW_SCROLL_UNCONFIRMED');
+   await document.fonts?.ready;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));if(closed||generation!==viewGeneration)return;
+   zoomPercent=sheet.getZoom()*100;zoom.value=String(zoomPercent);sheetSelect.value=sheet.getSheetId();updateCell(sheet);
+  }catch{if(!closed)status.textContent='工作表视图恢复未完成，请手动定位。';}
+ });
+};
 const instance=crypto.randomUUID();
 const boot=()=>{if(!closed)parent.postMessage({type:'jot-xlsx-boot',protocol:1,started,instance},parentOrigin);};
 const controls=()=>{
@@ -25,11 +59,11 @@ const controls=()=>{
  document.getElementById('match-previous').disabled=!ready||busy||!matches.length;
  document.getElementById('match-next').disabled=!ready||busy||!matches.length;
  cellReferences?.controls();
- region?.controls();
+ region?.controls();scheduleView();
 };
 const dispose=()=>{
  if(closed)return;
- closed=true;searchGeneration++;clearTimeout(searchTimer);matches=[];searchStarts=[];workbookData=undefined;
+ clearTimeout(viewTimer);viewGeneration++;viewScrollListener?.dispose();window.removeEventListener('blur',reportView);for(const type of ['pointerdown','wheel','keydown'])window.removeEventListener(type,cancelViewRestore,true);closed=true;searchGeneration++;clearTimeout(searchTimer);matches=[];searchStarts=[];workbookData=undefined;
  region?.dispose();cellReferences?.dispose();selectionListener?.dispose();activeSheetListener?.dispose();univer?.dispose();
  book=undefined;api=undefined;univer=undefined;content.replaceChildren();controls();
 };
@@ -147,14 +181,14 @@ zoom.addEventListener('change',()=>{
  if(Number.isFinite(value)&&value>=10&&value<=400){zoomPercent=value;run(()=>book.getActiveSheet().zoom(value/100));}
  else zoom.value=String(zoomPercent);
 });
-addEventListener('pagehide',()=>{if(started&&!closed)report({type:'jot-xlsx-closed',reason:'pagehide'});dispose();},{once:true});
+addEventListener('pagehide',()=>{reportView();if(started&&!closed)report({type:'jot-xlsx-closed',reason:'pagehide'});dispose();},{once:true});
 document.addEventListener('submit',event=>event.preventDefault(),true);
 document.addEventListener('click',event=>{if(event.target instanceof Element&&event.target.closest('a'))event.preventDefault();},true);
 addEventListener('message',async event=>{
  if(closed||event.source!==parent||event.origin!==parentOrigin||!event.data||typeof event.data!=='object'||Array.isArray(event.data))return;
  const value=event.data;
  if(value.type==='jot-xlsx-probe'&&value.protocol===1&&Object.keys(value).length===2){boot();return;}
- if(started&&value.protocol===1&&value.token===token&&Object.keys(value).length===4){cellReferences?.command(value);region?.command(value);return;}
+ if(started&&value.protocol===1&&value.token===token&&Object.keys(value).length===4){if(value.type==='jot-xlsx-view-probe'&&book)restoreView(value.view);else{cellReferences?.command(value);region?.command(value);}return;}
  if(started||value.type!=='jot-xlsx-init'||value.protocol!==1||typeof value.token!=='string'||!/^[a-f0-9-]{36}$/.test(value.token)||Object.keys(value).length!==4
   ||!(value.bytes instanceof ArrayBuffer)||value.bytes.byteLength>32*1024*1024)return;
  started=true;token=value.token;status.textContent='正在读取原生表格组件…';
@@ -195,11 +229,11 @@ addEventListener('message',async event=>{
    if(closed)return;
    cellReferences?.invalidate();const first=selections[0];if(first)updateCell(worksheet,first.startRow,first.startColumn);
   });
-  activeSheetListener=api.addEvent(api.Event.ActiveSheetChanged,({activeSheet})=>{if(!closed){cellReferences?.invalidate();region?.sheetChanged();sheetSelect.value=activeSheet.getSheetId();updateCell(activeSheet);}});
+  activeSheetListener=api.addEvent(api.Event.ActiveSheetChanged,({activeSheet})=>{if(!closed){cellReferences?.invalidate();region?.sheetChanged();observeViewScroll();sheetSelect.value=activeSheet.getSheetId();updateCell(activeSheet);}});
   cellReferences=createCellReferences({api,content,getBook:()=>book,isWorking:()=>busy,isRegionActive:()=>!!region?.active,report,run});
   region=createSpreadsheetRegion({api,content,getBook:()=>book,isWorking:()=>busy,report,run,
    onModeChange:()=>{cellReferences.invalidate();controls();},onViewRestored:ratio=>{zoomPercent=ratio*100;zoom.value=String(zoomPercent);}});
-  controls();status.textContent='原生工作簿已读取。'+data.warnings.map(warning=>warning.message).join(' ');
+  observeViewScroll();controls();status.textContent='原生工作簿已读取。'+data.warnings.map(warning=>warning.message).join(' ');
   report({type:'jot-xlsx-ready',info:{sheets:data.workbook.sheetOrder.length,warnings:data.warnings.length}});
  }catch{if(!closed)fail();}finally{value.bytes=null;}
 });

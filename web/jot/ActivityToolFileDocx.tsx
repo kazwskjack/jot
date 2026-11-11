@@ -1,3 +1,4 @@
+import OfficeFileViewState from './OfficeFileViewState';
 import React,{useContext,useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
 import {readFileVisualSourceBytes,readOfficeViewerUrl,type FileVisualSource} from './activity-file-preview-client';
@@ -151,6 +152,7 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
   {notice&&<p role="status">{notice}</p>}
   {state.phase!=='error'&&viewerUrl&&<iframe ref={frame} title="原固定版本Word视觉查看器" src={viewerUrl} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer"
    onLoad={event=>{loaded.current=event.currentTarget;notify.current(event.currentTarget);}}/>}
+  {state.phase==='ready'&&regionSession.current&&<OfficeFileViewState kind="docx" source={source} owner={owner} session={regionSession.current} focused={!!officeTextFocus||!!officeRegionFocus}/>}
   {state.phase==='ready'&&regionSession.current&&<OfficeFileRegionReference kind="docx" source={source} owner={owner} session={regionSession.current} focus={officeRegionFocus}/>}
   {proposal&&<section className="jot-docx-selection" aria-label="待确认的Word视觉文字引用"><blockquote>{proposal.reference.reference.selectedText}</blockquote><button type="button" disabled={disabled||committing} onPointerDown={event=>event.preventDefault()} onMouseDown={event=>event.preventDefault()} onClick={()=>commit.current()}>引用Word文字到当前对话</button></section>}
  </section>;

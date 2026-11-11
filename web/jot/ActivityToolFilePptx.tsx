@@ -1,3 +1,4 @@
+import OfficeFileViewState from './OfficeFileViewState';
 import React,{useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
 import {readOfficeViewerUrl,readFileVisualSourceBytes,type FileVisualSource} from './activity-file-preview-client';
@@ -55,6 +56,7 @@ function PptxAttempt({source,owner,identity,officeRegionFocus}:{source:FileVisua
  return <section className="jot-pptx-preview" aria-label="原幻灯片视觉内容">
   <p role={state.phase==='error'?'alert':'status'}>{state.working?'正在绘制或搜索幻灯片…':state.message} {(state.phase==='loading'||state.working)&&<button type="button" onClick={()=>cancel.current()}>取消并关闭视觉查看器</button>}</p>
   {state.phase!=='error'&&url&&<iframe ref={frame} src={url} title="原固定版本幻灯片视觉查看器" sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={event=>probe.current(event.currentTarget)}/>}
+  {state.phase==='ready'&&regionSession.current&&<OfficeFileViewState kind="pptx" source={source} owner={owner} session={regionSession.current} focused={!!officeRegionFocus}/>}
   {state.phase==='ready'&&regionSession.current&&<OfficeFileRegionReference kind="pptx" source={source} owner={owner} session={regionSession.current} focus={officeRegionFocus}/>}
  </section>;
 }

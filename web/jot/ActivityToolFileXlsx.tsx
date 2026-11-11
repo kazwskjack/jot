@@ -1,3 +1,4 @@
+import OfficeFileViewState from './OfficeFileViewState';
 import React,{useEffect,useRef,useState} from 'react';
 import {taskDraftScope} from './client';
 import {readOfficeViewerUrl,readFileVisualSourceBytes,type FileVisualSource} from './activity-file-preview-client';
@@ -56,6 +57,7 @@ function XlsxAttempt({source,owner,identity,officeFocus,officeRegionFocus}:{sour
  return <section className="jot-xlsx-preview" aria-label="原工作簿视觉内容">
   <p role={state.phase==='error'?'alert':'status'}>{state.working?'正在处理原生工作簿…':state.message} {(state.phase==='loading'||state.working)&&<button type="button" onClick={()=>cancel.current()}>取消并关闭视觉查看器</button>}</p>
   {state.phase!=='error'&&url&&<iframe ref={frame} src={url} title="原固定版本工作簿视觉查看器" sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={event=>probe.current(event.currentTarget)}/>}
+  {state.phase==='ready'&&cellSession.current&&<OfficeFileViewState kind="xlsx" source={source} owner={owner} session={cellSession.current} focused={!!officeFocus||!!officeRegionFocus}/>}
   {state.phase==='ready'&&cellSession.current&&<XlsxCellReferences source={source} owner={owner} session={cellSession.current} focus={officeFocus}/>}
   {state.phase==='ready'&&cellSession.current&&<OfficeFileRegionReference kind="xlsx" source={source} owner={owner} session={cellSession.current} focus={officeRegionFocus}/>}
  </section>;

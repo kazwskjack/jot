@@ -117,6 +117,23 @@ function findTextSearchMatches(text, query, limit) {
   if(event.source===window.parent&&event.origin===parentOrigin&&event.data?.type==='jot-docx-probe'&&event.data.protocol===1&&Object.keys(event.data).length===2)boot();
  });
  const report=(message,transfer=[])=>{if(!closed)window.parent.postMessage({protocol:1,token:sessionToken,...message},parentOrigin,transfer);};
+ let viewEnabled=false,viewRestoring=false,viewTimer,viewGeneration=0;
+ const bounded=value=>Math.max(0,Math.min(33554432,value));
+ const currentView=()=>({protocol:1,kind:'docx',zoom,outlinePage,pageTop:bounded(window.scrollY),pageLeft:bounded(window.scrollX),top:bounded(content.scrollTop),left:bounded(content.scrollLeft)});
+ const validView=view=>view&&Object.keys(view).sort().join(',')==='kind,left,outlinePage,pageLeft,pageTop,protocol,top,zoom'&&view.protocol===1&&view.kind==='docx'
+  &&typeof view.zoom==='number'&&Number.isFinite(view.zoom)&&view.zoom>=0.25&&view.zoom<=3&&Number.isSafeInteger(view.outlinePage)&&view.outlinePage>=0&&view.outlinePage<=50000
+  &&['pageTop','pageLeft','top','left'].every(key=>typeof view[key]==='number'&&Number.isFinite(view[key])&&view[key]>=0&&view[key]<=33554432);
+ const reportView=()=>{clearTimeout(viewTimer);if(viewEnabled&&!viewRestoring&&!closed&&visualView)report({type:'jot-docx-view',view:currentView()});};
+ const scheduleView=()=>{clearTimeout(viewTimer);if(viewEnabled&&!viewRestoring)viewTimer=setTimeout(reportView,160);};
+ window.addEventListener('scroll',scheduleView,true);window.addEventListener('blur',reportView);
+ const cancelViewRestore=event=>{if(event.isTrusted){viewGeneration++;viewRestoring=false;}};
+ for(const type of ['pointerdown','wheel','keydown'])window.addEventListener(type,cancelViewRestore,{capture:true,passive:true});
+ const restoreView=view=>{
+  const generation=++viewGeneration;viewEnabled=true;viewRestoring=false;
+  if(!validView(view)){reportView();return;}
+  viewRestoring=true;zoom=view.zoom;content.style.zoom=String(zoom);document.getElementById('zoom').textContent=Math.round(zoom*100)+'%';renderOutlinePage(view.outlinePage);
+  void Promise.resolve(document.fonts?.ready).then(()=>{if(closed||generation!==viewGeneration)return;requestAnimationFrame(()=>requestAnimationFrame(()=>{if(closed||generation!==viewGeneration)return;content.scrollTo({top:view.top,left:view.left});window.scrollTo({top:view.pageTop,left:view.pageLeft});viewRestoring=false;reportView();}));}).catch(()=>{if(!closed&&generation===viewGeneration){viewRestoring=false;status.textContent='Word视图恢复未完成，请手动定位。';reportView();}});
+ };
  // text_view 2 pins docx-preview 0.4.0 raw DOM text order. A renderer upgrade needs a new locator protocol.
  const indexVisualText=()=>{
   const walker=document.createTreeWalker(content,NodeFilter.SHOW_TEXT),parts=[],nodes=[];let length=0,node;
@@ -211,11 +228,12 @@ function findTextSearchMatches(text, query, limit) {
    else{proposal=undefined;report({type:'jot-docx-selection',selection:null});}
   }else if(value.type==='jot-docx-added'&&value.serial===proposal?.data.serial){
    proposal=undefined;window.getSelection()?.removeAllRanges();report({type:'jot-docx-selection',selection:null});
-  }else regionController?.command(value);
+  }else if(value.type==='jot-docx-view-probe'&&visualView)restoreView(value.view);
+  else regionController?.command(value);
  });
  const resize=delta=>{
   zoom=Math.min(3,Math.max(0.25,Math.round((zoom+delta)*100)/100));
-  content.style.zoom=String(zoom);document.getElementById('zoom').textContent=Math.round(zoom*100)+'%';
+  content.style.zoom=String(zoom);document.getElementById('zoom').textContent=Math.round(zoom*100)+'%';scheduleView();
  };
  document.getElementById('in').addEventListener('click',()=>resize(0.1));
  document.getElementById('out').addEventListener('click',()=>resize(-0.1));
@@ -320,7 +338,7 @@ function findTextSearchMatches(text, query, limit) {
   outlineInput.disabled=count===0;outlineInput.value=count?String(outlinePage+1):'0';outlineInput.max=String(Math.max(1,count));
   outlinePrevious.disabled=count===0||outlinePage===0;outlineNext.disabled=count===0||outlinePage+1>=count;
   document.getElementById('outline-pages').textContent=count?`第 ${outlinePage+1} / ${count} 页`:'0 / 0';
-  list.start=outlinePage*100+1;
+  list.start=outlinePage*100+1;scheduleView();
   for(const item of outlineItems.slice(outlinePage*100,(outlinePage+1)*100)){
    const row=document.createElement('li'),button=document.createElement('button');button.type='button';
    const label=document.createElement('span');label.className='jot-docx-outline-label';label.textContent=item.title;
@@ -348,6 +366,7 @@ function findTextSearchMatches(text, query, limit) {
   document.getElementById('outline-status').textContent=outlineItems.length?`识别到 ${outlineItems.length} 个标题，每页最多100项。`:'此文档没有可识别的标题。';
  };
  window.addEventListener('pagehide',()=>{
+  reportView();viewGeneration++;clearTimeout(viewTimer);window.removeEventListener('scroll',scheduleView,true);window.removeEventListener('blur',reportView);for(const type of ['pointerdown','wheel','keydown'])window.removeEventListener(type,cancelViewRestore,true);
   if(started)report({type:'jot-docx-closed',reason:'pagehide'});cancelSearch();closed=true;batchStarts=[];
   window.clearTimeout(searchTimer);window.clearTimeout(selectionTimer);clearHighlights();matches=[];clearOutline('目录已关闭');
   visualView=undefined;proposal=undefined;focusRange=undefined;regionController=undefined;content.replaceChildren();styles.replaceChildren();
