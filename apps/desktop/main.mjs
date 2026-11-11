@@ -300,6 +300,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
    tray.setContextMenu(Menu.buildFromTemplate([{label:'显示 Jot',click:restoreWindow},{label:'任务通知设置',click:openNotificationSettings},{type:'separator'},{label:'退出',click:()=>app.quit()}]));
    tray.on('click',restoreWindow);
   }catch(error){report(new Error('system_tray_unavailable:'+String(error?.message??error)));}
+  const appearanceContext=()=>{if(shuttingDown||!appearanceStore)throw Error('desktop_appearance_unavailable');const frame=window.webContents.mainFrame,admittedDocument=appearanceDocument;return()=>appearanceDocument===admittedDocument&&mainWindow===window&&!window.isDestroyed()&&!window.webContents.isDestroyed?.()&&window.webContents.mainFrame===frame&&!(window.webContents.isLoadingMainFrame?.()??window.webContents.isLoading())&&!window.webContents.isCrashed?.()&&isDesktopAppUrl(window.webContents.getURL(),appOrigin);};
   removeIpcHandlers=registerDesktopIpcHandlers({
    ipcMain,appOrigin,getWindow:()=>mainWindow,stateStore,notificationRuntime,
    readPermission:permissionStatus,updateLifecycle,setMenuState:value=>{
@@ -307,9 +308,10 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
     if(reset)captionMenu?.close();commandMenu.setState(value);
     if(reset)linuxCaptionMenu?.invalidate();else linuxCaptionMenu?.refresh();
    },
+   appearanceImages:{save:bytes=>{const current=appearanceContext();return appearanceStore.saveImage(bytes,current);},read:id=>{const current=appearanceContext();return appearanceStore.readImage(id,current);},delete:id=>{const current=appearanceContext();return appearanceStore.deleteImage(id,current);}},
    readAppearance:()=>appearanceStore?.read()??null,writeAppearance:async request=>{
     if(shuttingDown||!appearanceStore)throw Error('desktop_appearance_unavailable');
-    const frame=window.webContents.mainFrame,admittedDocument=appearanceDocument,current=()=>appearanceDocument===admittedDocument&&mainWindow===window&&!window.isDestroyed()&&!window.webContents.isDestroyed?.()&&window.webContents.mainFrame===frame&&!(window.webContents.isLoadingMainFrame?.()??window.webContents.isLoading())&&!window.webContents.isCrashed?.()&&isDesktopAppUrl(window.webContents.getURL(),appOrigin);
+    const current=appearanceContext();
     const saved=await appearanceStore.write(request,current);applySavedAppearance();return saved;
    },
    linuxCaptionMenu,readDesktopAbout:()=>desktopHelp.read(),
@@ -379,7 +381,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   startupRestoredStartup=preparation?.restoredStartup??null;
   if(startupRestoredStartup&&process.env.JOT_DESKTOP_RESTORED_STARTUP_NONCE===restoredStartupNonce)
    delete process.env.JOT_DESKTOP_RESTORED_STARTUP_NONCE;
-  if(!appearanceStore)try{appearanceStore=await createDesktopAppearanceStore({userDataPath});}catch{report(Error('desktop_appearance_unavailable'));}
+  if(!appearanceStore)try{appearanceStore=await createDesktopAppearanceStore({userDataPath,decodeImage:bytes=>nativeImage.createFromBuffer(bytes).getSize()});}catch{report(Error('desktop_appearance_unavailable'));}
   return true;
  }});
  app.on('second-instance',restoreWindow);

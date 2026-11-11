@@ -4,7 +4,7 @@ import {assertTrustedDesktopSender,parseDesktopCommand,parseDesktopNotificationR
 const operationIdPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const updatePhases=new Set(['available','downloading','downloaded','verified','staged','awaiting-activation','activating','active','cancelled','failed','unknown']);
 
-export function registerDesktopIpcHandlers({ipcMain,appOrigin,getWindow,stateStore,notificationRuntime,readPermission,selectFile,updateLifecycle=null,setMenuState=null,showCaptionMenu=null,closeCaptionMenu=null,readWindowChrome=null,setWindowTheme=null,setWindowAppearance=null,linuxCaptionMenu=null,readDesktopAbout=null,readAppearance=null,writeAppearance=null}={}){
+export function registerDesktopIpcHandlers({ipcMain,appOrigin,getWindow,stateStore,notificationRuntime,readPermission,selectFile,updateLifecycle=null,setMenuState=null,showCaptionMenu=null,closeCaptionMenu=null,readWindowChrome=null,setWindowTheme=null,setWindowAppearance=null,linuxCaptionMenu=null,readDesktopAbout=null,readAppearance=null,writeAppearance=null,appearanceImages=null}={}){
  if(typeof readAppearance==='function'&&(typeof ipcMain?.on!=='function'||typeof ipcMain?.removeListener!=='function'))throw Error('desktop_ipc_configuration_invalid');
  if(!ipcMain||typeof ipcMain.handle!=='function'||typeof ipcMain.removeHandler!=='function'||typeof getWindow!=='function'||
   !stateStore||typeof stateStore.read!=='function'||typeof stateStore.write!=='function'||!notificationRuntime||
@@ -17,6 +17,9 @@ export function registerDesktopIpcHandlers({ipcMain,appOrigin,getWindow,stateSto
  };
  const appearanceRead=(event,payload)=>{try{trusted(event);parseDesktopCommand('appearance.read',payload);event.returnValue=readAppearance();}catch{event.returnValue=null;}};
  const routes=new Map([
+  ['appearance.image.save',async(_event,payload)=>{if(!appearanceImages)throw Error('desktop_appearance_image_unavailable');return appearanceImages.save(payload);}],
+  ['appearance.image.read',async(_event,payload)=>{if(!appearanceImages)throw Error('desktop_appearance_image_unavailable');return appearanceImages.read(payload.id);}],
+  ['appearance.image.delete',async(_event,payload)=>{if(!appearanceImages)throw Error('desktop_appearance_image_unavailable');return appearanceImages.delete(payload.id);}],
   ['appearance.write',async(_event,payload)=>{if(typeof writeAppearance!=='function')throw Error('desktop_appearance_unavailable');return writeAppearance(payload);}],
   ['desktop.about.read',async()=>{if(typeof readDesktopAbout!=='function')throw Error('desktop_about_unavailable');return readDesktopAbout();}],
   ['menu.caption.items',async(_event,payload)=>{if(!linuxCaptionMenu)throw Error('desktop_caption_unavailable');return linuxCaptionMenu.read(payload);}],
