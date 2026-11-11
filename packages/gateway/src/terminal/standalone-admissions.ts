@@ -35,6 +35,24 @@ export function prepareStandaloneTerminalAdmission(db:DatabaseSync,input:{owner_
 export function readStandaloneTerminalAdmission(db:DatabaseSync,owner:string,request:string){
  return withReadTransaction(db,()=>{const row=source(db,owner,request);return row?view(row):null;});
 }
+export type StandaloneTerminalAdmissionCatalog={protocol:1;items:StandaloneTerminalAdmission[];before_request_id:string|null;next_before_request_id:string|null;execution_authorized:false};
+/** Original owned/configured scope, newest first with a stable timestamp/request keyset. */
+export function listStandaloneTerminalAdmissions(db:DatabaseSync,owner:string,workspaces:readonly string[],before:string|null):StandaloneTerminalAdmissionCatalog{
+ if(!id(owner)||before!==null&&!uuid(before)||!Array.isArray(workspaces)||workspaces.some(value=>typeof value!=='string'||!value.trim()||value.length>4096||value.includes('\0')))throw Error('standalone_terminal_input_invalid');
+ return withReadTransaction(db,()=>{
+  const allowed=JSON.stringify([...new Set(workspaces)]);
+  const boundary=before===null?null:db.prepare(`SELECT created_at FROM ga_standalone_terminal_admissions
+   WHERE owner_id=? AND request_id=? AND workspace_id IN (SELECT value FROM json_each(?))`).get(owner,before,allowed) as {created_at:string}|undefined;
+  if(before!==null&&!boundary)throw Error('standalone_terminal_catalog_cursor_invalid');
+  const rows=db.prepare('SELECT '+columns+` FROM ga_standalone_terminal_admissions
+   WHERE owner_id=? AND workspace_id IN (SELECT value FROM json_each(?))
+    AND (? IS NULL OR created_at<? OR (created_at=? AND request_id<?))
+   ORDER BY created_at DESC,request_id DESC LIMIT 51`).all(owner,allowed,boundary?.created_at??null,boundary?.created_at??null,boundary?.created_at??null,before) as Row[];
+  const items=rows.slice(0,50).map(view);
+  return{protocol:1,items,before_request_id:before,next_before_request_id:rows.length>50?items.at(-1)!.request_id:null,execution_authorized:false};
+ });
+}
+
 type Expected={owner_id:string;request_id:string;expected_version:number;expected_state_sha256:string;authority_sha256:string};
 function transition(db:DatabaseSync,input:Expected,next:State,nativeIdentity:string|null){
  if(!Number.isSafeInteger(input.expected_version)||input.expected_version<1||!hash(input.expected_state_sha256)||!hash(input.authority_sha256))throw Error('standalone_terminal_input_invalid');

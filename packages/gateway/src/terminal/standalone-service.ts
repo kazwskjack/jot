@@ -4,7 +4,7 @@ import type {TerminalAttachment,TerminalInputPacket} from './stream.js';
 import {validateTerminalInventory} from './inventory.js';
 import {validateTerminalOptions,validateTerminalCommand,validateTerminalReceipt,type TerminalCommand} from './control.js';
 import {reserveStandaloneTerminalCommand,readStandaloneTerminalCommandReceipt,settleStandaloneTerminalCommand} from './standalone-commands.ts';
-import {prepareStandaloneTerminalAdmission,readStandaloneTerminalAdmission,claimStandaloneTerminalAdmission,cancelStandaloneTerminalAdmission,
+import {listStandaloneTerminalAdmissions,prepareStandaloneTerminalAdmission,readStandaloneTerminalAdmission,claimStandaloneTerminalAdmission,cancelStandaloneTerminalAdmission,
  markStandaloneTerminalUnknown,confirmStandaloneTerminalAdmission,type StandaloneTerminalAdmission} from './standalone-admissions.ts';
 
 type Authority={protocol:1;owner_id:string;workspace_id:string;profile_id:string;authority_sha256:string;execution_authorized:false};
@@ -58,6 +58,7 @@ export class StandaloneTerminalAdmissions{
   this.workspaces=new Set(workspaces);
  }
  private scope(workspace:string){if(!this.workspaces.has(workspace))throw Error('standalone_terminal_workspace_forbidden');}
+ list(owner:string,before:string|null){return listStandaloneTerminalAdmissions(this.db,owner,[...this.workspaces],before);}
  read(owner:string,request:string){const row=readStandaloneTerminalAdmission(this.db,owner,request);if(row)this.scope(row.workspace_id);return row;}
  private current(owner:string,input:StandaloneTerminalExpected){
   const row=this.read(owner,input.request_id);

@@ -13,6 +13,19 @@ export function validateStandaloneTerminalAdmission(value,expected){
   ||(value.state==='ready'?!hash(value.native_identity_sha256):value.native_identity_sha256!==null))throw Error('standalone_terminal_receipt_invalid');
  return Object.freeze({...value});
 }
+export function validateStandaloneTerminalCatalog(value,before){
+ if(before!==null&&!uuid(before)||!object(value)||Object.keys(value).sort().join(',')!=='before_request_id,execution_authorized,items,next_before_request_id,protocol'
+  ||value.protocol!==1||value.execution_authorized!==false||value.before_request_id!==before||!Array.isArray(value.items)||value.items.length>50
+  ||value.next_before_request_id!==null&&!uuid(value.next_before_request_id))throw Error('standalone_terminal_catalog_invalid');
+ const items=value.items.map(item=>validateStandaloneTerminalAdmission(item,{request_id:item?.request_id,workspace_id:item?.workspace_id}));
+ for(let index=0;index<items.length;index++){
+  const item=items[index],previous=items[index-1],time=Date.parse(item.created_at);
+  if(!Number.isFinite(time)||new Date(time).toISOString()!==item.created_at||item.request_id===before||item.owner_id!==items[0].owner_id
+   ||previous&&(previous.created_at<item.created_at||previous.created_at===item.created_at&&previous.request_id<=item.request_id))throw Error('standalone_terminal_catalog_invalid');
+ }
+ if(new Set(items.map(item=>item.request_id)).size!==items.length||value.next_before_request_id!==null&&(items.length!==50||value.next_before_request_id!==items.at(-1)?.request_id))throw Error('standalone_terminal_catalog_invalid');
+ return Object.freeze({...value,items});
+}
 /** Only request identity is kept; native grants and Session creation remain server-owned. */
 export class StandaloneTerminalSessionStore{
  constructor(storage,scope){
@@ -31,6 +44,13 @@ export class StandaloneTerminalSessionStore{
   const items=value.items.map(item=>this.validate(item));
   if(new Set(items.map(item=>item.request_id)).size!==items.length)throw Error('standalone_terminal_storage_invalid');
   return items;
+ }
+ remove(input){
+  const item=this.validate(input),items=this.read(),prior=items.find(row=>row.request_id===item.request_id);
+  if(prior&&prior.workspace_id!==item.workspace_id)throw Error('terminal_storage_conflict');
+  if(!prior)return items;
+  const next=items.filter(row=>row.request_id!==item.request_id);
+  this.storage.setItem(this.key,JSON.stringify({version:1,items:next}));return next;
  }
  add(input){
   const item=this.validate(input),items=this.read(),prior=items.find(row=>row.request_id===item.request_id);

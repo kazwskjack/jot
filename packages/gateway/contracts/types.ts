@@ -883,3 +883,4 @@ export type TerminalSessionChoice=import('../src/terminal/session-catalog').Term
 export type TerminalSessionCatalog=import('../src/terminal/session-catalog').TerminalSessionCatalog;
 
 export type StandaloneTerminalAdmission=import('../src/terminal/standalone-admissions').StandaloneTerminalAdmission;
+export type StandaloneTerminalAdmissionCatalog=import('../src/terminal/standalone-admissions').StandaloneTerminalAdmissionCatalog;

@@ -26,6 +26,7 @@ export function installStandaloneTerminalAdmissions(db:DatabaseSync){
     OR (OLD.native_attempted_at IS NOT NULL AND NEW.native_attempted_at IS NOT OLD.native_attempted_at)
     OR OLD.receipt_json IS NOT NULL
    BEGIN SELECT RAISE(ABORT,'standalone_terminal_command_immutable'); END;
+  CREATE INDEX IF NOT EXISTS idx_ga_standalone_terminal_catalog ON ga_standalone_terminal_admissions(owner_id,created_at DESC,request_id DESC);
   CREATE INDEX IF NOT EXISTS idx_ga_standalone_terminal_owner ON ga_standalone_terminal_admissions(owner_id,workspace_id,request_id);
   CREATE TRIGGER IF NOT EXISTS ga_standalone_terminal_identity BEFORE UPDATE ON ga_standalone_terminal_admissions
   WHEN NEW.owner_id IS NOT OLD.owner_id OR NEW.request_id IS NOT OLD.request_id

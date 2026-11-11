@@ -13,6 +13,7 @@ const hash=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{
 function failure(error:unknown){
  const code=(error as Error)?.message;
  if(code==='unauthorized')return{status:401,code:'UNAUTHORIZED'};
+ if(code==='standalone_terminal_catalog_cursor_invalid')return{status:422,code:'STANDALONE_TERMINAL_CATALOG_CURSOR_INVALID'};
  if(code==='terminal_command_invalid')return{status:422,code:'TERMINAL_INPUT_INVALID'};
  if(code==='terminal_wait_ended_unknown')return{status:409,code:'TERMINAL_WAIT_ENDED_UNKNOWN'};
  if(code==='terminal_outcome_unknown')return{status:503,code:'TERMINAL_OUTCOME_UNKNOWN'};
@@ -52,6 +53,14 @@ export function registerStandaloneTerminalAdmissionRoutes(app:FastifyInstance,op
  });
  const service=new StandaloneTerminalAdmissions(options.db,options.workspaces,options.client),path='/v1/standalone-terminals/admissions';
  registerStandaloneTerminalStreamRoutes(app,{admissions:service,actor:options.actor,client:options.client});
+ app.get(path,async(request,reply)=>{
+  reply.header('cache-control','private, no-store');
+  try{
+   const owner=options.actor(request),query=request.query as Record<string,unknown>,before=query.before_request_id??null;
+   if(Object.keys(query).some(key=>key!=='before_request_id')||before!==null&&!uuid(before))throw Error('standalone_terminal_input_invalid');
+   return service.list(owner,before as string|null);
+  }catch(error){const result=failure(error);return reply.code(result.status).send({error:{code:result.code}});}
+ });
  app.get(path+'/:requestId',async(request,reply)=>{
   reply.header('cache-control','private, no-store');
   try{
