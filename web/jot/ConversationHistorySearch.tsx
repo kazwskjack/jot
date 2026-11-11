@@ -4,7 +4,7 @@ import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import React,{useEffect,useId,useMemo,useRef,useState,type RefObject} from 'react';
 import {request,taskDraftScope} from './client';
 import type {Message,MessagePage,Activity} from './types';
-import {activitySearchText,type ActivityReveal,type ActivityRun,type ToolActivity} from './activity-presentation';
+import {activityTodoSearchMatch,activitySearchText,type ActivityReveal,type ActivityRun,type ToolActivity} from './activity-presentation';
 import ToolResultSearch from './ToolResultSearch';
 import InteractionSearch from './InteractionSearch';
 import ArtifactTextSearch from './ArtifactTextSearch';
@@ -80,7 +80,7 @@ export default function ConversationHistorySearch(props:Props){
  const pageCallback=useRef(onHistoryLoaded),lastReveal=useRef('');
  pageCallback.current=onHistoryLoaded;
  const highlightName=`jot-chat-search-${useId().replace(/[^a-z0-9-]/gi,'')}`;
- const needle=query.trim();
+ const needle=query.trim(),scope=taskDraftScope();
  useEffect(()=>{if(open)onLoadActivityHistory();},[open,activityHistorySeq,onLoadActivityHistory]);
  useEffect(()=>{
   cursor.current=historyCursor;
@@ -144,10 +144,10 @@ export default function ConversationHistorySearch(props:Props){
  const results=useMemo(()=>{
   if(!needle)return [];
   const pattern=searchPattern(needle);
-  const sources:Array<{kind:'message'|'activity'|'content';id:string;text:string}>=[
+  const sources:Array<{kind:'message'|'activity'|'content';id:string;text:string;activity?:ToolActivity}>=[
    ...activities.filter((activity):activity is ToolActivity=>activity.kind!=='compaction')
     .sort((a,b)=>a.started_at.localeCompare(b.started_at)||a.activity_id.localeCompare(b.activity_id))
-    .map(activity=>({kind:'activity' as const,id:activity.activity_id,text:activitySearchText(activity,runs[activity.run_id])})),
+    .map(activity=>({kind:'activity' as const,id:activity.activity_id,text:activitySearchText(activity,runs[activity.run_id]),activity})),
    ...contentDocuments,
    ...messages.map(message=>({kind:'message' as const,id:message.message_id,
     text:message.blocks.filter(block=>block.kind==='text').map(block=>block.text).join('\n')})),
@@ -167,18 +167,19 @@ export default function ConversationHistorySearch(props:Props){
    const pattern=searchPattern(needle);
    let match:RegExpExecArray|null=null;
    for(let occurrence=0;occurrence<=remaining;occurrence++)match=pattern.exec(result.text);
-   if(match)return {source:result,occurrence:remaining,offset:match.index,length:match[0].length};
+   if(match)return {source:result,occurrence:remaining,offset:match.index,length:match[0].length,
+     todo:result.activity?activityTodoSearchMatch(result.activity,runs[result.activity.run_id],match.index,match[0].length):undefined};
   }
   return null;
- },[results,activeIndex,needle]);
+ },[results,activeIndex,needle,runs]);
 
  const activeKind=active?.source.kind,activeId=active?.source.id;
- const revealKey=active?JSON.stringify([highlightName,navigationVersion,activeKind,activeId,query,active.offset]):'';
+ const revealKey=active?JSON.stringify([highlightName,scope,navigationVersion,activeKind,activeId,query,active.offset]):'';
  useEffect(()=>{
   if(!open||!activeId)return;
-  if(activeKind==='activity')onRevealActivity({activityId:activeId,key:revealKey});
+  if(activeKind==='activity')onRevealActivity({activityId:activeId,key:revealKey,...(active?.todo?{todo:{...active.todo,scope}}:{})});
   else if(activeKind==='message'&&!loading)onReveal?.(activeId);
- },[open,activeKind,activeId,revealKey,loading,onReveal,onRevealActivity]);
+ },[open,activeKind,activeId,revealKey,loading,onReveal,onRevealActivity,active?.todo,scope]);
  useEffect(()=>{
   if(!open||!active)return;
   let frame:number|undefined,marked:HTMLElement|undefined;
@@ -188,21 +189,36 @@ export default function ConversationHistorySearch(props:Props){
   const refresh=()=>{
    frame=undefined;clear();
    const attribute=searchAttributes[active.source.kind],selector=`[${attribute}]`;
-   const element=Array.from(root.current?.querySelectorAll<HTMLElement>(selector)??[])
+   let element=Array.from(root.current?.querySelectorAll<HTMLElement>(selector)??[])
     .find(node=>{
      const scope=node.closest('[data-chat-search-scope]');
      return (!scope||scope===root.current)&&node.getAttribute(attribute)===active.source.id;
     });
    if(!element||element.dataset.chatSearchReady==='false'||!element.getClientRects().length)return;
-   const source=readSearchDocument(element,active.source.kind==='content'),pattern=searchPattern(needle);
-   let visibleMatch:RegExpExecArray|null=null;
-   for(let occurrence=0;occurrence<=active.occurrence;occurrence++){
-    visibleMatch=pattern.exec(source.text);
-    if(!visibleMatch)break;
+   let source:SearchDocument,visibleOffset:number|undefined,visibleLength=active.length;
+   if(active.todo){
+    const todo=active.todo,key=JSON.stringify([scope,todo.sourceKey]);
+    const target=Array.from(element.querySelectorAll<HTMLElement>('[data-chat-search-todo]')).find(node=>node.getAttribute('data-chat-search-todo')===key);
+    if(!target)return;
+    const rawStart=target.getAttribute('data-chat-search-start'),rawEnd=target.getAttribute('data-chat-search-end');
+    const start=Number(rawStart),end=Number(rawEnd);
+    if(rawStart===null||rawEnd===null||!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end>todo.text.length
+     ||start>todo.offset||end<todo.offset+todo.length)return;
+    source=readSearchDocument(target,true);
+    if(source.text!==todo.text.slice(start,end))return;
+    element=target;visibleOffset=todo.offset-start;visibleLength=todo.length;
+   }else{
+    source=readSearchDocument(element,active.source.kind==='content');const pattern=searchPattern(needle);
+    let visibleMatch:RegExpExecArray|null=null;
+    for(let occurrence=0;occurrence<=active.occurrence;occurrence++){
+     visibleMatch=pattern.exec(source.text);
+     if(!visibleMatch)break;
+    }
+    if(visibleMatch){visibleOffset=visibleMatch.index;visibleLength=visibleMatch[0].length;}
    }
    let range:Range|undefined;
-   if(visibleMatch){
-    const offset=visibleMatch.index,endOffset=offset+visibleMatch[0].length;
+   if(visibleOffset!==undefined){
+    const offset=visibleOffset,endOffset=offset+visibleLength;
     const start=source.nodes.find(entry=>entry.end>offset),end=source.nodes.find(entry=>entry.end>=endOffset);
     if(start&&end){
      range=document.createRange();
@@ -210,17 +226,18 @@ export default function ConversationHistorySearch(props:Props){
      range.setEnd(end.node,Math.max(0,Math.min(end.node.length,endOffset-end.start)));
     }
    }
+   const destination=element;
    if(range&&registry&&HighlightClass)registry.set(highlightName,new HighlightClass(range));
-   element.setAttribute('data-chat-search-active','true');marked=element;
+   destination.setAttribute('data-chat-search-active','true');marked=destination;
    const ready=active.source.kind!=='message'||(!loading&&revealedMessageId===active.source.id);
    if(ready&&lastReveal.current!==revealKey){
     lastReveal.current=revealKey;
     const targetRect=()=>{
      const rect=range?.getBoundingClientRect();
-     return rect&&(rect.width||rect.height)?rect:element.getBoundingClientRect();
+     return rect&&(rect.width||rect.height)?rect:destination.getBoundingClientRect();
     };
     const rangeNode=range?.startContainer;
-    let container:HTMLElement|null=rangeNode instanceof HTMLElement?rangeNode:rangeNode?.parentElement??element;
+    let container:HTMLElement|null=rangeNode instanceof HTMLElement?rangeNode:rangeNode?.parentElement??destination;
     while(container){
      if(container.scrollHeight>container.clientHeight&&/(auto|scroll)/.test(getComputedStyle(container).overflowY)){
       const bounds=container.getBoundingClientRect(),rect=targetRect();
@@ -235,10 +252,10 @@ export default function ConversationHistorySearch(props:Props){
   };
   const schedule=()=>{if(frame===undefined)frame=requestAnimationFrame(refresh);};
   const observer=new MutationObserver(schedule),container=root.current;
-  if(container)observer.observe(container,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['open','data-chat-search-ready']});
+  if(container)observer.observe(container,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['open','data-chat-search-ready','data-chat-search-todo','data-chat-search-start','data-chat-search-end']});
   schedule();
   return()=>{observer.disconnect();if(frame!==undefined)cancelAnimationFrame(frame);clear();};
- },[open,active,needle,root,highlightName,loading,renderedRevision,revealedMessageId,revealKey]);
+ },[open,active,needle,root,highlightName,loading,renderedRevision,revealedMessageId,revealKey,scope]);
 
  const changeQuery=(value:string)=>{setQuery(value);setIndex(0);setNavigationVersion(version=>version+1);};
  const close=()=>{setOpen(false);setDraft('');changeQuery('');lastReveal.current='';opener.current?.focus();};

@@ -1,6 +1,6 @@
 // Task/todo presentation adapted from PilotDeck 783499ff TodoListContent/TaskListContent.
 // Adapted portions retain AGPL-3.0; see packages/session-adapter/runtime-patches/PILOTDECK-AGPL-3.0.txt.
-export type ResultTask={title:string;id?:string;status?:string;marker?:'checked'|'unchecked';owner?:string;priority?:string;blockedBy?:string[];metadataUnconfirmed?:boolean};
+export type ResultTask={sourceRange?:{start:number;end:number};title:string;id?:string;status?:string;marker?:'checked'|'unchecked';owner?:string;priority?:string;blockedBy?:string[];metadataUnconfirmed?:boolean};
 export type ResultTasks={items:ResultTask[];unconfirmed:number};
 const object=(value:unknown)=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:undefined;
 function arrayTasks(values:unknown[],explicit:boolean):ResultTasks|undefined{
@@ -27,15 +27,17 @@ export function toolResultTasks(value:unknown):ResultTasks|undefined{
  if(typeof value!=='string')return structuredTasks(value);
  if(value.length>512*1024)return;
  const trimmed=value.trim();if(trimmed.startsWith('{')||trimmed.startsWith('['))try{const structured=structuredTasks(JSON.parse(trimmed));if(structured)return structured;}catch{}
- const items:ResultTask[]=[];
+ const items:ResultTask[]=[];let sourceOffset=0;
  for(const line of value.split(/\r?\n/)){
+  const sourceRange={start:sourceOffset,end:sourceOffset+line.length};
+  sourceOffset=sourceRange.end+(value.slice(sourceRange.end,sourceRange.end+2)==='\r\n'?2:1);
   const checkbox=/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/.exec(line);
-  if(checkbox){items.push({title:checkbox[2]!,marker:checkbox[1]===' '?'unchecked':'checked'});continue;}
+  if(checkbox){items.push({sourceRange,title:checkbox[2]!,marker:checkbox[1]===' '?'unchecked':'checked'});continue;}
   const task=/^(?:-\s*)?#([0-9]{1,64})\.?\s+(.+)$/.exec(line.trimStart());if(!task)continue;
   let title=task[2]!,status:string|undefined;
   if(title.startsWith('[')){const end=title.indexOf(']');if(end>1&&end<=65){status=title.slice(1,end);title=title.slice(end+1).trimStart();}}
   if(status===undefined){const suffix=/\(status:\s*([A-Za-z_]{1,64})\)\s*$/.exec(title);if(suffix){status=suffix[1];title=title.slice(0,suffix.index).trimEnd();}}
-  items.push({id:task[1]!,title,...(status!==undefined?{status}:{})});
+  items.push({sourceRange,id:task[1]!,title,...(status!==undefined?{status}:{})});
  }
  return items.length?{items,unconfirmed:0}:undefined;
 }

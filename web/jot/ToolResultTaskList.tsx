@@ -1,10 +1,12 @@
-import React,{useMemo,useState} from 'react';
+import React,{useEffect,useMemo,useRef,useState} from 'react';
 import type {ResultTasks} from './tool-result-tasks';
 
 const labels:Record<string,string>={pending:'待处理',in_progress:'进行中',completed:'已完成',failed:'失败',cancelled:'已取消',blocked:'受阻',unknown:'未确认'};
 /** Tool-reported list data is not a Jot execution/goal receipt and provides no mutation controls. */
-export default function ToolResultTaskList({value,documentId,origin='result'}:{value:ResultTasks;documentId:string;origin?:'input'|'result'}){
+export default function ToolResultTaskList({value,documentId,origin='result',reveal}:{value:ResultTasks;documentId:string;origin?:'input'|'result';reveal?:{key:string;itemIndex:number}}){
  const [selected,setSelected]=useState(0),count=Math.max(1,Math.ceil(value.items.length/20)),page=Math.min(selected,count-1);
+ const appliedReveal=useRef('');
+ useEffect(()=>{if(reveal&&appliedReveal.current!==reveal.key&&Number.isSafeInteger(reveal.itemIndex)&&reveal.itemIndex>=0&&reveal.itemIndex<value.items.length){appliedReveal.current=reveal.key;setSelected(Math.floor(reveal.itemIndex/20));}},[reveal?.key,reveal?.itemIndex,value.items.length]);
  const summary=useMemo(()=>({completed:value.items.filter(item=>item.status==='completed').length,checked:value.items.filter(item=>item.marker==='checked').length}),[value]);
  return <section aria-label={origin==='input'?'原工具请求中的任务清单':'原工具结果中的任务清单'} data-chat-search-content={JSON.stringify([documentId,'tasks',page])}>
   <h6>{origin==='input'?'原工具请求中的任务清单':'原工具结果中的任务清单'}</h6>

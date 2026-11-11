@@ -5,7 +5,7 @@ import ConversationDisplayBoundary from './ConversationDisplayBoundary';
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import type {Activity} from './types';
 import type {NativeMemberTarget} from './native-member-execution';
-import {activityArtifactTargets,type ActivityArtifactTarget,activityDetailRows,activityDisplayStatus,activityForest,activityTreeProgress,type ActivityProgress,activityIsActive as running,visibleActivityRows,activityKindLabels,activityStatusLabels,type ActivityRow,type ToolActivity,type ActivityReveal,type ActivityRun} from './activity-presentation';
+import {activityTodoSourceKey,activityArtifactTargets,type ActivityArtifactTarget,activityDetailRows,activityDisplayStatus,activityForest,activityTreeProgress,type ActivityProgress,activityIsActive as running,visibleActivityRows,activityKindLabels,activityStatusLabels,type ActivityRow,type ToolActivity,type ActivityReveal,type ActivityRun} from './activity-presentation';
 import ActivityArtifactDetails from './ActivityArtifactDetails';
 import ActivityToolResult from './ActivityToolResult';
 import './activity-timeline.css';
@@ -76,7 +76,7 @@ function ActivityGroup({group,run,onSelectRun,availableRuns,reveal,onOpenMember,
      {row.issue&&<p role="status" data-chat-search-ignore>{row.issue}</p>}
      {isExpanded&&<>
       {status==='unknown'&&activity.status!=='unknown'&&<p role="status" data-chat-search-ignore>所属运行已结束，此步骤尚无终态回执。</p>}
-      {activity.kind==='subagent'&&activity.detail.todo_input&&<NativeTodoInputContent value={activity.detail.todo_input} sourceKey={JSON.stringify([activity.run_id,activity.activity_id,activity.tool_call_id])}/>}
+      {activity.kind==='subagent'&&activity.detail.todo_input&&<NativeTodoInputContent value={activity.detail.todo_input} sourceKey={activityTodoSourceKey(activity)} {...(reveal?.activityId===activity.activity_id?{reveal}:{})}/>}
       <dl>{activityDetailRows(activity).map((detail,index)=><React.Fragment key={index}><dt>{detail.label}</dt><dd style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{detail.value}</dd></React.Fragment>)}</dl>
       {typeof activity.detail.tool_name==='string'&&(activity.detail.tool_name==='jot_workspace'||/^jot_mcp_[a-z0-9_]{1,50}$/.test(activity.detail.tool_name)
        ||(activity.kind==='search'||activity.kind==='subagent')&&['glob','grep'].includes(activity.detail.tool_name)&&activity.detail.file_search)&&<button type="button" data-chat-search-ignore onClick={()=>onOpenToolResult(activity)}>查看工具结果正文</button>}

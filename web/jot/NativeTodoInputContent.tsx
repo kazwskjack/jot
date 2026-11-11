@@ -1,16 +1,22 @@
-import React,{useId,useMemo} from 'react';
+import React,{useEffect,useId,useMemo,useRef} from 'react';
 import type {NativeTodoInput} from './types';
 import {taskDraftScope} from './client';
 import {toolResultTasks} from './tool-result-tasks';
 import ToolResultTaskList from './ToolResultTaskList';
 import ToolResultText from './ToolResultText';
+import {nativeTodoSearchText,type ActivityReveal} from './activity-presentation';
 
-export default function NativeTodoInputContent({value,sourceKey}:{value:NativeTodoInput;sourceKey:string}){
- const instance=useId(),identity=JSON.stringify(['native-todo-input',taskDraftScope(),sourceKey,instance]);
+export default function NativeTodoInputContent({value,sourceKey,reveal}:{value:NativeTodoInput;sourceKey:string;reveal?:ActivityReveal}){
+ const instance=useId(),scope=taskDraftScope(),identity=JSON.stringify(['native-todo-input',scope,sourceKey,instance]);
+ const text=useMemo(()=>nativeTodoSearchText(value),[value]),plain=useRef<HTMLDetailsElement>(null),appliedReveal=useRef('');
+ const match=reveal?.todo,valid=!!match&&match.scope===scope&&match.sourceKey===sourceKey&&match.text===text
+  &&Number.isSafeInteger(match.offset)&&Number.isSafeInteger(match.length)&&match.offset>=0&&match.length>0&&match.offset+match.length<=text.length;
+ useEffect(()=>{if(valid&&reveal&&appliedReveal.current!==reveal.key&&plain.current){appliedReveal.current=reveal.key;plain.current.open=true;}},[valid,reveal?.key]);
  const tasks=useMemo(()=>value.format==='items'?toolResultTasks({todos:value.items}):value.format==='markdown'?toolResultTasks(value.text):undefined,[value]);
  if(value.format==='source_limit')return <p role="status" data-chat-search-ignore>原调用输入超过公开展示范围，当前未展开完整清单。</p>;
  return <section aria-label="原生工具公开清单输入">
-  {tasks?<ToolResultTaskList value={tasks} documentId={identity} origin="input"/>:value.format==='markdown'?<ToolResultText text={value.text} identity={identity+':text'}/>:null}
+  {tasks?<ToolResultTaskList value={tasks} documentId={identity} origin="input" {...(valid&&match?.itemIndex!==undefined?{reveal:{key:reveal!.key,itemIndex:match.itemIndex}}:{})}/>:value.format==='markdown'?<ToolResultText text={value.text} identity={identity+':text'}/>:null}
+  <details ref={plain}><summary>清单文字与原状态</summary><ToolResultText text={text} identity={identity+':source'} sourceKey={JSON.stringify([scope,sourceKey])} {...(valid&&match?{reveal:{key:reveal!.key,offset:match.offset,length:match.length}}:{})}/></details>
   <details><summary>公开清单输入数据</summary><ToolResultText text={JSON.stringify(value)} identity={identity+':data'}/></details>
  </section>;
 }

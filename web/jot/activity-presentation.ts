@@ -1,9 +1,11 @@
-import type {Activity,Run} from './types';
+import type {Activity,Run,NativeTodoInput} from './types';
+import {toolResultTasks} from './tool-result-tasks';
 import {nativeFileSearchRows} from '../../packages/gateway/src/events/native-file-search-text.js';
 
 export type ToolActivity=Exclude<Activity,{kind:'compaction'}>;
 export type ActivityRun={status:Run['status'];created_at?:string};
-export type ActivityReveal={activityId:string;key:string};
+export type NativeTodoSearchMatch={sourceKey:string;text:string;offset:number;length:number;itemIndex?:number};
+export type ActivityReveal={activityId:string;key:string;todo?:NativeTodoSearchMatch&{scope:string}};
 export type ActivityRow={activity:ToolActivity;depth:number;children:number;issue?:string};
 export const activityKindLabels:Record<ToolActivity['kind'],string>={
  search:'搜索',browse:'网页',file_read:'读取文件',file_edit:'修改文件',command:'命令',subagent:'子任务',crawl:'批量抓取',
@@ -188,10 +190,36 @@ export function visibleActivityRows(rows:ActivityRow[],expanded:Record<string,bo
  return visible;
 }
 
-export function activitySearchText(activity:ToolActivity,run?:ActivityRun){
+function activitySearchSummary(activity:ToolActivity,run?:ActivityRun){
  const status=activityDisplayStatus(activity,run);
  return [activityKindLabels[activity.kind],activity.title,activityStatusLabels[status]??activityStatusLabels.unknown,
-  ...activityDetailRows(activity).flatMap(detail=>[detail.label,detail.value]),
-  ...(activity.kind==='subagent'&&activity.detail.todo_input?.format==='items'?activity.detail.todo_input.items.flatMap(item=>[item.content,item.status])
-   :activity.kind==='subagent'&&activity.detail.todo_input?.format==='markdown'?[activity.detail.todo_input.text]:[])].join('\n');
+  ...activityDetailRows(activity).flatMap(detail=>[detail.label,detail.value])].join('\n');
+}
+export function nativeTodoSearchText(value:NativeTodoInput){
+ return value.format==='items'?value.items.flatMap(item=>[item.content,item.status]).join('\n'):value.format==='markdown'?value.text:'';
+}
+export function activityTodoSourceKey(activity:ToolActivity){return JSON.stringify([activity.run_id,activity.activity_id,activity.tool_call_id]);}
+export function activitySearchText(activity:ToolActivity,run?:ActivityRun){
+ const summary=activitySearchSummary(activity,run),todo=activity.kind==='subagent'?activity.detail.todo_input:undefined;
+ return todo&&todo.format!=='source_limit'&&(todo.format!=='items'||todo.items.length)?summary+'\n'+nativeTodoSearchText(todo):summary;
+}
+/** Offsets use the same public text as the index, never rendered labels or private arguments. */
+export function activityTodoSearchMatch(activity:ToolActivity,run:ActivityRun|undefined,offset:number,length:number):NativeTodoSearchMatch|undefined{
+ const todo=activity.kind==='subagent'?activity.detail.todo_input:undefined;
+ if(!todo||todo.format==='source_limit'||!Number.isSafeInteger(offset)||!Number.isSafeInteger(length)||length<1)return;
+ const text=nativeTodoSearchText(todo),start=offset-activitySearchSummary(activity,run).length-1;
+ if(start<0||start+length>text.length)return;
+ let itemIndex:number|undefined;
+ if(todo.format==='items'){
+  let position=0;
+  for(let index=0;index<todo.items.length;index++){
+   const item=todo.items[index]!,end=position+item.content.length+1+item.status.length;
+   if(start<=end){itemIndex=index;break;}position=end+1;
+  }
+ }else{
+  // shortcut: Non-row Markdown or embedded JSON uses exact source text; card navigation needs structural source ranges.
+  const index=toolResultTasks(todo.text)?.items.findIndex(item=>item.sourceRange&&start>=item.sourceRange.start&&start<item.sourceRange.end)??-1;
+  if(index>=0)itemIndex=index;
+ }
+ return {sourceKey:activityTodoSourceKey(activity),text,offset:start,length,...(itemIndex!==undefined?{itemIndex}:{})};
 }
