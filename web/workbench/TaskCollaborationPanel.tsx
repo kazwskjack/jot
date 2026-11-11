@@ -1,3 +1,5 @@
+import {useApplicationLanguage} from '../jot/application-language';
+import {taskUiMessage} from './task-ui-messages';
 import React,{useEffect,useRef,useState} from 'react';
 import type {Agent,Task,SaveTaskCollaboration} from './types';
 import {workbenchApi} from './client';
@@ -7,6 +9,8 @@ import {ApiError} from '../jot/client';
 import {eligibleCollaborationTeams,collaborationRequest} from './task-collaboration-ui.mjs';
 
 export default function TaskCollaborationPanel({task,agents}:{task:Task;agents:Agent[]}){
+ const language=useApplicationLanguage();
+ const uiMessage=(value:string)=>taskUiMessage(value,language);
  const policy=useResource(signal=>workbenchApi.taskCollaboration(task.task_id,signal),task.task_id);
  const teams=useResource(signal=>workbenchApi.teams(signal),task.task_id);
  const lead=agents.find(a=>a.agent_id===task.agent_id),available=eligibleCollaborationTeams(lead,teams.data?.items??[]);
@@ -26,17 +30,17 @@ export default function TaskCollaborationPanel({task,agents}:{task:Task;agents:A
    else setUncertain(!!pending.current);
   }finally{setBusy(false);}
  }
- return <section aria-label="主控自动派工授权"><h4>自动派工</h4><p className="wb-hint">允许主控从现有子任务中选择成员协作。成员共享工作区和任务额度，只交回材料，由主控核验并回答。</p>
- <ResourceStatus {...policy} onRetry={policy.reload}/><ResourceStatus {...teams} onRetry={teams.reload}/>
+ return <section lang={language} aria-label={uiMessage('主控自动派工授权')}><h4>{uiMessage('自动派工')}</h4><p className="wb-hint">{uiMessage('允许主控从现有子任务中选择成员协作。成员共享工作区和任务额度，只交回材料，由主控核验并回答。')}</p>
+ <ResourceStatus {...policy} error={uiMessage(policy.error)} onRetry={policy.reload}/><ResourceStatus {...teams} error={uiMessage(teams.error)} onRetry={teams.reload}/>
  <form className="wb-form" onSubmit={save}>
- <label className="wb-checkbox"><input type="checkbox" checked={enabled} disabled={disabled} onChange={e=>{setEnabled(e.target.checked);setSaved(false);}}/>允许主控自动派工</label>
- {enabled&&<><label>协作团队<select value={teamId} disabled={disabled} onChange={e=>{setTeamId(e.target.value);setMembers([]);}}><option value="">选择包含主控的团队</option>{available.map(t=><option key={t.team_id} value={t.team_id}>{t.name}</option>)}</select></label>
- {!available.length&&<p className="wb-hint">请先创建包含任务主控的同项目团队。</p>}
- <fieldset disabled={disabled}><legend>授权成员（最多两名）</legend>{choices.map(a=><label className="wb-checkbox" key={a.agent_id}><input type="checkbox" checked={members.includes(a.agent_id)} disabled={!members.includes(a.agent_id)&&members.length>=2} onChange={e=>setMembers(ids=>e.target.checked?[...ids,a.agent_id]:ids.filter(id=>id!==a.agent_id))}/>{a.name}</label>)}</fieldset>
- <label>每次任务派工上限<input type="number" min={1} max={20} step={1} value={maximum} disabled={disabled} onChange={e=>setMaximum(Number(e.target.value))}/></label>
- <label>同时执行成员<select value={active} disabled={disabled} onChange={e=>setActive(Number(e.target.value))}><option value={1}>一名，其他排队</option><option value={2}>最多两名</option></select></label></>}
- <p className="wb-hint">关闭再开启不会清零本次已用次数，也不会增加模型额度。团队或权限变化后需要重新授权。</p>
- {uncertain&&<p role="status">保存结果尚未确认；重试沿用原设置和请求。</p>}{error&&<p className="wb-error" role="alert">{error}</p>}{saved&&<p role="status">授权设置已保存</p>}
- <button className="wb-primary" disabled={busy||(!uncertain&&disabled)}>{busy?'正在保存…':uncertain?'重试原授权设置':'保存派工授权'}</button>
+ <label className="wb-checkbox"><input type="checkbox" checked={enabled} disabled={disabled} onChange={e=>{setEnabled(e.target.checked);setSaved(false);}}/>{uiMessage('允许主控自动派工')}</label>
+ {enabled&&<><label>{uiMessage('协作团队')}<select value={teamId} disabled={disabled} onChange={e=>{setTeamId(e.target.value);setMembers([]);}}><option value="">{uiMessage('选择包含主控的团队')}</option>{available.map(t=><option key={t.team_id} value={t.team_id}>{t.name}</option>)}</select></label>
+ {!available.length&&<p className="wb-hint">{uiMessage('请先创建包含任务主控的同项目团队。')}</p>}
+ <fieldset disabled={disabled}><legend>{uiMessage('授权成员（最多两名）')}</legend>{choices.map(a=><label className="wb-checkbox" key={a.agent_id}><input type="checkbox" checked={members.includes(a.agent_id)} disabled={!members.includes(a.agent_id)&&members.length>=2} onChange={e=>setMembers(ids=>e.target.checked?[...ids,a.agent_id]:ids.filter(id=>id!==a.agent_id))}/>{a.name}</label>)}</fieldset>
+ <label>{uiMessage('每次任务派工上限')}<input type="number" min={1} max={20} step={1} value={maximum} disabled={disabled} onChange={e=>setMaximum(Number(e.target.value))}/></label>
+ <label>{uiMessage('同时执行成员')}<select value={active} disabled={disabled} onChange={e=>setActive(Number(e.target.value))}><option value={1}>{uiMessage('一名，其他排队')}</option><option value={2}>{uiMessage('最多两名')}</option></select></label></>}
+ <p className="wb-hint">{uiMessage('关闭再开启不会清零本次已用次数，也不会增加模型额度。团队或权限变化后需要重新授权。')}</p>
+ {uncertain&&<p role="status">{uiMessage('保存结果尚未确认；重试沿用原设置和请求。')}</p>}{error&&<p className="wb-error" role="alert">{uiMessage(error)}</p>}{saved&&<p role="status">{uiMessage('授权设置已保存')}</p>}
+ <button className="wb-primary" disabled={busy||(!uncertain&&disabled)}>{uiMessage(busy?'正在保存…':uncertain?'重试原授权设置':'保存派工授权')}</button>
  </form></section>;
 }
