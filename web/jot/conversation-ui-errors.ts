@@ -1,6 +1,21 @@
 // Fixed owned conversation UI failures; unknown/raw content stays unchanged.
 import type {ApplicationLanguage} from '../../packages/desktop/src/application-language.mjs';
 const english:Record<string,string>={
+ "此文件类型的Office查看器尚未确认": "The Office viewer for this file type is unconfirmed.",
+ "此文件超过当前100 MiB结构化预览来源范围，可下载固定版本。": "This file exceeds the current 100 MiB structured-preview source limit. Download the pinned version.",
+ "原Office文件版本或解析结果尚未确认": "The original Office file version or parsed result is unconfirmed.",
+ "文档引擎正在处理另一个文件，请稍后重试。": "The document engine is processing another file. Try again later.",
+ "文档引擎暂不可用，或本次解析超时，请重试。": "The document engine is unavailable or parsing timed out. Retry.",
+ "原Office文件读取失败": "Reading the original Office file failed.",
+ "Office全屏暂不可用，请重试。": "Office fullscreen is unavailable. Retry.",
+ "Office读取已取消": "Office reading was cancelled.",
+ "单元格范围无效，请使用A1或A1:C10等范围。": "The cell range is invalid. Use a range such as A1 or A1:C10.",
+ "选区快照尚未完成核对": "The selection snapshot has not completed verification.",
+ "单元格引用尚未保存，请检查草稿状态或减少选中的内容。": "The cell reference has not been saved. Check draft status or select less content.",
+ "单元格引用已加入当前对话草稿。": "The cell reference was added to the current conversation draft.",
+ "单元格引用已加入当前对话草稿。 部分上下文尚未覆盖，未附对应上下文矩阵。": "The cell reference was added to the current conversation draft. Some context is not covered; the corresponding context matrix is omitted.",
+ "单元格引用已加入当前对话草稿。 部分原保存值尚未确认，相关选区未附原值矩阵。": "The cell reference was added to the current conversation draft. Some original saved values are unconfirmed; those selections omit the original-value matrix.",
+ "单元格引用已加入当前对话草稿。 部分原保存值尚未确认，相关选区未附原值矩阵。 部分上下文尚未覆盖，未附对应上下文矩阵。": "The cell reference was added to the current conversation draft. Some original saved values are unconfirmed; those selections omit the original-value matrix. Some context is not covered; the corresponding context matrix is omitted.",
  "文字选区尚未完成核对": "The text selection has not completed verification.",
  "文字引用尚未保存，请检查草稿状态或缩小选区。": "The text reference has not been saved. Check draft status or select a smaller region.",
  "截图引用尚未接收，请检查当前对话提示。": "The screenshot reference has not been accepted. Check the current conversation notice.",

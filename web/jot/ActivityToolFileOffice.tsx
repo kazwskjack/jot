@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import {officeViewIdentity,readOfficeView} from './office-file-view-state';
 import {useStructuredOfficeViewState} from './office-structured-view-state';
 import type {OfficePrintFocus} from './pdf-file-view-state';
@@ -29,10 +31,11 @@ type Page={document_protocol:1;conversation_id:string;run_id:string;activity_id:
 
 function storedPage(page:number|undefined,count:number){return Math.max(0,Math.min(page??0,Math.max(0,count-1)));}
 function Pager({page,count,onChange,label}:{page:number;count:number;onChange:(page:number)=>void;label:string}){
- return <nav aria-label={label} data-chat-search-ignore>
-  <button type="button" disabled={page===0} onClick={()=>onChange(page-1)}>上一页</button>
+ const language=useApplicationLanguage(),t=useApplicationText();
+ return <nav lang={language} aria-label={label} data-chat-search-ignore>
+  <button type="button" disabled={page===0} onClick={()=>onChange(page-1)}>{t("上一页","Previous Page")}</button>
   <span>{page+1} / {Math.max(1,count)}</span>
-  <button type="button" disabled={page+1>=count} onClick={()=>onChange(page+1)}>下一页</button>
+  <button type="button" disabled={page+1>=count} onClick={()=>onChange(page+1)}>{t("下一页","Next Page")}</button>
  </nav>;
 }
 function cellAddress(column:number,row:number){
@@ -64,6 +67,7 @@ function spreadsheetReferenceContext(sheet:Extract<OfficeDocumentPreview,{kind:'
  return {headers,surroundingValues,incomplete:headerRows>0&&!headers||!surroundingValues};
 }
 function SpreadsheetContent({value,source,viewingSource,officeFocus}:{value:Extract<OfficeDocumentPreview,{kind:'xlsx'}>;source?:FileReferenceIdentity|undefined;viewingSource?:FileViewingIdentity|undefined;officeFocus?:OfficeCellFocus}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const context=useContext(FileTextReferenceContext),owner=taskDraftScope();
  const root=useRef<HTMLElement>(null),jumped=useRef(false);
  const storageKey=viewingSource?officeViewIdentity(viewingSource,owner,'structured-xlsx'):undefined;
@@ -178,28 +182,28 @@ function SpreadsheetContent({value,source,viewingSource,officeFocus}:{value:Extr
  const pendingRange=useMemo(()=>{
   try{return cellRangeCoordinates(rangeDraft.trim().toUpperCase());}catch{return undefined;}
  },[rangeDraft]);
- return <section ref={root} aria-label="原工作表单元格">
-  {officeFocus&&<p role="status">{focused?.confirmed?(value.truncated||officeFocus.value.reference.cells.some(snapshot=>snapshot.truncated)?'已核对原引用保存的快照片段，当前解析或原选区存在截断。':'已核对原引用工作表、保存值、公式及附带的原值与上下文。'):'原引用选区尚未完成核对，请对照原引用快照。'}</p>}
-  <label>工作表 <select value={part} onChange={event=>{setPart(Number(event.target.value));setPage(0);setSelected([]);setNotice('');setRangeView(undefined);setRangeDraft('A1:J20');setRangeRow(0);setRangeColumn(0);anchor.current=null;drag.current=undefined;}}>
-   {value.sheets.map((sheet,index)=><option key={index} value={index}>{sheet.name||`工作表 ${index+1}`}</option>)}
+ return <section lang={language} ref={root} aria-label={t('原工作表单元格','Original Sheet Cells')}>
+  {officeFocus&&<p role="status">{focused?.confirmed?(value.truncated||officeFocus.value.reference.cells.some(snapshot=>snapshot.truncated)?t('已核对原引用保存的快照片段，当前解析或原选区存在截断。','Saved fragments of the original reference were verified. The current parse or original selection is truncated.'):t('已核对原引用工作表、保存值、公式及附带的原值与上下文。','The original sheet, saved values, formulas and included original values/context were verified.')):t('原引用选区尚未完成核对，请对照原引用快照。','The original selection has not completed verification. Compare with the original reference snapshot.')}</p>}
+  <label>{t('工作表','Sheet')} <select value={part} onChange={event=>{setPart(Number(event.target.value));setPage(0);setSelected([]);setNotice('');setRangeView(undefined);setRangeDraft('A1:J20');setRangeRow(0);setRangeColumn(0);anchor.current=null;drag.current=undefined;}}>
+   {value.sheets.map((sheet,index)=><option key={index} value={index}>{sheet.name||t(`工作表 ${index+1}`,`Sheet ${index+1}`)}</option>)}
   </select></label>
   <div data-chat-search-ignore>
-   <button type="button" disabled={disabled||!selected.length||!sheet?.name} onClick={()=>capture(selected)}>引用选中的 {selected.length} 个单元格</button>
-   <button type="button" disabled={!selected.length&&!rangeDraft.trim()} onClick={()=>{setSelected([]);setRangeDraft('');anchor.current=null;drag.current=undefined;}}>清空选择</button>
-   <span>每次最多选择100个单元格，可跨页选择。</span>
+   <button type="button" disabled={disabled||!selected.length||!sheet?.name} onClick={()=>capture(selected)}>{t(`引用选中的 ${selected.length} 个单元格`,`Reference ${selected.length} Selected Cells`)}</button>
+   <button type="button" disabled={!selected.length&&!rangeDraft.trim()} onClick={()=>{setSelected([]);setRangeDraft('');anchor.current=null;drag.current=undefined;}}>{t('清空选择','Clear Selection')}</button>
+   <span>{t('每次最多选择100个单元格，可跨页选择。','Select up to 100 cells at a time, across pages.')}</span>
   </div>
-  {notice&&<p role="status">{notice}</p>}
+  {notice&&<p role="status">{conversationUiError(notice,language)}</p>}
   <fieldset data-chat-search-ignore>
-   <legend>矩形选区</legend>
-   <label>单元格范围 <input value={rangeDraft} maxLength={32} onChange={event=>{setRangeDraft(event.target.value);anchor.current=null;drag.current=undefined;}} placeholder="A1:C10"/></label>
-   <button type="button" onClick={showRange}>查看范围</button>
-   <button type="button" disabled={disabled||!sheet?.name||!rangeDraft.trim()} onClick={()=>capture([rangeDraft.trim().toUpperCase()])}>引用矩形选区</button>
-   {rangeView&&<button type="button" onClick={()=>{setRangeView(undefined);drag.current=undefined;}}>返回单元格列表</button>}
-   <p>在选区表格中拖选，或用键盘选定起点后按住Shift选择终点。快照最多保留100行、50列，截断状态随引用保存。已确认的原保存值随选区附带，上方行最多2行，周边上下文最多20行、30列。</p>
+   <legend>{t('矩形选区','Rectangular Selection')}</legend>
+   <label>{t('单元格范围','Cell Range')} <input value={rangeDraft} maxLength={32} onChange={event=>{setRangeDraft(event.target.value);anchor.current=null;drag.current=undefined;}} placeholder="A1:C10"/></label>
+   <button type="button" onClick={showRange}>{t('查看范围','View Range')}</button>
+   <button type="button" disabled={disabled||!sheet?.name||!rangeDraft.trim()} onClick={()=>capture([rangeDraft.trim().toUpperCase()])}>{t('引用矩形选区','Reference Rectangular Selection')}</button>
+   {rangeView&&<button type="button" onClick={()=>{setRangeView(undefined);drag.current=undefined;}}>{t('返回单元格列表','Return to Cell List')}</button>}
+   <p>{t('在选区表格中拖选，或用键盘选定起点后按住Shift选择终点。快照最多保留100行、50列，截断状态随引用保存。已确认的原保存值随选区附带，上方行最多2行，周边上下文最多20行、30列。','Drag in the selection table, or choose the start with the keyboard and hold Shift to choose the end. Snapshots retain up to 100 rows and 50 columns, with truncation saved in the reference. Verified original values are included. Context includes up to 2 rows above and up to 20 rows and 30 columns around the selection.')}</p>
   </fieldset>
   {viewport?<>
-   <table className="jot-sheet-grid"><caption>{sheet?.name||'工作表'} · {rangeView}</caption>
-    <thead><tr><th scope="col">行</th>{Array.from({length:Math.min(10,viewport.columns-rangeColumn*10)},(_value,index)=>
+   <table className="jot-sheet-grid"><caption>{sheet?.name||t('工作表','Sheet')} · {rangeView}</caption>
+    <thead><tr><th scope="col">{t('行','Row')}</th>{Array.from({length:Math.min(10,viewport.columns-rangeColumn*10)},(_value,index)=>
      <th scope="col" key={index}>{cellAddress(viewport.left+rangeColumn*10+index,1).replace(/[0-9]+$/,'')}</th>)}</tr></thead>
     <tbody>{Array.from({length:Math.min(20,viewport.rows-rangeRow*20)},(_value,rowIndex)=>{
      const row=viewport.top+rangeRow*20+rowIndex;
@@ -207,7 +211,7 @@ function SpreadsheetContent({value,source,viewingSource,officeFocus}:{value:Extr
       const column=viewport.left+rangeColumn*10+columnIndex,address=cellAddress(column,row),cell=sheet?.cells[address];
       const original=focused?.confirmed&&focused.index===part&&ranges.some(range=>column>=range.left&&column<=range.right&&row>=range.top&&row<=range.bottom);
       return <td key={address} data-office-reference-cell={original?address:undefined} style={original?{outline:'2px solid var(--accent)'}:undefined}>
-       <button type="button" className="jot-sheet-cell" aria-pressed={!!pendingRange&&column>=pendingRange.left&&column<=pendingRange.right&&row>=pendingRange.top&&row<=pendingRange.bottom} aria-label={`${address} ${cell?.value.slice(0,80)??(value.truncated?'尚未覆盖':'空单元格')}`}
+       <button type="button" className="jot-sheet-cell" aria-pressed={!!pendingRange&&column>=pendingRange.left&&column<=pendingRange.right&&row>=pendingRange.top&&row<=pendingRange.bottom} aria-label={`${address} ${cell?.value.slice(0,80)??(value.truncated?t('尚未覆盖','Not Covered Yet'):t('空单元格','Empty Cell'))}`}
         onPointerDown={event=>{if(event.button!==0||!event.isPrimary)return;event.preventDefault();event.currentTarget.focus();drag.current=event.pointerId;chooseCell(row,column,event.shiftKey);}}
         onPointerEnter={event=>{if(drag.current===event.pointerId&&event.buttons===1)chooseCell(row,column,true);}}
         onKeyDown={event=>{
@@ -215,22 +219,22 @@ function SpreadsheetContent({value,source,viewingSource,officeFocus}:{value:Extr
          if(event.key==='Enter'||event.key===' '){event.preventDefault();chooseCell(row,column,event.shiftKey);}
         }}
         onClick={event=>{if(event.detail===0)chooseCell(row,column,event.shiftKey);}}>
-        <span>{address}</span><pre>{cell?.value??(value.truncated?'尚未覆盖':'')}</pre>{cell?.formula&&<code>={cell.formula}</code>}
+        <span>{address}</span><pre>{cell?.value??(value.truncated?t('尚未覆盖','Not Covered Yet'):'')}</pre>{cell?.formula&&<code>={cell.formula}</code>}
        </button>
       </td>;
      })}</tr>;
     })}</tbody>
    </table>
-   <Pager page={rangeRow} count={Math.ceil(viewport.rows/20)} onChange={page=>{setRangeRow(page);drag.current=undefined;}} label="矩形选区行翻页"/>
-   <Pager page={rangeColumn} count={Math.ceil(viewport.columns/10)} onChange={page=>{setRangeColumn(page);drag.current=undefined;}} label="矩形选区列翻页"/>
+   <Pager page={rangeRow} count={Math.ceil(viewport.rows/20)} onChange={page=>{setRangeRow(page);drag.current=undefined;}} label={t('矩形选区行翻页','Selection Row Pages')}/>
+   <Pager page={rangeColumn} count={Math.ceil(viewport.columns/10)} onChange={page=>{setRangeColumn(page);drag.current=undefined;}} label={t('矩形选区列翻页','Selection Column Pages')}/>
   </>:<>
-  <table><caption>{sheet?.name||'工作表'} · 单元格与保存的公式</caption>
-   <thead><tr><th scope="col">引用</th><th scope="col">单元格</th><th scope="col">保存值</th><th scope="col">原保存值类型与内容</th><th scope="col">公式</th></tr></thead>
+  <table><caption>{sheet?.name||t('工作表','Sheet')} · {t('单元格与保存的公式','Cells and Saved Formulas')}</caption>
+   <thead><tr><th scope="col">{t('引用','Reference')}</th><th scope="col">{t('单元格','Cell')}</th><th scope="col">{t('保存值','Saved Value')}</th><th scope="col">{t('原保存值类型与内容','Original Value Type and Content')}</th><th scope="col">{t('公式','Formula')}</th></tr></thead>
    <tbody>{cells.slice(page*50,(page+1)*50).map(([address,cell])=>{
     const position=cellRangeCoordinates(address);
     const original=focused?.confirmed&&focused.index===part&&ranges.some(range=>position.left>=range.left&&position.left<=range.right&&position.top>=range.top&&position.top<=range.bottom);
     return <tr key={address} data-office-reference-cell={original?address:undefined} style={original?{outline:'2px solid var(--accent)'}:undefined}>
-     <td data-chat-search-ignore><input type="checkbox" aria-label={`引用 ${sheet?.name??'工作表'} ${address}`} checked={selected.includes(address)}
+     <td data-chat-search-ignore><input type="checkbox" aria-label={t(`引用 ${sheet?.name??'工作表'} ${address}`,`Reference ${sheet?.name??'Sheet'} ${address}`)} checked={selected.includes(address)}
       disabled={disabled||selected.length>=100&&!selected.includes(address)} onChange={event=>{
        const checked=event.target.checked;
        setSelected(values=>{
@@ -239,12 +243,12 @@ function SpreadsheetContent({value,source,viewingSource,officeFocus}:{value:Extr
         return [...values,address];
        });
       }}/></td>
-     <th scope="row">{address}</th><td><pre>{cell.value}</pre></td><td><code>{Object.hasOwn(cell,'raw_value')?JSON.stringify(cell.raw_value):'尚未确认'}</code></td><td><code>{cell.formula===null?'':'='+cell.formula}</code></td>
+     <th scope="row">{address}</th><td><pre>{cell.value}</pre></td><td><code>{Object.hasOwn(cell,'raw_value')?JSON.stringify(cell.raw_value):t('尚未确认','Unconfirmed')}</code></td><td><code>{cell.formula===null?'':'='+cell.formula}</code></td>
     </tr>;
    })}</tbody>
   </table>
-  {!cells.length&&<p>此工作表没有可显示的单元格。</p>}
-  <Pager page={page} count={Math.ceil(cells.length/50)} onChange={setPage} label="工作表单元格翻页"/>
+  {!cells.length&&<p>{t('此工作表没有可显示的单元格。','This sheet has no displayable cells.')}</p>}
+  <Pager page={page} count={Math.ceil(cells.length/50)} onChange={setPage} label={t('工作表单元格翻页','Sheet Cell Pages')}/>
   </>}
  </section>;
 }
@@ -253,6 +257,7 @@ function OfficeText({text,match}:{text:string;match?:{start:number;end:number}})
  return <>{text.slice(0,match.start)}<mark data-office-reference-text>{text.slice(match.start,match.end)}</mark>{text.slice(match.end)}</>;
 }
 function OfficeDocumentContent({value,source,viewingSource,officeTextFocus}:{value:Exclude<OfficeDocumentPreview,{kind:'xlsx'}>;source?:FileReferenceIdentity|undefined;viewingSource?:FileViewingIdentity|undefined;officeTextFocus?:OfficeTextFocus}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const root=useRef<HTMLElement>(null),jumped=useRef(false),owner=taskDraftScope();
  const view=useMemo(()=>officeTextView(value),[value]);
  const focused=useMemo(()=>{
@@ -286,47 +291,49 @@ function OfficeDocumentContent({value,source,viewingSource,officeTextFocus}:{val
  },[focused,part,page,column,table,owner]);
  const match=(key:string)=>focused?.block.key===key?focused:undefined;
  const rows=value.kind==='docx'?value.tables[table]??[]:[],columns=rows.reduce((count,row)=>Math.max(count,row.length),0);
- return <section ref={root} aria-label="原Office文档文字">
+ return <section lang={language} ref={root} aria-label={t('原Office文档文字','Original Office Document Text')}>
   {source&&<OfficeTextReferenceAction key={`${part}-${page}-${table}-${column}`} root={root} source={source} view={view}/>}
-  {officeTextFocus&&<p role="status">{focused?(view.truncated||officeTextFocus.value.reference.truncated?'已核对原引用文字片段，原解析或引用存在截断。':'已核对并定位原引用文字。'):'原引用文字尚未与当前固定版本的解析结果核对，请对照原引用快照。'}</p>}
+  {officeTextFocus&&<p role="status">{focused?(view.truncated||officeTextFocus.value.reference.truncated?t('已核对原引用文字片段，原解析或引用存在截断。','The original quoted text fragment was verified. The original parse or reference is truncated.'):t('已核对并定位原引用文字。','The original quoted text was verified and located.')):t('原引用文字尚未与当前固定版本的解析结果核对，请对照原引用快照。','The original quoted text has not been verified against the current pinned-version parse. Compare with the original reference snapshot.')}</p>}
   {value.kind==='pptx'?<>
-   {value.slides.slice(page*10,(page+1)*10).map(slide=><section key={slide.number} aria-label={`幻灯片 ${slide.number}`}>
-    <h5>幻灯片 {slide.number}</h5><pre data-office-text-block={'slide-'+slide.number}><OfficeText text={slide.text} match={match('slide-'+slide.number)}/></pre>
+   {value.slides.slice(page*10,(page+1)*10).map(slide=><section key={slide.number} aria-label={t(`幻灯片 ${slide.number}`,`Slide ${slide.number}`)}>
+    <h5>{t(`幻灯片 ${slide.number}`,`Slide ${slide.number}`)}</h5><pre data-office-text-block={'slide-'+slide.number}><OfficeText text={slide.text} match={match('slide-'+slide.number)}/></pre>
    </section>)}
-   {!value.slides.length&&<p>此演示文稿没有可显示的幻灯片文字。</p>}
-   <Pager page={page} count={Math.ceil(value.slides.length/10)} onChange={setPage} label="幻灯片文字翻页"/>
+   {!value.slides.length&&<p>{t('此演示文稿没有可显示的幻灯片文字。','This presentation has no displayable slide text.')}</p>}
+   <Pager page={page} count={Math.ceil(value.slides.length/10)} onChange={setPage} label={t('幻灯片文字翻页','Slide Text Pages')}/>
   </>:<>
-   <nav aria-label="Word内容分组" data-chat-search-ignore><button type="button" disabled={part===0} onClick={()=>changePart(0)}>段落</button><button type="button" disabled={part===1||!value.tables.length} onClick={()=>changePart(1)}>表格</button></nav>
+   <nav aria-label={t('Word内容分组','Word Content Groups')} data-chat-search-ignore><button type="button" disabled={part===0} onClick={()=>changePart(0)}>{t('段落','Paragraphs')}</button><button type="button" disabled={part===1||!value.tables.length} onClick={()=>changePart(1)}>{t('表格','Tables')}</button></nav>
    {part===0?<>
     {value.paragraphs.slice(page*30,(page+1)*30).map((text,index)=>{
      const key='paragraph-'+(page*30+index);
      return <p key={key} data-office-text-block={key} style={{whiteSpace:'pre-wrap'}}><OfficeText text={text} match={match(key)}/></p>;
     })}
-    {!value.paragraphs.length&&<p>此文档没有可显示的段落。</p>}
-    <Pager page={page} count={Math.ceil(value.paragraphs.length/30)} onChange={setPage} label="Word段落翻页"/>
+    {!value.paragraphs.length&&<p>{t('此文档没有可显示的段落。','This document has no displayable paragraphs.')}</p>}
+    <Pager page={page} count={Math.ceil(value.paragraphs.length/30)} onChange={setPage} label={t('Word段落翻页','Word Paragraph Pages')}/>
    </>:<>
-    <label>表格 <select value={table} onChange={event=>{setTable(Number(event.target.value));setPage(0);setColumn(0);}}>{value.tables.map((_table,index)=><option key={index} value={index}>表格 {index+1}</option>)}</select></label>
-    <table><caption>表格 {table+1} · 列 {Math.min(column*20+1,columns)}–{Math.min((column+1)*20,columns)} / {columns}</caption><tbody>
+    <label>{t('表格','Table')} <select value={table} onChange={event=>{setTable(Number(event.target.value));setPage(0);setColumn(0);}}>{value.tables.map((_table,index)=><option key={index} value={index}>{t(`表格 ${index+1}`,`Table ${index+1}`)}</option>)}</select></label>
+    <table><caption>{t('表格','Table')} {table+1} · {t('列','Columns')} {Math.min(column*20+1,columns)}–{Math.min((column+1)*20,columns)} / {columns}</caption><tbody>
      {rows.slice(page*20,(page+1)*20).map((row,rowIndex)=><tr key={page*20+rowIndex}>{row.slice(column*20,(column+1)*20).map((text,columnIndex)=>{
       const key=`table-${table}-row-${page*20+rowIndex}-column-${column*20+columnIndex}`;
       return <td key={key}><pre data-office-text-block={key}><OfficeText text={text} match={match(key)}/></pre></td>;
      })}</tr>)}
     </tbody></table>
-    <Pager page={page} count={Math.ceil(rows.length/20)} onChange={setPage} label="Word表格行翻页"/>
-    <Pager page={column} count={Math.ceil(columns/20)} onChange={setColumn} label="Word表格列翻页"/>
+    <Pager page={page} count={Math.ceil(rows.length/20)} onChange={setPage} label={t('Word表格行翻页','Word Table Row Pages')}/>
+    <Pager page={column} count={Math.ceil(columns/20)} onChange={setColumn} label={t('Word表格列翻页','Word Table Column Pages')}/>
    </>}
   </>}
  </section>;
 }
 export function OfficeContent({value,source,officeFocus,officeTextFocus}:{value:OfficeDocumentPreview;source?:FileViewingIdentity|undefined;officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),identity=source?officeViewIdentity(source,owner,value.kind==='xlsx'?'structured-xlsx':value.kind==='docx'?'structured-docx':'structured-pptx'):'unbound-'+value.kind;
- const referenceSource=source?fileViewingReferenceSource(source):undefined,cellFocus=referenceSource?officeFocus:undefined,textFocus=referenceSource?officeTextFocus:undefined;
+ const referenceSource=useMemo(()=>source?fileViewingReferenceSource(source):undefined,[identity,source?.file.path,source?.native_source?.proof]),cellFocus=referenceSource?officeFocus:undefined,textFocus=referenceSource?officeTextFocus:undefined;
  const content=value.kind==='xlsx'?<SpreadsheetContent key={JSON.stringify([identity,cellFocus?.key])} value={value} source={referenceSource} viewingSource={source} officeFocus={cellFocus}/>
   :<OfficeDocumentContent key={JSON.stringify([identity,textFocus?.key])} value={value} source={referenceSource} viewingSource={source} officeTextFocus={textFocus}/>;
- return <>{source?.native_source&&!referenceSource&&<p>此打开内容没有引用凭据，可阅读和下载；文字与单元格引用暂不可用。</p>}{content}</>;
+ return <>{source?.native_source&&!referenceSource&&<p lang={language}>{t("此打开内容没有引用凭据，可阅读和下载；文字与单元格引用暂不可用。","This opened content has no reference credentials. You can read and download it; text and cell references are unavailable.")}</p>}{content}</>;
 }
 
 export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{officeFocus?:OfficeCellFocus;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus;printFocus?:OfficePrintFocus}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const {conversationId,runId,activityId,resultSha,file}=props,owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,runId,activityId,resultSha,file.path,file.version,file.sha256,file.size,props.officeFocus?.key,props.officeTextFocus?.key,props.officeRegionFocus?.key,props.printFocus?.key]);
  const root=useRef<HTMLElement>(null),active=useRef<AbortController|null>(null);
  const [state,setState]=useState<{identity:string;page?:Page;error?:string}>(),[revision,setRevision]=useState(0);
@@ -385,52 +392,52 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
   }catch{if(root.current===element&&taskDraftScope()===owner)setDisplayError('Office全屏暂不可用，请重试。');}
   finally{fullscreenRequest.current=false;if(root.current===element)setFullscreenPending(false);}
  };
- return <section ref={root} tabIndex={-1} className="jot-activity-content jot-office-preview" aria-label="原Office文件预览">
-  <h4>{file.path} · 版本 {file.version}</h4>
-  <nav aria-label="Office查看器工具栏" data-chat-search-ignore>
-   <button type="button" aria-pressed={fullscreen} disabled={fullscreenPending} onClick={()=>void toggleFullscreen()}>{fullscreen?'退出全屏':'全屏查看Office文件'}</button>
-   <button type="button" disabled={loading} onClick={refresh}>重新读取固定版本</button>
-   <button type="button" aria-pressed={!print} disabled={!native} onClick={()=>setPrintSource({identity,enabled:false})}>内置Office查看器</button>
-   <button type="button" aria-pressed={print} disabled={loading} onClick={()=>setPrintSource({identity,enabled:true})}>LibreOffice转换PDF</button>
+ return <section lang={language} ref={root} tabIndex={-1} className="jot-activity-content jot-office-preview" aria-label={t('原Office文件预览','Original Office File Preview')}>
+  <h4>{file.path} · {t('版本','Version')} {file.version}</h4>
+  <nav aria-label={t('Office查看器工具栏','Office Viewer Toolbar')} data-chat-search-ignore>
+   <button type="button" aria-pressed={fullscreen} disabled={fullscreenPending} onClick={()=>void toggleFullscreen()}>{fullscreen?t('退出全屏','Exit Fullscreen'):t('全屏查看Office文件','View Office File Fullscreen')}</button>
+   <button type="button" disabled={loading} onClick={refresh}>{t('重新读取固定版本','Read Pinned Version Again')}</button>
+   <button type="button" aria-pressed={!print} disabled={!native} onClick={()=>setPrintSource({identity,enabled:false})}>{t("内置Office查看器","Built-In Office Viewer")}</button>
+   <button type="button" aria-pressed={print} disabled={loading} onClick={()=>setPrintSource({identity,enabled:true})}>{t('LibreOffice转换PDF','LibreOffice Converted PDF')}</button>
   </nav>
-  {displayError&&<p role="alert">{displayError}</p>}
-  <OfficePreviewServiceStatus key={identity} owner={owner} onRendererChange={()=>{setPrintSource(undefined);refresh();}} onStatus={value=>setConfiguredService({identity,service:value.service})}/>
+  {displayError&&<p role="alert">{conversationUiError(displayError,language)}</p>}
+  <div lang="zh-CN"><OfficePreviewServiceStatus key={identity} owner={owner} onRendererChange={()=>{setPrintSource(undefined);refresh();}} onStatus={value=>setConfiguredService({identity,service:value.service})}/></div>
   <ActivityToolFileBytes {...props}/>
-  {!native&&!print&&<p role="status">此文件可通过LibreOffice转换PDF查看，请选择转换入口。</p>}
-  {print&&<OfficeFilePrintPreview key={identity+':print:'+revision} {...props} focus={props.printFocus}/>}
-  {loading&&<p role="status">正在核对原版本并解析Office内容… <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'Office读取已取消'});}}>取消读取</button></p>}
+  {!native&&!print&&<p role="status">{t('此文件可通过LibreOffice转换PDF查看，请选择转换入口。','This file can be viewed as a LibreOffice-converted PDF. Select the conversion view.')}</p>}
+  {print&&<div lang="zh-CN"><OfficeFilePrintPreview key={identity+':print:'+revision} {...props} focus={props.printFocus}/></div>}
+  {loading&&<p role="status">{t('正在核对原版本并解析Office内容…','Verifying the original version and parsing Office content…')} <button type="button" onClick={()=>{active.current?.abort();setState({identity,error:'Office读取已取消'});}}>{t('取消读取','Cancel Reading')}</button></p>}
   {!print&&current?.page&&<>
-   <p>原文件结构化内容 · {current.page.engine.name} {current.page.engine.version}</p>
-   {current.page.document.truncated&&<p role="status">结构化解析结果已截断，文字与单元格引用入口有未覆盖部分。可下载原固定版本查看完整文件。</p>}
+   <p>{t('原文件结构化内容','Original File Structured Content')} · {current.page.engine.name} {current.page.engine.version}</p>
+   {current.page.document.truncated&&<p role="status">{t('结构化解析结果已截断，文字与单元格引用入口有未覆盖部分。可下载原固定版本查看完整文件。','The structured result is truncated. Text and cell references have uncovered parts. Download the original pinned version to inspect the complete file.')}</p>}
    {current.page.document.kind==='xlsx'&&<>
-    {props.officeRegionFocus&&(!visual||current.page.xlsx_visual?.ready!==true)&&<p role="status">原工作表截图引用按原生视口状态定位，请打开原生工作簿核对。</p>}
-    {props.officeFocus?.value.cell_view!==2&&props.officeFocus&&visual&&<p role="status">原单元格引用按保存值与公式核对，可切换结构化单元格定位原引用。</p>}
-    {props.officeFocus?.value.cell_view===2&&(!visual||current.page.xlsx_visual?.ready!==true)&&<p role="status">原引用使用原生单元格视图，请打开原生工作簿核对原选区。</p>}
-    <nav aria-label="工作簿查看方式"><button type="button" aria-pressed={!visual} onClick={()=>setVisualState({identity,enabled:false})}>结构化单元格与引用</button>
-     <button type="button" aria-pressed={visual} disabled={current.page.xlsx_visual?.protocol!==1||current.page.xlsx_visual.ready!==true} onClick={()=>setVisualState({identity,enabled:true})}>原生工作簿视觉内容</button></nav>
-    {current.page.xlsx_visual?.ready!==true&&<p role="status">{current.page.xlsx_visual?.reason==='source_limit'?'原工作簿超过当前视觉渲染资源范围。':'原工作簿尚未通过视觉读取检查。'}</p>}
+    {props.officeRegionFocus&&(!visual||current.page.xlsx_visual?.ready!==true)&&<p role="status">{t('原工作表截图引用按原生视口状态定位，请打开原生工作簿核对。','The original sheet screenshot reference uses native viewport state. Open the native workbook to verify it.')}</p>}
+    {props.officeFocus?.value.cell_view!==2&&props.officeFocus&&visual&&<p role="status">{t('原单元格引用按保存值与公式核对，可切换结构化单元格定位原引用。','Original cell references are verified against saved values and formulas. Switch to structured cells to locate the original reference.')}</p>}
+    {props.officeFocus?.value.cell_view===2&&(!visual||current.page.xlsx_visual?.ready!==true)&&<p role="status">{t('原引用使用原生单元格视图，请打开原生工作簿核对原选区。','The original reference uses native cell view. Open the native workbook to verify the original selection.')}</p>}
+    <nav aria-label={t('工作簿查看方式','Workbook View Mode')}><button type="button" aria-pressed={!visual} onClick={()=>setVisualState({identity,enabled:false})}>{t('结构化单元格与引用','Structured Cells and References')}</button>
+     <button type="button" aria-pressed={visual} disabled={current.page.xlsx_visual?.protocol!==1||current.page.xlsx_visual.ready!==true} onClick={()=>setVisualState({identity,enabled:true})}>{t('原生工作簿视觉内容','Native Workbook Visual Content')}</button></nav>
+    {current.page.xlsx_visual?.ready!==true&&<p role="status">{current.page.xlsx_visual?.reason==='source_limit'?t('原工作簿超过当前视觉渲染资源范围。','The original workbook exceeds current visual rendering limits.'):t('原工作簿尚未通过视觉读取检查。','The original workbook has not passed visual read verification.')}</p>}
    </>}
    {current.page.document.kind==='docx'&&<>
-    {props.officeRegionFocus&&(!visual||current.page.docx_visual?.ready!==true)&&<p role="status">原Word区域引用按视觉分段定位，请打开Word视觉内容核对原区域。</p>}
-    {props.officeTextFocus?.value.text_view===2&&(!visual||current.page.docx_visual?.ready!==true)&&<p role="status">此原引用使用Word视觉文字定位。请打开Word视觉内容核对原位置；原引用快照仍可查看。</p>}
-    <nav aria-label="Word查看方式"><button type="button" aria-pressed={!visual} onClick={()=>setVisualState({identity,enabled:false})}>结构化文字与引用</button>
-     <button type="button" aria-pressed={visual} disabled={current.page.docx_visual?.protocol!==1||current.page.docx_visual.ready!==true} onClick={()=>setVisualState({identity,enabled:true})}>Word视觉内容</button></nav>
-    {current.page.docx_visual?.ready!==true&&<p role="status">{current.page.docx_visual?.reason==='source_limit'?'原文件超过当前视觉渲染资源范围。':'原文件尚未通过视觉读取检查。'}</p>}
+    {props.officeRegionFocus&&(!visual||current.page.docx_visual?.ready!==true)&&<p role="status">{t('原Word区域引用按视觉分段定位，请打开Word视觉内容核对原区域。','The original Word region reference uses visual sections. Open Word visual content to verify the original region.')}</p>}
+    {props.officeTextFocus?.value.text_view===2&&(!visual||current.page.docx_visual?.ready!==true)&&<p role="status">{t('此原引用使用Word视觉文字定位。请打开Word视觉内容核对原位置；原引用快照仍可查看。','This original reference uses Word visual text locations. Open Word visual content to verify its location. The original reference snapshot remains available.')}</p>}
+    <nav aria-label={t('Word查看方式','Word View Mode')}><button type="button" aria-pressed={!visual} onClick={()=>setVisualState({identity,enabled:false})}>{t('结构化文字与引用','Structured Text and References')}</button>
+     <button type="button" aria-pressed={visual} disabled={current.page.docx_visual?.protocol!==1||current.page.docx_visual.ready!==true} onClick={()=>setVisualState({identity,enabled:true})}>{t('Word视觉内容','Word Visual Content')}</button></nav>
+    {current.page.docx_visual?.ready!==true&&<p role="status">{current.page.docx_visual?.reason==='source_limit'?t('原文件超过当前视觉渲染资源范围。','The original file exceeds current visual rendering limits.'):t('原文件尚未通过视觉读取检查。','The original file has not passed visual read verification.')}</p>}
    </>}
    {current.page.document.kind==='pptx'&&<>
-    {props.officeRegionFocus&&(!visual||current.page.pptx_visual?.ready!==true)&&<p role="status">原幻灯片区域引用按视觉坐标定位，请打开幻灯片视觉内容核对原区域。</p>}
-    <nav aria-label="幻灯片查看方式"><button type="button" aria-pressed={!visual} onClick={()=>setVisualState({identity,enabled:false})}>结构化文字与引用</button>
-     <button type="button" aria-pressed={visual} disabled={current.page.pptx_visual?.protocol!==1||current.page.pptx_visual.ready!==true} onClick={()=>setVisualState({identity,enabled:true})}>幻灯片视觉内容</button></nav>
-    {current.page.pptx_visual?.ready!==true&&<p role="status">{current.page.pptx_visual?.reason==='source_limit'?'原幻灯片超过当前视觉渲染资源范围。':'原幻灯片尚未通过视觉读取检查。'}</p>}
+    {props.officeRegionFocus&&(!visual||current.page.pptx_visual?.ready!==true)&&<p role="status">{t('原幻灯片区域引用按视觉坐标定位，请打开幻灯片视觉内容核对原区域。','The original slide region reference uses visual coordinates. Open slide visual content to verify the original region.')}</p>}
+    <nav aria-label={t('幻灯片查看方式','Slide View Mode')}><button type="button" aria-pressed={!visual} onClick={()=>setVisualState({identity,enabled:false})}>{t('结构化文字与引用','Structured Text and References')}</button>
+     <button type="button" aria-pressed={visual} disabled={current.page.pptx_visual?.protocol!==1||current.page.pptx_visual.ready!==true} onClick={()=>setVisualState({identity,enabled:true})}>{t('幻灯片视觉内容','Slide Visual Content')}</button></nav>
+    {current.page.pptx_visual?.ready!==true&&<p role="status">{current.page.pptx_visual?.reason==='source_limit'?t('原幻灯片超过当前视觉渲染资源范围。','The original slides exceed current visual rendering limits.'):t('原幻灯片尚未通过视觉读取检查。','The original slides have not passed visual read verification.')}</p>}
    </>}
-   {visual&&current.page.document.kind==='xlsx'&&current.page.xlsx_visual?.protocol===1&&current.page.xlsx_visual.ready===true
+   <div lang="zh-CN">{visual&&current.page.document.kind==='xlsx'&&current.page.xlsx_visual?.protocol===1&&current.page.xlsx_visual.ready===true
     ?<ActivityToolFileXlsx key={identity+':'+revision} {...props}/>
     :visual&&current.page.document.kind==='docx'&&current.page.docx_visual?.protocol===1&&current.page.docx_visual.ready===true
     ?<ActivityToolFileDocx key={identity+':'+revision} {...props}/>
     :visual&&current.page.document.kind==='pptx'&&current.page.pptx_visual?.protocol===1&&current.page.pptx_visual.ready===true
     ?<ActivityToolFilePptx key={identity+':'+revision} {...props}/>
-    :<section className="jot-office-content" data-chat-search-content={JSON.stringify(['listed-office',identity])}><OfficeContent key={identity+':'+revision} value={current.page.document} source={props} officeFocus={props.officeFocus?.value.cell_view===2?undefined:props.officeFocus} officeTextFocus={props.officeTextFocus?.value.text_view===2?undefined:props.officeTextFocus}/></section>}
+    :<section className="jot-office-content" data-chat-search-content={JSON.stringify(['listed-office',identity])}><OfficeContent key={identity+':'+revision} value={current.page.document} source={props} officeFocus={props.officeFocus?.value.cell_view===2?undefined:props.officeFocus} officeTextFocus={props.officeTextFocus?.value.text_view===2?undefined:props.officeTextFocus}/></section>}</div>
   </>}
-  {!print&&current?.error&&<p role="alert">{current.error} <button type="button" onClick={refresh}>重试读取</button></p>}
+  {!print&&current?.error&&<p role="alert">{conversationUiError(current.error,language)} <button type="button" onClick={refresh}>{t('重试读取','Retry Reading')}</button></p>}
  </section>;
 }

@@ -67,7 +67,7 @@ export default function ActivityToolFile(props:ListedFilePreviewSource&{focus?:P
  const language=useApplicationLanguage(),t=useApplicationText();
  const identity=JSON.stringify([taskDraftScope(),props.conversationId,props.runId,props.activityId,props.resultSha,props.file,props.focus?.key,props.officeFocus?.key,props.officeTextFocus?.key,props.officeRegionFocus?.key,props.printFocus?.key]),[textView,setTextView]=useState<string>();
  const pdf=props.file.path.toLowerCase().endsWith('.pdf'),office=officePreviewFormat(props.file.path);
- if(office)return <ConversationDisplayBoundary key={identity} label={t('Office查看器','Office Viewer')}><Suspense fallback={<p lang={language} role="status">{t('正在载入Office查看器…','Loading Office viewer…')}</p>}><div lang="zh-CN"><ActivityToolFileOffice {...props}/></div></Suspense></ConversationDisplayBoundary>;
+ if(office)return <ConversationDisplayBoundary key={identity} label={t('Office查看器','Office Viewer')}><Suspense fallback={<p lang={language} role="status">{t('正在载入Office查看器…','Loading Office viewer…')}</p>}><div lang={language}><ActivityToolFileOffice {...props}/></div></Suspense></ConversationDisplayBoundary>;
  if(!pdf&&!listedFileImageType(props.file.path))return <ActivityToolFileText {...props}/>;
  return <>
   <nav lang={language} aria-label={t("原列表文件查看方式","Original List File View Mode")} data-chat-search-ignore>
