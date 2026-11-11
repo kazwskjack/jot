@@ -78,6 +78,8 @@ ipcRenderer.on('desktop:window-chrome',(_event,value)=>{const state=windowChrome
 const invoke=(channel,payload)=>ipcRenderer.invoke(channel,payload);
 const bridge=Object.freeze({
  platform:process.platform,
+ getAppearance:()=>ipcRenderer.sendSync('appearance.read'),
+ setAppearance:value=>invoke('appearance.write',value),
  getDesktopAbout:()=>invoke('desktop.about.read'),
  getWindowChrome:()=>invoke('window.chrome.read'),
  setWindowTheme:theme=>invoke('window.chrome.theme',{theme}),
@@ -129,7 +131,7 @@ function installWindowChrome(){
  const platform=process.platform;if(!['win32','linux','darwin'].includes(platform))return;
  const install=()=>{
   const root=document.documentElement;if(!root||!document.body||document.getElementById('jot-window-caption'))return;
-  let disposed=false,serial=0,active=null,savedFocus=null,fullscreen=false,lastRevision=0;
+  let disposed=false,serial=0,active=null,savedFocus=null,fullscreen=false,lastRevision=0,nativePalette=null;
   let desiredTheme=root.dataset.theme==='light'?'light':'dark';
   const systemTheme=window.matchMedia?.('(prefers-color-scheme: dark)');
   if(!root.hasAttribute('data-theme')){
@@ -140,6 +142,14 @@ function installWindowChrome(){
     if(raw&&raw.length<=128){try{const value=JSON.parse(raw);
      if(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')==='mode,version'&&value.version===1&&['system','dark','light'].includes(value.mode))mode=value.mode;
     }catch{}}
+   }catch{}
+   try{const saved=bridge.getAppearance();
+    if(saved?.protocol===1&&saved.stored===true&&['system','light','dark'].includes(saved.themeMode)){
+     mode=saved.themeMode;const light=saved.lightAppearance;
+     if(light?.version===2&&light.background&&typeof light.background==='object'&&!Array.isArray(light.background)){
+      const raw=JSON.stringify({...light,background:{...light.background,imageId:null}});if(raw.length<=4096)root.dataset.jotWindowAppearance=raw;
+     }
+    }
    }catch{}
    root.dataset.themeMode=mode;desiredTheme=mode==='system'?(systemTheme?.matches?'dark':'light'):mode;root.dataset.theme=desiredTheme;
   }
@@ -165,7 +175,7 @@ function installWindowChrome(){
   const paint=()=>{
    host.toggleAttribute('data-toolbar',platform==='darwin'&&root.hasAttribute('data-jot-desktop-toolbar'));
    host.toggleAttribute('data-integrated',platform==='darwin'&&root.hasAttribute('data-jot-desktop-integrated'));
-   let palette=chromePalette(desiredTheme);
+   let palette=!root.hasAttribute('data-jot-theme-ready')&&nativePalette?.theme===desiredTheme?nativePalette.palette:chromePalette(desiredTheme);
    if(desiredTheme==='light'&&root.hasAttribute('data-jot-light-appearance')){
     const css=getComputedStyle(root),custom={background:css.getPropertyValue('--jot-light-canvas').trim(),caption:css.getPropertyValue('--jot-light-sidebar').trim(),symbol:css.getPropertyValue('--jot-light-sidebar-ink').trim()};
     if(Object.values(custom).every(color=>/^#[a-f0-9]{6}$/.test(color)))palette=custom;
@@ -179,6 +189,7 @@ function installWindowChrome(){
   const captionEvent=value=>{if(!disposed)setActive(value.id);};captionMenuListeners.add(captionEvent);
   const applyState=value=>{
    const state=windowChromeState(value);if(disposed||!state||state.revision<lastRevision)return;lastRevision=state.revision;
+   if(!root.hasAttribute('data-jot-theme-ready'))nativePalette={theme:state.theme,palette:state.palette};
    fullscreen=state.fullscreen;root.toggleAttribute('data-jot-desktop-fullscreen',fullscreen);host.hidden=fullscreen;
    for(const button of buttons)button.hidden=!state.menus.includes(button.dataset.menu);
    // Theme belongs to the page preference. A late native reply cannot replace it.
@@ -279,7 +290,7 @@ function installWindowChrome(){
    if(sentAppearance===requested)return;sentAppearance=requested;
    void invoke(appearance?'window.chrome.appearance':'window.chrome.theme',payload).then(applyState).catch(()=>{if(sentAppearance===requested)sentAppearance=null;});
   };
-  const observer=new MutationObserver(syncTheme);observer.observe(root,{attributes:true,attributeFilter:['data-theme','data-theme-mode','data-jot-window-appearance','lang','data-jot-desktop-toolbar','data-jot-desktop-integrated']});
+  const observer=new MutationObserver(syncTheme);observer.observe(root,{attributes:true,attributeFilter:['data-theme','data-theme-mode','data-jot-theme-ready','data-jot-window-appearance','lang','data-jot-desktop-toolbar','data-jot-desktop-integrated']});
   window.addEventListener('keydown',keydown);paint();
   void invoke('window.chrome.read').then(value=>{applyState(value);syncTheme();}).catch(syncTheme);
   const dispose=()=>{

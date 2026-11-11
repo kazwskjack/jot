@@ -6,14 +6,14 @@ export function windowChromePalette(theme,lightAppearance){
  if(theme==='light'&&isCustomizedLightAppearance(value)){const c=deriveLightColors(value);return Object.freeze({background:c.background,caption:c.sidebar,symbol:c.sidebarInk});}
  return Object.freeze(theme==='light'?{background:'#faf9f6',caption:'#f0eee9',symbol:'#242731'}:{background:'#101217',caption:'#171a21',symbol:'#eef0f5'});
 }
-export function windowChromeOptions(platform=process.platform){
- const palette=windowChromePalette('dark');
+export function windowChromeOptions(platform=process.platform,theme='dark',lightAppearance){
+ const palette=windowChromePalette(theme,lightAppearance);
  if(platform==='darwin')return {backgroundColor:palette.background,titleBarStyle:'hiddenInset',trafficLightPosition:{x:16,y:18}};
  if(platform==='win32'||platform==='linux')return {backgroundColor:palette.background,titleBarStyle:'hidden',titleBarOverlay:{height:32,color:palette.caption,symbolColor:palette.symbol}};
  return {};
 }
-export function createDesktopWindowChrome({owner,getWindow,appOrigin,getMenus,platform=process.platform}){
- let theme='dark',lightAppearance=null,disposed=false,revision=0,lastSignature='';
+export function createDesktopWindowChrome({owner,getWindow,appOrigin,getMenus,platform=process.platform,initialTheme='dark',initialAppearance=null}){
+ let theme=initialTheme,lightAppearance=initialAppearance,disposed=false,revision=0,lastSignature='';
  const valid=()=>!disposed&&getWindow()===owner&&!owner.isDestroyed()&&!owner.webContents.isDestroyed?.();
  const read=()=>{
   if(!valid())throw Error('desktop_window_unavailable');

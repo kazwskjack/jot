@@ -1,3 +1,5 @@
+import {createDesktopAppearanceStore} from './appearance-storage.mjs';
+import {withoutMissingImage} from '../../packages/desktop/src/light-appearance.mjs';
 import {createDesktopDiagnosticLog} from './diagnostic-log.mjs';
 import {createDesktopHelp} from './desktop-help.mjs';
 import {createLinuxCaptionMenu} from './linux-caption-menu.mjs';
@@ -88,7 +90,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   write:async state=>{const saved=await saveDesktopNotificationState(statePath,state);deviceNotificationEnabled=saved.preferences.enabled;return saved;}
  };
  let appOrigin='',mainWindow=null,tray=null,removeIpcHandlers=null,quitConfirmed=false,shutdownPromise=null,shuttingDown=false,queuedTaskNavigation=null;
- let permissionRequestHandler=null,permissionCheckHandler=null,diagnostics=null;
+ let permissionRequestHandler=null,permissionCheckHandler=null,diagnostics=null,appearanceStore=null;
  const report=error=>{try{diagnostics?.record('desktop-error',{error});}catch{}console.error('[Jot desktop]',error);};
  const restoreWindow=()=>{
   if(!showWindow||!mainWindow||mainWindow.isDestroyed())return;
@@ -231,14 +233,18 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   });
   session.defaultSession.setPermissionRequestHandler(permissionRequestHandler);
   session.defaultSession.setPermissionCheckHandler(permissionCheckHandler);
+  const nativeTheme=electron.nativeTheme,persistedAppearance=appearanceStore?.read(),initialMode=persistedAppearance?.stored?persistedAppearance.themeMode:'system';
+  if(nativeTheme)nativeTheme.themeSource=initialMode;
+  const resolvedTheme=mode=>mode==='dark'||mode==='system'&&nativeTheme?.shouldUseDarkColors===true?'dark':'light';
+  const initialTheme=resolvedTheme(initialMode),initialAppearance=persistedAppearance?.stored?withoutMissingImage(persistedAppearance.lightAppearance,true):null;
   const window=new BrowserWindow({
-   width:1200,height:820,minWidth:880,minHeight:620,show:false,autoHideMenuBar:true,...windowChromeOptions(),
+   width:1200,height:820,minWidth:880,minHeight:620,show:false,autoHideMenuBar:true,...windowChromeOptions(process.platform,initialTheme,initialAppearance),
    webPreferences:desktopWebPreferences(paths.preloadPath)
   });
   mainWindow=window;
-  let commandMenu=null,captionMenu=null,windowChrome=null,linuxCaptionMenu=null,desktopHelp=null;
+  let commandMenu=null,captionMenu=null,windowChrome=null,linuxCaptionMenu=null,desktopHelp=null,appearanceDocument=0;
   const resetCommandMenu=()=>{captionMenu?.close();commandMenu?.reset();};
-  const commandNavigationStarted=(_event,_url,inPlace,mainFrame)=>{if(mainFrame===true&&inPlace!==true)resetCommandMenu();};
+  const commandNavigationStarted=(_event,_url,inPlace,mainFrame)=>{if(mainFrame===true&&inPlace!==true){appearanceDocument+=1;resetCommandMenu();}};
   const syncNotificationPermission=()=>{
    void permissionStatus().then(status=>{
     notificationRuntime.permissionChanged(status);
@@ -278,7 +284,15 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   commandMenu=createDesktopCommandMenu({Menu,getWindow:()=>mainWindow,appOrigin,restoreWindow,openNotificationSettings,requestQuit:()=>app.quit(),help:action=>desktopHelp.run(action)});
   if(process.platform==='win32'||process.platform==='linux')window.setMenuBarVisibility(false);
   if(process.platform==='win32'||process.platform==='linux')captionMenu=createDesktopCaptionMenu({owner:window,getWindow:()=>mainWindow,appOrigin,Menu,getTemplate:()=>commandMenu.template(true),getCursor:typeof electron.screen?.getCursorScreenPoint==='function'?()=>electron.screen.getCursorScreenPoint():null});
-  if(['win32','linux','darwin'].includes(process.platform))windowChrome=createDesktopWindowChrome({owner:window,getWindow:()=>mainWindow,appOrigin,getMenus:()=>commandMenu.template().map(item=>item.id).filter(id=>typeof id==='string')});
+  if(['win32','linux','darwin'].includes(process.platform))windowChrome=createDesktopWindowChrome({owner:window,getWindow:()=>mainWindow,appOrigin,initialTheme,initialAppearance,getMenus:()=>commandMenu.template().map(item=>item.id).filter(id=>typeof id==='string')});
+  const applySavedAppearance=()=>{
+   if(shuttingDown||mainWindow!==window||window.isDestroyed()||window.webContents.isDestroyed?.())return;
+   const value=appearanceStore?.read();if(!value?.stored)return;
+   try{if(nativeTheme&&nativeTheme.themeSource!==value.themeMode)nativeTheme.themeSource=value.themeMode;
+    windowChrome?.setAppearance({theme:resolvedTheme(value.themeMode),appearance:withoutMissingImage(value.lightAppearance,true)});
+   }catch(error){report(error);}
+  };
+  nativeTheme?.on?.('updated',applySavedAppearance);
   if(process.platform==='linux')linuxCaptionMenu=createLinuxCaptionMenu({owner:window,getWindow:()=>mainWindow,appOrigin,getTemplate:()=>commandMenu.template(true),getEpoch:()=>commandMenu.getEpoch()});
   try{
    tray=new Tray(nativeImage.createFromBuffer(buildTrayIconPng()));
@@ -292,6 +306,11 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
     const reset=value.owner_scope!==commandMenu.getState().owner_scope||value.blocked||!value.ready;
     if(reset)captionMenu?.close();commandMenu.setState(value);
     if(reset)linuxCaptionMenu?.invalidate();else linuxCaptionMenu?.refresh();
+   },
+   readAppearance:()=>appearanceStore?.read()??null,writeAppearance:async request=>{
+    if(shuttingDown||!appearanceStore)throw Error('desktop_appearance_unavailable');
+    const frame=window.webContents.mainFrame,admittedDocument=appearanceDocument,current=()=>appearanceDocument===admittedDocument&&mainWindow===window&&!window.isDestroyed()&&!window.webContents.isDestroyed?.()&&window.webContents.mainFrame===frame&&!(window.webContents.isLoadingMainFrame?.()??window.webContents.isLoading())&&!window.webContents.isCrashed?.()&&isDesktopAppUrl(window.webContents.getURL(),appOrigin);
+    const saved=await appearanceStore.write(request,current);applySavedAppearance();return saved;
    },
    linuxCaptionMenu,readDesktopAbout:()=>desktopHelp.read(),
    readWindowChrome:windowChrome?()=>windowChrome.read():null,setWindowTheme:windowChrome?theme=>windowChrome.setTheme(theme):null,setWindowAppearance:windowChrome?value=>windowChrome.setAppearance(value):null,
@@ -309,7 +328,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   });
   const destroyWindow=()=>{
    if(recoveryTimer)clearTimeout(recoveryTimer);if(stableTimer)clearTimeout(stableTimer);
-   window.off('focus',syncNotificationPermission);
+   window.off('focus',syncNotificationPermission);nativeTheme?.removeListener?.('updated',applySavedAppearance);
    desktopHelp?.dispose();linuxCaptionMenu?.dispose();windowChrome?.dispose();captionMenu?.dispose();commandMenu?.reset();window.webContents.off('did-start-navigation',commandNavigationStarted);
    window.webContents.off('did-finish-load',didFinishLoadHandler);window.webContents.off('render-process-gone',renderProcessGoneHandler);
    window.webContents.off('will-navigate',denyNavigation);window.webContents.off('will-redirect',denyNavigation);
@@ -360,6 +379,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   startupRestoredStartup=preparation?.restoredStartup??null;
   if(startupRestoredStartup&&process.env.JOT_DESKTOP_RESTORED_STARTUP_NONCE===restoredStartupNonce)
    delete process.env.JOT_DESKTOP_RESTORED_STARTUP_NONCE;
+  if(!appearanceStore)try{appearanceStore=await createDesktopAppearanceStore({userDataPath});}catch{report(Error('desktop_appearance_unavailable'));}
   return true;
  }});
  app.on('second-instance',restoreWindow);
@@ -370,7 +390,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   event.preventDefault();
   if(shutdownPromise)return;
   shuttingDown=true;notificationRuntime.closeAll();
-  shutdownPromise=lifecycle.stop('quit').then(async()=>{
+  shutdownPromise=(async()=>{await appearanceStore?.flush();return lifecycle.stop('quit');})().then(async()=>{
    try{await diagnostics?.close();}catch{}
    quitConfirmed=true;app.quit();
   }).catch(error=>{
