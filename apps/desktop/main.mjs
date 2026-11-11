@@ -277,6 +277,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   let syncNotificationPermission=null,commandNavigationStarted=null,denyNavigation=null,downloadHandler=null,didFinishLoadHandler=null,renderProcessGoneHandler=null,applySavedAppearance=null,closeHandler=null;
   let recoveryTimer=null,recoveryAttempts=0,stableTimer=null;
   const destroyWindow=(keepWindow=false)=>{
+   if(mainWindow===window)notificationRuntime.closeAll();
    if(recoveryTimer)clearTimeout(recoveryTimer);if(stableTimer)clearTimeout(stableTimer);
    if(syncNotificationPermission)window.off('focus',syncNotificationPermission);if(closeHandler)window.off('close',closeHandler);if(applySavedAppearance)nativeTheme?.removeListener?.('updated',applySavedAppearance);
    rendererRecovery?.dispose();desktopHelp?.dispose();linuxCaptionMenu?.dispose();windowChrome?.dispose();captionMenu?.dispose();commandMenu?.reset();if(commandNavigationStarted)window.webContents.off('did-start-navigation',commandNavigationStarted);
@@ -289,11 +290,11 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   };
   try{
   const resetCommandMenu=()=>{captionMenu?.close();linuxCaptionMenu?.invalidate();commandMenu?.reset();};
-  commandNavigationStarted=(_event,_url,inPlace,mainFrame)=>{if(mainFrame===true&&inPlace!==true){appearanceDocument+=1;resetCommandMenu();}};
+  commandNavigationStarted=(_event,_url,inPlace,mainFrame)=>{if(mainFrame===true&&inPlace!==true){appearanceDocument+=1;resetCommandMenu();notificationRuntime.closeAll();}};
   syncNotificationPermission=()=>{
    void permissionStatus().then(status=>{
-    notificationRuntime.permissionChanged(status);
     if(mainWindow!==window||window.isDestroyed()||window.webContents.isDestroyed?.())return;
+    notificationRuntime.permissionChanged(status);
     window.webContents.send('desktop:notification-permission',status);
    }).catch(()=>{});
   };
@@ -307,6 +308,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
   window.webContents.session.on('will-download',downloadHandler);
   didFinishLoadHandler=()=>{windowChrome?.publish();deliverPendingTaskNavigation(window);if(recoveryTimer){clearTimeout(recoveryTimer);recoveryTimer=null;}if(stableTimer)clearTimeout(stableTimer);stableTimer=setTimeout(()=>{stableTimer=null;recoveryAttempts=0;},30000);stableTimer.unref?.();};
   renderProcessGoneHandler=(_event,details)=>{
+   notificationRuntime.closeAll();
    if(shuttingDown||details?.reason==='clean-exit')return;
    if(stableTimer){clearTimeout(stableTimer);stableTimer=null;}
    resetCommandMenu();

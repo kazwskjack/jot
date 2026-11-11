@@ -72,3 +72,17 @@ export async function saveDesktopNotificationState(filePath,state){
   throw error;
  }
 }
+
+// Share one read-modify-write queue across runtime and IPC users of the same store.
+const stateUpdates=new WeakMap();
+export function updateDesktopNotificationState(stateStore,update){
+ if(!stateStore||typeof stateStore.read!=='function'||typeof stateStore.write!=='function'||typeof update!=='function')throw new Error('desktop_notification_state_invalid');
+ const pending=(stateUpdates.get(stateStore)??Promise.resolve()).then(async()=>{
+  const current=await stateStore.read(),next=await update(current);
+  if(next===null||next===current)return next;
+  await stateStore.write(next);return next;
+ });
+ const tail=pending.catch(()=>{});stateUpdates.set(stateStore,tail);
+ void tail.then(()=>{if(stateUpdates.get(stateStore)===tail)stateUpdates.delete(stateStore);});
+ return pending;
+}

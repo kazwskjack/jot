@@ -1,4 +1,4 @@
-import {initializeDesktopNotificationState} from './notification-state.mjs';
+import {initializeDesktopNotificationState,updateDesktopNotificationState} from './notification-state.mjs';
 import {assertTrustedDesktopSender,parseDesktopCommand,parseDesktopNotificationRequest} from './bridge-contract.mjs';
 
 const operationIdPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -35,8 +35,7 @@ export function registerDesktopIpcHandlers({ipcMain,appOrigin,getWindow,stateSto
   ['menu.state.set',async(_event,payload)=>{if(typeof setMenuState!=='function')throw Error('desktop_menu_unavailable');setMenuState(payload);return Object.freeze({protocol:1,accepted:true});}],
   ['notification.state.read',async()=>stateStore.read()],
   ['notification.state.initialize',async(_event,payload)=>{
-   const current=await stateStore.read();if(current.initialized_at)return current;
-   const next=initializeDesktopNotificationState(current,payload.started_at);await stateStore.write(next);return next;
+   return updateDesktopNotificationState(stateStore,current=>initializeDesktopNotificationState(current,payload.started_at));
   }],
   ['notification.permission.read',async event=>readPermission(event.sender)],
   ['preferences.read',async()=>{const state=await stateStore.read();return state.preferences;}],
