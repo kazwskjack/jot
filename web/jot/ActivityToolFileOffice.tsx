@@ -430,7 +430,7 @@ export default function ActivityToolFileOffice(props:ListedFilePreviewSource&{of
      <button type="button" aria-pressed={visual} disabled={current.page.pptx_visual?.protocol!==1||current.page.pptx_visual.ready!==true} onClick={()=>setVisualState({identity,enabled:true})}>{t('幻灯片视觉内容','Slide Visual Content')}</button></nav>
     {current.page.pptx_visual?.ready!==true&&<p role="status">{current.page.pptx_visual?.reason==='source_limit'?t('原幻灯片超过当前视觉渲染资源范围。','The original slides exceed current visual rendering limits.'):t('原幻灯片尚未通过视觉读取检查。','The original slides have not passed visual read verification.')}</p>}
    </>}
-   <div lang="zh-CN">{visual&&current.page.document.kind==='xlsx'&&current.page.xlsx_visual?.protocol===1&&current.page.xlsx_visual.ready===true
+   <div lang={language}>{visual&&current.page.document.kind==='xlsx'&&current.page.xlsx_visual?.protocol===1&&current.page.xlsx_visual.ready===true
     ?<ActivityToolFileXlsx key={identity+':'+revision} {...props}/>
     :visual&&current.page.document.kind==='docx'&&current.page.docx_visual?.protocol===1&&current.page.docx_visual.ready===true
     ?<ActivityToolFileDocx key={identity+':'+revision} {...props}/>

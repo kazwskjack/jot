@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import {pdfViewIdentity} from './pdf-file-view-state';
 import OfficeFileViewState from './OfficeFileViewState';
 import React,{useContext,useEffect,useRef,useState} from 'react';
@@ -41,12 +43,13 @@ function originalVisualFocus(focus:OfficeTextFocus|undefined,source:FileReferenc
 }
 
 function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{source:FileViewingSource;owner:string;identity:string;officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const referenceSource=fileViewingReferenceSource(source);
  const context=useContext(FileTextReferenceContext),currentContext=useRef(context);currentContext.current=context;
  const frame=useRef<HTMLIFrameElement>(null),loaded=useRef<HTMLIFrameElement|null>(null);
  const notify=useRef<(frame:HTMLIFrameElement)=>void>(()=>{});
  const cancel=useRef<()=>void>(()=>{}),commit=useRef<()=>void>(()=>{});
- const [state,setState]=useState<{phase:'loading'|'ready'|'error';message:string}>({phase:'loading',message:'正在核对原文件并渲染Word…'});
+ const [state,setState]=useState<{phase:'loading'|'ready'|'error';message:string;sections?:number}>({phase:'loading',message:'正在核对原文件并渲染Word…'});
  const [proposal,setProposal]=useState<Proposal>(),selected=useRef<Proposal|undefined>(undefined),pending=useRef<Proposal|undefined>(undefined);
  const pendingTimer=useRef<number|undefined>(undefined);
  const [committing,setCommitting]=useState(false),[notice,setNotice]=useState(''),[focused,setFocused]=useState<boolean>();
@@ -101,7 +104,7 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
    if(value.protocol!==1||value.token!==token||Object.keys(value).length!==4)return;
    if(value.type==='jot-docx-closed'&&value.reason==='pagehide'){fail('Word查看器页面已离开，请重新读取固定版本。');return;}
    if(value.type==='jot-docx-ready'&&Number.isSafeInteger(value.sections)&&value.sections>=0&&value.sections<=50000){
-    ready=true;window.clearTimeout(timeout);setState({phase:'ready',message:`已渲染 ${value.sections} 个Word分段。分段沿原文件分页标记。`});
+    ready=true;window.clearTimeout(timeout);setState({phase:'ready',sections:value.sections,message:`已渲染 ${value.sections} 个Word分段。分段沿原文件分页标记。`});
    }else if(value.type==='jot-docx-error'&&['DOCX_RENDER_FAILED','DOCX_VIEW_LIMIT'].includes(value.code)){
     fail(value.code==='DOCX_VIEW_LIMIT'?'Word内容超过当前视觉渲染范围，可切换结构化文字查看。':'Word视觉渲染失败，可重试或切换结构化文字查看。');
    }else if(ready&&value.type==='jot-docx-focus'&&typeof value.confirmed==='boolean'&&focus){
@@ -146,23 +149,24 @@ function DocxAttempt({source,owner,identity,officeTextFocus,officeRegionFocus}:{
   }).catch(error=>{if(live())fail(error instanceof Error?error.message:'原Word文件读取失败');});
   return()=>{dispose();regionSession.current=undefined;notify.current=()=>{};commit.current=()=>{};cancel.current=()=>{};};
  },[identity,owner,viewerUrl]);
- return <section className="jot-docx-preview" aria-label="Word视觉内容">
-  <p role={state.phase==='error'?'alert':'status'}>{state.message}
-   {state.phase==='loading'&&<button type="button" onClick={()=>cancel.current()}>取消读取</button>}
+ return <section lang={language} className="jot-docx-preview" aria-label={t('Word视觉内容','Word Visual Content')}>
+  <p role={state.phase==='error'?'alert':'status'}>{state.phase==='ready'&&state.sections!==undefined?t(state.message,`Rendered ${state.sections} Word sections, following original file page markers.`):conversationUiError(state.message,language)}
+   {state.phase==='loading'&&<button type="button" onClick={()=>cancel.current()}>{t('取消读取','Cancel Reading')}</button>}
   </p>
-  {referenceSource&&officeTextFocus?.value.text_view===2&&<p role="status">{focused===true?'已核对并定位原视觉文字引用。':focused===false?'原视觉文字尚未与固定版本核对，请对照原引用快照。':'正在核对原视觉文字引用…'}</p>}
-  {notice&&<p role="status">{notice}</p>}
-  {state.phase==='ready'&&source.native_source&&!referenceSource&&<p>此打开内容没有引用凭据，可阅读和下载；文字、单元格与选区引用暂不可用。</p>}
-  {state.phase!=='error'&&viewerUrl&&<iframe ref={frame} title="原固定版本Word视觉查看器" src={viewerUrl} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer"
+  {referenceSource&&officeTextFocus?.value.text_view===2&&<p role="status">{focused===true?t('已核对并定位原视觉文字引用。','The original visual text reference was verified and located.'):focused===false?t('原视觉文字尚未与固定版本核对，请对照原引用快照。','The original visual text has not been verified against the pinned version. Compare with the original reference snapshot.'):t('正在核对原视觉文字引用…','Verifying original visual text reference…')}</p>}
+  {notice&&<p role="status">{conversationUiError(notice,language)}</p>}
+  {state.phase==='ready'&&source.native_source&&!referenceSource&&<p>{t('此打开内容没有引用凭据，可阅读和下载；文字、单元格与选区引用暂不可用。',"This opened content has no reference credentials. You can read and download it; text, cell and region references are unavailable.")}</p>}
+  {state.phase!=='error'&&viewerUrl&&<iframe ref={frame} title={t('原固定版本Word视觉查看器','Original Pinned Word Visual Viewer')} src={viewerUrl} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer"
    onLoad={event=>{loaded.current=event.currentTarget;notify.current(event.currentTarget);}}/>}
   {state.phase==='ready'&&regionSession.current&&<OfficeFileViewState kind="docx" source={source} owner={owner} session={regionSession.current} focused={!!referenceSource&&(!!officeTextFocus||!!officeRegionFocus)}/>}
   {state.phase==='ready'&&referenceSource&&regionSession.current&&<OfficeFileRegionReference kind="docx" source={referenceSource} owner={owner} session={regionSession.current} focus={officeRegionFocus}/>}
-  {proposal&&<section className="jot-docx-selection" aria-label="待确认的Word视觉文字引用"><blockquote>{proposal.reference.reference.selectedText}</blockquote><button type="button" disabled={disabled||committing} onPointerDown={event=>event.preventDefault()} onMouseDown={event=>event.preventDefault()} onClick={()=>commit.current()}>引用Word文字到当前对话</button></section>}
+  {proposal&&<section className="jot-docx-selection" aria-label={t('待确认的Word视觉文字引用','Word Visual Text Reference Awaiting Confirmation')}><blockquote>{proposal.reference.reference.selectedText}</blockquote><button type="button" disabled={disabled||committing} onPointerDown={event=>event.preventDefault()} onMouseDown={event=>event.preventDefault()} onClick={()=>commit.current()}>{t('引用Word文字到当前对话','Reference Word Text in This Chat')}</button></section>}
  </section>;
 }
 
 export default function ActivityToolFileDocx(source:FileViewingSource&{officeTextFocus?:OfficeTextFocus;officeRegionFocus?:OfficeRegionFocus}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),[revision,setRevision]=useState(0);
  const identity=JSON.stringify([pdfViewIdentity(source,owner),source.native_source?.proof??null,source.officeTextFocus?.key,source.officeRegionFocus?.key,revision]);
- return <><button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取Word视觉内容</button><DocxAttempt key={identity} source={source} owner={owner} identity={identity} officeTextFocus={source.officeTextFocus} officeRegionFocus={source.officeRegionFocus}/></>;
+ return <><button lang={language} type="button" onClick={()=>setRevision(value=>value+1)}>{t('重新读取Word视觉内容','Read Word Visual Content Again')}</button><DocxAttempt key={identity} source={source} owner={owner} identity={identity} officeTextFocus={source.officeTextFocus} officeRegionFocus={source.officeRegionFocus}/></>;
 }

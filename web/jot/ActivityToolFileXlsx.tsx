@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from './application-language';
+import {conversationUiError} from './conversation-ui-errors';
 import {pdfViewIdentity} from './pdf-file-view-state';
 import OfficeFileViewState from './OfficeFileViewState';
 import React,{useEffect,useRef,useState} from 'react';
@@ -8,10 +10,11 @@ import OfficeFileRegionReference,{type OfficeRegionSession} from './OfficeFileRe
 import XlsxCellReferences from './XlsxCellReferences';
 
 function XlsxAttempt({source,owner,identity,officeFocus,officeRegionFocus}:{source:FileViewingSource;owner:string;identity:string;officeFocus?:OfficeCellFocus;officeRegionFocus?:OfficeRegionFocus}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const referenceSource=fileViewingReferenceSource(source);
  const cellSession=useRef<OfficeRegionSession|undefined>(undefined);
  const frame=useRef<HTMLIFrameElement>(null),probe=useRef<(element:HTMLIFrameElement)=>void>(()=>{}),cancel=useRef<()=>void>(()=>{});
- const [url,setUrl]=useState<string>(),[state,setState]=useState<{phase:'loading'|'ready'|'error';message:string;working?:boolean}>({phase:'loading',message:'正在核对原工作簿并读取视觉内容…'});
+ const [url,setUrl]=useState<string>(),[state,setState]=useState<{phase:'loading'|'ready'|'error';message:string;working?:boolean;sheets?:number;warnings?:number}>({phase:'loading',message:'正在核对原工作簿并读取视觉内容…'});
  useEffect(()=>{
   const controller=new AbortController(),token=crypto.randomUUID();let closed=false,origin:string|undefined,instance:string|undefined,bytes:ArrayBuffer|undefined,booted=false,sent=false,ready=false,working=false,timer:number|undefined;
   const live=()=>!closed&&!controller.signal.aborted&&taskDraftScope()===owner;
@@ -39,7 +42,7 @@ function XlsxAttempt({source,owner,identity,officeFocus,officeRegionFocus}:{sour
    if(value.type==='jot-xlsx-error'&&value.code==='XLSX_RENDER_FAILED'){fail('工作簿视觉读取失败，可重读或切换结构化单元格查看。');return;}
    if(value.type==='jot-xlsx-ready'&&value.info&&Object.keys(value.info).length===2&&Number.isSafeInteger(value.info.sheets)&&value.info.sheets>=1&&value.info.sheets<=100&&Number.isSafeInteger(value.info.warnings)&&value.info.warnings>=0&&value.info.warnings<=2){
     if(frame.current?.contentWindow&&origin)cellSession.current={window:frame.current.contentWindow,origin,token,live,close:fail};
-    ready=true;window.clearTimeout(timer);setState({phase:'ready',message:`已读取 ${value.info.sheets} 个原生工作表${value.info.warnings?'，存在工作簿显示提示，请对照原文件。':'。'}`});
+    ready=true;window.clearTimeout(timer);setState({phase:'ready',sheets:value.info.sheets,warnings:value.info.warnings,message:`已读取 ${value.info.sheets} 个原生工作表${value.info.warnings?'，存在工作簿显示提示，请对照原文件。':'。'}`});
    }else if(ready&&value.type==='jot-xlsx-work'&&typeof value.busy==='boolean'){
     if(value.busy&&!working)arm();if(!value.busy)window.clearTimeout(timer);working=value.busy;
     setState(current=>({...current,working}));
@@ -56,16 +59,17 @@ function XlsxAttempt({source,owner,identity,officeFocus,officeRegionFocus}:{sour
   void load().catch(error=>{if(!controller.signal.aborted)fail(error instanceof Error?error.message:'原工作簿读取失败');});
   return()=>{dispose();cellSession.current=undefined;probe.current=()=>{};cancel.current=()=>{};};
  },[identity,owner]);
- return <section className="jot-xlsx-preview" aria-label="原工作簿视觉内容">
-  <p role={state.phase==='error'?'alert':'status'}>{state.working?'正在处理原生工作簿…':state.message} {(state.phase==='loading'||state.working)&&<button type="button" onClick={()=>cancel.current()}>取消并关闭视觉查看器</button>}</p>
-  {state.phase==='ready'&&source.native_source&&!referenceSource&&<p>此打开内容没有引用凭据，可阅读和下载；文字、单元格与选区引用暂不可用。</p>}
-  {state.phase!=='error'&&url&&<iframe ref={frame} src={url} title="原固定版本工作簿视觉查看器" sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={event=>probe.current(event.currentTarget)}/>}
+ return <section lang={language} className="jot-xlsx-preview" aria-label={t('原工作簿视觉内容','Original Workbook Visual Content')}>
+  <p role={state.phase==='error'?'alert':'status'}>{state.working?t('正在处理原生工作簿…','Processing native workbook…'):state.phase==='ready'&&state.sheets!==undefined?t(state.message,`${state.sheets} native sheets read${state.warnings?'; workbook display notices are present. Compare with the original file.':'.'}`):conversationUiError(state.message,language)} {(state.phase==='loading'||state.working)&&<button type="button" onClick={()=>cancel.current()}>{t('取消并关闭视觉查看器','Cancel and Close Visual Viewer')}</button>}</p>
+  {state.phase==='ready'&&source.native_source&&!referenceSource&&<p>{t('此打开内容没有引用凭据，可阅读和下载；文字、单元格与选区引用暂不可用。',"This opened content has no reference credentials. You can read and download it; text, cell and region references are unavailable.")}</p>}
+  {state.phase!=='error'&&url&&<iframe ref={frame} src={url} title={t('原固定版本工作簿视觉查看器','Original Pinned Workbook Visual Viewer')} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={event=>probe.current(event.currentTarget)}/>}
   {state.phase==='ready'&&cellSession.current&&<OfficeFileViewState kind="xlsx" source={source} owner={owner} session={cellSession.current} focused={!!referenceSource&&(!!officeFocus||!!officeRegionFocus)}/>}
   {state.phase==='ready'&&referenceSource&&cellSession.current&&<XlsxCellReferences source={referenceSource} owner={owner} session={cellSession.current} focus={officeFocus}/>}
   {state.phase==='ready'&&referenceSource&&cellSession.current&&<OfficeFileRegionReference kind="xlsx" source={referenceSource} owner={owner} session={cellSession.current} focus={officeRegionFocus}/>}
  </section>;
 }
 export default function ActivityToolFileXlsx(source:FileViewingSource&{officeFocus?:OfficeCellFocus;officeRegionFocus?:OfficeRegionFocus}){
+ const language=useApplicationLanguage(),t=useApplicationText();
  const owner=taskDraftScope(),[revision,setRevision]=useState(0),identity=JSON.stringify([pdfViewIdentity(source,owner),source.native_source?.proof??null,source.officeFocus?.key,source.officeRegionFocus?.key,revision]);
- return <><button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取工作簿视觉内容</button><XlsxAttempt key={identity} source={source} owner={owner} identity={identity} officeFocus={source.officeFocus?.value.cell_view===2?source.officeFocus:undefined} officeRegionFocus={source.officeRegionFocus}/></>;
+ return <><button lang={language} type="button" onClick={()=>setRevision(value=>value+1)}>{t('重新读取工作簿视觉内容','Read Workbook Visual Content Again')}</button><XlsxAttempt key={identity} source={source} owner={owner} identity={identity} officeFocus={source.officeFocus?.value.cell_view===2?source.officeFocus:undefined} officeRegionFocus={source.officeRegionFocus}/></>;
 }
