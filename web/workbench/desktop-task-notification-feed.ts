@@ -2,8 +2,8 @@ import type {DesktopTaskNotificationCandidate,DesktopTaskNotificationEvent,Deskt
 import {normalizeDesktopTaskNotificationPolicy,normalizeDesktopNotificationPreferences} from '../../packages/desktop/src/notification-policy.mjs';
 
 export type NotificationIdentity=Pick<DesktopTaskNotificationCandidate,'event_id'|'task_id'|'occurrence_id'|'generation'|'event_kind'>;
-export type NotificationPending={identity:NotificationIdentity;state:'queued'|'dispatching'|'unknown'|'observing'|'shown'};
-export type NotificationJournal={version:1;cursor:string|null;baseline:string;pending:NotificationPending[]};
+export type NotificationPending={identity:NotificationIdentity;state:'queued'|'dispatching'|'unknown'|'observing'|'shown'|'ending'};
+export type NotificationJournal={version:2;cursor:string|null;baseline:string;pending:NotificationPending[];ended:NotificationIdentity[]};
 const kinds=['changed','completed','failed','needs_confirmation'];
 const invalid=()=>{throw Error('desktop_notification_data_invalid');};
 const row=(value:unknown):Record<string,any>=>value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,any>:invalid();
@@ -54,11 +54,21 @@ export function notificationInspection(value:unknown,eventId:string):'active'|'p
  return status.status;
 }
 function journalValue(value:unknown):NotificationJournal{
- const saved=row(value);exact(saved,['version','cursor','baseline','pending']);
- if(saved.version!==1||saved.cursor!==null&&!id(saved.cursor)||!time(saved.baseline)||!Array.isArray(saved.pending)||saved.pending.length>64)invalid();
- const pending=saved.pending.map((value:unknown)=>{const item=row(value);exact(item,['identity','state']);if(!['queued','dispatching','unknown','observing','shown'].includes(item.state))invalid();return {identity:notificationIdentity(item.identity),state:item.state} as NotificationPending;});
- if(new Set(pending.map(item=>item.identity.event_id)).size!==pending.length)invalid();
- return {version:1,cursor:saved.cursor,baseline:saved.baseline,pending};
+ const saved=row(value);exact(saved,saved.version===1?['version','cursor','baseline','pending']:['version','cursor','baseline','pending','ended']);
+ if(![1,2].includes(saved.version)||saved.cursor!==null&&!id(saved.cursor)||!time(saved.baseline)||!Array.isArray(saved.pending)||saved.pending.length>64)invalid();
+ const pending=saved.pending.map((value:unknown)=>{const item=row(value);exact(item,['identity','state']);if(!['queued','dispatching','unknown','observing','shown','ending'].includes(item.state)||saved.version===1&&item.state==='ending')invalid();return {identity:notificationIdentity(item.identity),state:item.state} as NotificationPending;});
+ const ended=saved.version===1?[]:saved.ended;
+ if(!Array.isArray(ended)||ended.length>64)invalid();
+ const history=ended.map(notificationIdentity),ids=[...pending.map(item=>item.identity.event_id),...history.map(item=>item.event_id)];
+ if(new Set(ids).size!==ids.length||history.length+pending.filter(item=>item.state==='ending').length>64)invalid();
+ return {version:2,cursor:saved.cursor,baseline:saved.baseline,pending,ended:history};
+}
+export function endNotificationWait(saved:NotificationJournal,eventIds:readonly string[]):NotificationJournal{
+ if(!eventIds.length||eventIds.length>64||new Set(eventIds).size!==eventIds.length||eventIds.some(value=>!id(value)))invalid();
+ const requested=new Set(eventIds),selected=saved.pending.filter(item=>requested.has(item.identity.event_id)&&['dispatching','unknown','observing'].includes(item.state));
+ if(saved.ended.length+saved.pending.filter(item=>item.state==='ending').length+selected.length>64)throw Error('desktop_notification_history_full');
+ const eligible=new Set(selected.map(item=>item.identity.event_id));
+ return {...saved,pending:saved.pending.map<NotificationPending>(item=>eligible.has(item.identity.event_id)?{...item,state:'ending'}:item)};
 }
 export function notificationInitialization(value:unknown){
  const initialized=row(value);exact(initialized,['version','preferences','seen','initialized_at']);
@@ -74,10 +84,10 @@ export class DesktopNotificationJournal{
  }
  read():NotificationJournal|null{
   if(this.raw===null)return null;
-  if(this.raw.length>65536)invalid();return journalValue(JSON.parse(this.raw));
+  if(this.raw.length>131072)invalid();return journalValue(JSON.parse(this.raw));
  }
  save(value:NotificationJournal){
-  const next=JSON.stringify(journalValue(value));if(next.length>65536)throw Error('desktop_notification_storage_conflict');
+  const next=JSON.stringify(journalValue(value));if(next.length>131072)throw Error('desktop_notification_storage_conflict');
   let current:string|null;try{current=this.storage.getItem(this.key);}catch{throw Error('desktop_notification_storage_unavailable');}
   if(current!==this.raw)throw Error('desktop_notification_storage_conflict');
   try{this.storage.setItem(this.key,next);if(this.storage.getItem(this.key)!==next)throw Error('desktop_notification_storage_unconfirmed');}catch{throw Error('desktop_notification_storage_unavailable');}
