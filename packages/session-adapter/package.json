@@ -142,6 +142,7 @@
     "dsh-native-search-source-patch.js",
     "runtime-patches/dsh-tool-fs-search-0.2.1-rc.2-sha256.json",
     "session-header-identity.js",
+    "session-admission.js",
     "native-workspace-file-reader.js"
   ],
   "peerDependencies": {
