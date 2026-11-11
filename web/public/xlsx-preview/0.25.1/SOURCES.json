@@ -540,6 +540,90 @@
       "source_sha256": "a6ee2e2bf1a7b946525b08b8aedf342b077fcad5002caf4194e1bd1e54a1d1ba",
       "sha256": "a6ee2e2bf1a7b946525b08b8aedf342b077fcad5002caf4194e1bd1e54a1d1ba",
       "modified": false
+    },
+    {
+      "file": "design-en.js",
+      "package": "@univerjs/design",
+      "version": "0.25.1",
+      "url": "https://registry.npmjs.org/@univerjs/design/-/design-0.25.1.tgz",
+      "archive_integrity": "sha512-tqKzxh/HhUiHsZZzkFUHGBTEsRfOsSNgIGAjY6PTvbucpLJTYzijrQxEZfgOMC/tEQykUFJUo/WDRTXZEHMPXg==",
+      "upstream_integrity_matches": true,
+      "entry": "package/lib/umd/locale/en-US.js",
+      "source_sha256": "7496c959c185be1cef029197e3a45af9ae5b1a490e52a640d9bcfe1eb6d955e5",
+      "sha256": "7496c959c185be1cef029197e3a45af9ae5b1a490e52a640d9bcfe1eb6d955e5",
+      "modified": false
+    },
+    {
+      "file": "ui-en.js",
+      "package": "@univerjs/ui",
+      "version": "0.25.1",
+      "url": "https://registry.npmjs.org/@univerjs/ui/-/ui-0.25.1.tgz",
+      "archive_integrity": "sha512-DapFtWHIcidxE+vfueIL/sDQeVnf5MRY4MzrK1ag+VHuN6/bU4jwFXDEmyGi1otL03cYg8PFJja2lkV73cbYJA==",
+      "upstream_integrity_matches": true,
+      "entry": "package/lib/umd/locale/en-US.js",
+      "source_sha256": "bff668486df7436569f03f5899f7e86d48985f7f5ddfe3f972d912d9e5bf19c2",
+      "sha256": "bff668486df7436569f03f5899f7e86d48985f7f5ddfe3f972d912d9e5bf19c2",
+      "modified": false
+    },
+    {
+      "file": "docs-ui-en.js",
+      "package": "@univerjs/docs-ui",
+      "version": "0.25.1",
+      "url": "https://registry.npmjs.org/@univerjs/docs-ui/-/docs-ui-0.25.1.tgz",
+      "archive_integrity": "sha512-Oy5iPjf+gJlijUe3pQj5iIAILR/4YzCvOVtGy4FPyksXXrYYy1oMZ5JnEP3U7AUKhQ4yTNIFoaTYT6LwbshG+A==",
+      "upstream_integrity_matches": true,
+      "entry": "package/lib/umd/locale/en-US.js",
+      "source_sha256": "31e65d6c41ecba4739e3d4998763bbb044823a08b1b749d525ed33a93bed266c",
+      "sha256": "31e65d6c41ecba4739e3d4998763bbb044823a08b1b749d525ed33a93bed266c",
+      "modified": false
+    },
+    {
+      "file": "sheets-en.js",
+      "package": "@univerjs/sheets",
+      "version": "0.25.1",
+      "url": "https://registry.npmjs.org/@univerjs/sheets/-/sheets-0.25.1.tgz",
+      "archive_integrity": "sha512-VcHtHgCOStJZO4XLstvV6oWHxBwhGCpArKJaEe22EmKNY1lfsibOrvwIjEW/Xpm9Ago9ybTvmuIvByrCd60pew==",
+      "upstream_integrity_matches": true,
+      "entry": "package/lib/umd/locale/en-US.js",
+      "source_sha256": "0e3799f5e3932d8282fcfb9a8c9a3d6dec1f618532c5f7397043b8e95ea43d8f",
+      "sha256": "0e3799f5e3932d8282fcfb9a8c9a3d6dec1f618532c5f7397043b8e95ea43d8f",
+      "modified": false
+    },
+    {
+      "file": "sheets-ui-en.js",
+      "package": "@univerjs/sheets-ui",
+      "version": "0.25.1",
+      "url": "https://registry.npmjs.org/@univerjs/sheets-ui/-/sheets-ui-0.25.1.tgz",
+      "archive_integrity": "sha512-iCzUfuVc78iRYXCs4kzJKb7wdFQ05irvxxvMeeu5OfOMRef1z1Hr8fvChXfOfjDv6HzQ4nfTO7iGNzD59eE78g==",
+      "upstream_integrity_matches": true,
+      "entry": "package/lib/umd/locale/en-US.js",
+      "source_sha256": "fcabea81262f44a964afd10227c63f3f7573bf4b87341f2741b1d6bbac9baa97",
+      "sha256": "fcabea81262f44a964afd10227c63f3f7573bf4b87341f2741b1d6bbac9baa97",
+      "modified": false
+    },
+    {
+      "file": "sheets-formula-ui-en.js",
+      "package": "@univerjs/sheets-formula-ui",
+      "version": "0.25.1",
+      "url": "https://registry.npmjs.org/@univerjs/sheets-formula-ui/-/sheets-formula-ui-0.25.1.tgz",
+      "archive_integrity": "sha512-iMDZZutB5mcwBGn1kL2QfsQoiOJKJhyLtzp3oRv0bEhbScGDPyoADuAoOCQjDnnUKTp3cTAvc0ACn3Gj3vOvRQ==",
+      "upstream_integrity_matches": true,
+      "entry": "package/lib/umd/locale/en-US.js",
+      "source_sha256": "28345286321a13a95c41c720c69fb9906b83390811277bd8ff9c18706167d10c",
+      "sha256": "28345286321a13a95c41c720c69fb9906b83390811277bd8ff9c18706167d10c",
+      "modified": false
+    },
+    {
+      "file": "sheets-numfmt-ui-en.js",
+      "package": "@univerjs/sheets-numfmt-ui",
+      "version": "0.25.1",
+      "url": "https://registry.npmjs.org/@univerjs/sheets-numfmt-ui/-/sheets-numfmt-ui-0.25.1.tgz",
+      "archive_integrity": "sha512-L8MzmnjYiWq/M/X+lv69ryOqiS0WTazv4CYTv10hO5mqmHsGVDx59ECkLhd3L8gN4CM9Wet7eU1Qf27H5i8RhA==",
+      "upstream_integrity_matches": true,
+      "entry": "package/lib/umd/locale/en-US.js",
+      "source_sha256": "7a7b6ffcce35ead4ce005f51f7429b154f9a874d88cb9d0742a8339b224bdb61",
+      "sha256": "7a7b6ffcce35ead4ce005f51f7429b154f9a874d88cb9d0742a8339b224bdb61",
+      "modified": false
     }
   ],
   "adapted_source": {
@@ -615,6 +699,11 @@
       "path": "web/public/xlsx-preview/0.25.1/frame.js",
       "upstream_path": "ui/src/components/code-editor/view/subcomponents/SpreadsheetInteractivePreview.tsx",
       "changes": "Adapts pinned translation display to saved Jot language through exact original-window/origin/protocol/token/four-field admission after initialization. Only owned toolbar/search/status/cell/region/accessibility nodes and known notices are rebound. Existing bundled React useSyncExternalStore updates the original native cell popup caption without re-registering it or rebuilding selection snapshots. Original workbook/sheet names/data/formulas/display values/locale, parsing/read-only permissions, sparse search cursors, source/view/cell/capture/proof messages and renderer lifetime remain unchanged. Library locale and original warning messages remain pending separately. No dependency/CSP/allowlist change or runtime execution."
+    },
+    {
+      "path": "web/public/xlsx-preview/0.25.1/frame.js",
+      "upstream_path": "ui/src/components/code-editor/view/subcomponents/SpreadsheetInteractivePreview.tsx",
+      "changes": "Adds the seven unmodified en-US locale UMD entries from the same cached0.25.1 package archives, preserving archive integrity and entry hashes. Existing facade loadLocales/setLocale refreshes the UI dictionary under the original ZH_CN locale identity because number-format and formula engines also read getCurrentLocale. Original workbook locale/data/instance/display-value/reference identities remain unchanged; no workbook reconstruction or selection/search reset. Macro warnings translate only their fixed code; image warnings use the original parsed source count, retaining original warning messages and unknown fallback. Runtime behavior unexecuted."
     }
   ]
 }

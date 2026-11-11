@@ -467,6 +467,7 @@ function collectInteractivePreviewWarnings(workbook) {
   if (imageCount > 0) {
     warnings.push({
       code: 'SPREADSHEET_IMAGES_NOT_RENDERED',
+      count: imageCount,
       message: `${imageCount} embedded image${imageCount === 1 ? '' : 's'} are not shown in interactive preview.`,
     });
   }

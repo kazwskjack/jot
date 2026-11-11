@@ -10,6 +10,13 @@ const parentOrigin='http://'+parentHost,content=document.getElementById('content
 // Keep language changes on owned UI nodes, outside document text and view/search state.
 let language='zh-CN';
 const labels=new Map(),languageListeners=new Set();
+let localeTexts;
+const refreshLibraryLanguage=()=>{
+ if(!api||!localeTexts)return;
+ const locale=window.UniverCore.LocaleType.ZH_CN;
+ // Translate UI dictionaries under the original data locale; numfmt/formulas also read this locale.
+ api.loadLocales(locale,localeTexts[language]);api.setLocale(locale);
+};
 const getLanguage=()=>language;
 const subscribeLanguage=listener=>{languageListeners.add(listener);return()=>{languageListeners.delete(listener);};};
 const showLabel=entry=>{
@@ -26,6 +33,7 @@ const setLanguage=value=>{
  if(language===value)return;language=value;document.documentElement.lang=value;
  for(const fields of labels.values())for(const entry of fields.values())showLabel(entry);
  for(const listener of languageListeners)listener();
+ refreshLibraryLanguage();
 };
 const notices={
  "工作表视图恢复未完成，请手动定位。": "Worksheet view restoration did not complete. Locate the position manually.",
@@ -49,6 +57,12 @@ const notices={
  "PNG已生成，正在交给原草稿上传入口。": "The PNG was generated and is being handed to the original draft upload entry."
 };
 const notice=(element,message)=>ui(element,message,Object.hasOwn(notices,message)?notices[message]:message);
+const warningText=(warning,language)=>{
+ if(language!=='zh-CN')return warning.message;
+ if(warning.code==='SPREADSHEET_MACROS_NOT_RENDERED')return '交互式预览不会执行工作簿宏。';
+ if(warning.code==='SPREADSHEET_IMAGES_NOT_RENDERED'&&Number.isSafeInteger(warning.count)&&warning.count>0)return `交互式预览不显示 ${warning.count} 张内嵌图片。`;
+ return warning.message;
+};
 const sheetSelect=document.getElementById('sheet'),zoom=document.getElementById('zoom'),cell=document.getElementById('cell');
 const query=document.getElementById('query'),counter=document.getElementById('matches'),coverage=document.getElementById('coverage');
 const batchPrevious=document.getElementById('search-batch-previous'),batchNext=document.getElementById('search-batch-next');
@@ -248,6 +262,7 @@ addEventListener('message',async event=>{
   workbookData=data.workbook;
   const core=window.UniverCore,locale=core.LocaleType.ZH_CN;
   const locales=core.mergeLocales(window.UniverDesignZhCN,window.UniverUiZhCN,window.UniverDocsUiZhCN,window.UniverSheetsZhCN,window.UniverSheetsUiZhCN,window.UniverSheetsFormulaUiZhCN,window.UniverSheetsNumfmtUiZhCN);
+  localeTexts={'zh-CN':locales,en:core.mergeLocales(window.UniverDesignEnUS,window.UniverUiEnUS,window.UniverDocsUiEnUS,window.UniverSheetsEnUS,window.UniverSheetsUiEnUS,window.UniverSheetsFormulaUiEnUS,window.UniverSheetsNumfmtUiEnUS)};
   univer=new core.Univer({locale,locales:{[locale]:locales},logLevel:core.LogLevel.ERROR});
   univer.registerPlugin(window.UniverEngineRender.UniverRenderEnginePlugin);
   univer.registerPlugin(window.UniverEngineFormula.UniverFormulaEnginePlugin);
@@ -262,6 +277,7 @@ addEventListener('message',async event=>{
   univer.registerPlugin(window.UniverSheetsNumfmtUi.UniverSheetsNumfmtUIPlugin);
   api=window.UniverCoreFacade.FUniver.newAPI(univer);api.createWorkbook({...data.workbook,locale});book=api.getActiveWorkbook();
   if(!book)throw Error('XLSX_WORKBOOK_MISSING');
+  refreshLibraryLanguage();
   for(const id of data.workbook.sheetOrder){
    const option=document.createElement('option');option.value=id;option.textContent=data.workbook.sheets[id].name;sheetSelect.append(option);
   }
@@ -277,7 +293,7 @@ addEventListener('message',async event=>{
   cellReferences=createCellReferences({api,content,getBook:()=>book,isWorking:()=>busy,isRegionActive:()=>!!region?.active,report,run,notice,getLanguage,subscribeLanguage});
   region=createSpreadsheetRegion({api,content,getBook:()=>book,isWorking:()=>busy,report,run,notice,
    onModeChange:()=>{cellReferences.invalidate();controls();},onViewRestored:ratio=>{zoomPercent=ratio*100;zoom.value=String(zoomPercent);}});
-  observeViewScroll();controls();ui(status,'原生工作簿已读取。'+data.warnings.map(warning=>warning.message).join(' '),'Native workbook read. '+data.warnings.map(warning=>warning.message).join(' '));
+  observeViewScroll();controls();ui(status,'原生工作簿已读取。'+data.warnings.map(warning=>warningText(warning,'zh-CN')).join(' '),'Native workbook read. '+data.warnings.map(warning=>warningText(warning,'en')).join(' '));
   report({type:'jot-xlsx-ready',info:{sheets:data.workbook.sheetOrder.length,warnings:data.warnings.length}});
  }catch{if(!closed)fail();}finally{value.bytes=null;}
 });
