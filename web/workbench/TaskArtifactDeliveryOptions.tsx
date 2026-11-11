@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
+import {taskUiMessage} from './task-ui-messages';
 import React,{useEffect,useId,useRef} from 'react';
 import type {ChannelBinding} from './types';
 import {reconcileTaskArtifactDeliverySelection,taskArtifactDeliveryAvailability,updateTaskArtifactDeliverySelection} from './task-artifact-delivery-options.mjs';
@@ -28,6 +30,8 @@ function sameSelection(left:readonly TaskArtifactDeliverySelection[],right:reado
 }
 
 export default function TaskArtifactDeliveryOptions({targets,notificationDraft,selected,scopeEpoch,disabled=false,selectionFrozen=false,onChange}:TaskArtifactDeliveryOptionsProps){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const message=(value:string)=>taskUiMessage(value,language);
  const scope=useRef({epoch:scopeEpoch,settingsVersion:notificationDraft.expected_version}),id=useId(),completedEnabled=notificationDraft.events.includes('completed');
  const normalized=reconcileTaskArtifactDeliverySelection(selected,targets,notificationDraft),scopeChanged=scope.current.epoch!==scopeEpoch||scope.current.settingsVersion!==notificationDraft.expected_version;
  useEffect(()=>{
@@ -36,17 +40,17 @@ export default function TaskArtifactDeliveryOptions({targets,notificationDraft,s
   if(!sameSelection(selected,normalized))onChange(normalized);
  },[normalized,onChange,scopeChanged,scopeEpoch,selected,selectionFrozen]);
  const visibleSelection=scopeChanged?[]:normalized;
- return <fieldset className="wb-form" aria-label="本任务文件输出" disabled={disabled||selectionFrozen}>
-  <legend>任务文件输出</legend>
-  <p className="wb-hint">可逐个选择已验证且支持文件输出的通知渠道。只有任务完成提醒开启时，文件选择才可用；开启文本提醒不会自动同意发送文件。</p>
-  {!completedEnabled&&<p className="wb-status" role="status">任务完成提醒已关闭。开启后可单独选择文件输出。</p>}
-  {!targets.length&&<p className="wb-status" role="status">当前没有可配置的通知渠道。</p>}
+ return <fieldset lang={language} className="wb-form" aria-label={message('本任务文件输出')} disabled={disabled||selectionFrozen}>
+  <legend>{message('任务文件输出')}</legend>
+  <p className="wb-hint">{message('可逐个选择已验证且支持文件输出的通知渠道。只有任务完成提醒开启时，文件选择才可用；开启文本提醒不会自动同意发送文件。')}</p>
+  {!completedEnabled&&<p className="wb-status" role="status">{message('任务完成提醒已关闭。开启后可单独选择文件输出。')}</p>}
+  {!targets.length&&<p className="wb-status" role="status">{message('当前没有可配置的通知渠道。')}</p>}
   {targets.map((target,index)=>{
    const availability=taskArtifactDeliveryAvailability(target,notificationDraft),reasonId=`${id}-reason-${index}`,checked=visibleSelection.some(choice=>choice.channel_binding_id===target.channel_binding_id&&choice.binding_version===target.version);
-   const label=target.channel_binding_id.slice(-6)||'未知渠道',channel=channelLabels[target.channel]??'渠道';
+   const label=target.channel_binding_id.slice(-6)||message('未知渠道'),channel=message(channelLabels[target.channel]??'渠道');
    return <div key={target.channel_binding_id}>
-    <label className="wb-checkbox"><input type="checkbox" checked={checked} disabled={!availability.available} aria-describedby={!availability.available?reasonId:undefined} onChange={event=>onChange(updateTaskArtifactDeliverySelection(visibleSelection,targets,notificationDraft,target.channel_binding_id,event.target.checked))}/>{`发送本任务已审核的文件输出到${label}（${channel}）`}</label>
-    {!availability.available&&<small className="wb-hint" id={reasonId}>{reasonText(target,availability.reason)}</small>}
+    <label className="wb-checkbox"><input type="checkbox" checked={checked} disabled={!availability.available} aria-describedby={!availability.available?reasonId:undefined} onChange={event=>onChange(updateTaskArtifactDeliverySelection(visibleSelection,targets,notificationDraft,target.channel_binding_id,event.target.checked))}/>{t(`发送本任务已审核的文件输出到${label}（${channel}）`,`Send This Task’s Reviewed File Output to ${label} (${channel})`)}</label>
+    {!availability.available&&<small className="wb-hint" id={reasonId}>{message(reasonText(target,availability.reason))}</small>}
    </div>;
   })}
  </fieldset>;

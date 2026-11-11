@@ -1,8 +1,12 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
+import {taskUiMessage} from './task-ui-messages';
 import React,{useEffect,useRef,useState} from 'react';
 import type {ChannelBinding} from './types';
 import {request} from '../jot/client';
 import {EmailBindingCommands} from './email-binding-ui.mjs';
 export default function EmailBindingPanel({bindings,onUpdated}:{bindings:ChannelBinding[];onUpdated:()=>void}){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const message=(value:string)=>taskUiMessage(value,language);
  const commands=useRef(new EmailBindingCommands(request));
  const [address,setAddress]=useState(''),[code,setCode]=useState(''),[id,setId]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [confirmedId,setConfirmedId]=useState('');
@@ -17,22 +21,22 @@ export default function EmailBindingPanel({bindings,onUpdated}:{bindings:Channel
  const confirm=(event:React.FormEvent)=>{event.preventDefault();void run(async()=>{
   const result=await commands.current.confirm(id,code);setConfirmedId(result.channel_binding_id);setCode('');setId('');onUpdated();setNotice('邮箱已验证，可在任务通知设置中选择。');
  });};
- return <section aria-label="邮箱绑定"><h5>绑定邮箱</h5>
- <p className="wb-hint">验证邮件只发送到你填写的邮箱。验证后还需在任务通知设置中选择此渠道。</p>
- {error&&<p className="wb-error" role="alert">{error}</p>}{notice&&<p className="wb-status" role="status">{notice}</p>}
- <form className="wb-form" aria-label="申请邮箱验证" onSubmit={begin}>
- <label>通知邮箱<input type="email" maxLength={254} required autoComplete="email" value={address} disabled={busy||commands.current.beginPending} onChange={event=>setAddress(event.target.value)}/></label>
- {commands.current.beginPending&&<p>申请结果待确认，重试沿用原邮箱，不会重复发信。</p>}
- <button type="submit" disabled={busy}>{commands.current.beginPending?'重试原邮箱申请':'发送验证邮件'}</button>
+ return <section lang={language} aria-label={message('邮箱绑定')}><h5>{message('绑定邮箱')}</h5>
+ <p className="wb-hint">{message('验证邮件只发送到你填写的邮箱。验证后还需在任务通知设置中选择此渠道。')}</p>
+ {error&&<p className="wb-error" role="alert">{message(error)}</p>}{notice&&<p className="wb-status" role="status">{message(notice)}</p>}
+ <form className="wb-form" aria-label={message('申请邮箱验证')} onSubmit={begin}>
+ <label>{message('通知邮箱')}<input type="email" maxLength={254} required autoComplete="email" value={address} disabled={busy||commands.current.beginPending} onChange={event=>setAddress(event.target.value)}/></label>
+ {commands.current.beginPending&&<p>{message('申请结果待确认，重试沿用原邮箱，不会重复发信。')}</p>}
+ <button type="submit" disabled={busy}>{message(commands.current.beginPending?'重试原邮箱申请':'发送验证邮件')}</button>
  </form>
- {(pending.length>0||commands.current.confirmPending)&&<form className="wb-form" aria-label="确认邮箱验证" onSubmit={confirm}>
- <fieldset disabled={busy||commands.current.confirmPending}><legend>确认收到的验证码</legend>
- <label>待验证邮箱<select required value={id} onChange={event=>{setId(event.target.value);setCode('');}}>{pending.map(binding=><option key={binding.channel_binding_id} value={binding.channel_binding_id}>邮箱 · {binding.channel_binding_id.slice(-6)}</option>)}</select></label>
- <label>邮箱验证码<input type="text" required minLength={43} maxLength={43} autoComplete="off" spellCheck={false} value={code} onChange={event=>setCode(event.target.value.trim())}/></label>
- </fieldset><small>有效期10分钟，最多5次错误；验证码不保存到浏览器存储。</small>
- {commands.current.confirmPending&&<p>确认结果待核对，重试沿用原验证码。</p>}
- <button type="submit" disabled={busy}>{commands.current.confirmPending?'重试原邮箱确认':'确认邮箱'}</button>
+ {(pending.length>0||commands.current.confirmPending)&&<form className="wb-form" aria-label={message('确认邮箱验证')} onSubmit={confirm}>
+ <fieldset disabled={busy||commands.current.confirmPending}><legend>{message('确认收到的验证码')}</legend>
+ <label>{message('待验证邮箱')}<select required value={id} onChange={event=>{setId(event.target.value);setCode('');}}>{pending.map(binding=><option key={binding.channel_binding_id} value={binding.channel_binding_id}>{t('邮箱 · ','Email · ')}{binding.channel_binding_id.slice(-6)}</option>)}</select></label>
+ <label>{message('邮箱验证码')}<input type="text" required minLength={43} maxLength={43} autoComplete="off" spellCheck={false} value={code} onChange={event=>setCode(event.target.value.trim())}/></label>
+ </fieldset><small>{message('有效期10分钟，最多5次错误；验证码不保存到浏览器存储。')}</small>
+ {commands.current.confirmPending&&<p>{message('确认结果待核对，重试沿用原验证码。')}</p>}
+ <button type="submit" disabled={busy}>{message(commands.current.confirmPending?'重试原邮箱确认':'确认邮箱')}</button>
  </form>}
- <button type="button" disabled={busy} onClick={onUpdated}>刷新邮箱状态</button>
+ <button type="button" disabled={busy} onClick={onUpdated}>{message('刷新邮箱状态')}</button>
  </section>;
 }
