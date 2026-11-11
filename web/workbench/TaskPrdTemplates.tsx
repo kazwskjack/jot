@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
+import {taskUiMessage} from './task-ui-messages';
 import React,{useEffect,useRef,useState} from 'react';
 import {request} from '../jot/client';
 import {useResource} from './useResource';
@@ -10,6 +12,8 @@ import type {TaskPrdTemplates as Templates,TaskPrdTemplateRequest,TaskPrdTemplat
 export default function TaskPrdTemplates({task,locked,ready,save,onStateChange,onSaved}:{
  task:Task;locked:boolean;ready:boolean;save:TaskSaveReceipt;onStateChange:()=>void;onSaved:(receipt:TaskPrdTemplateApply)=>void;
 }){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const message=(value:string)=>taskUiMessage(value,language);
  const identity=`${task.task_id}:${task.version}:${task.status}`;
  const catalog=useResource(signal=>request<Templates>(`/persistent-tasks/${encodeURIComponent(task.task_id)}/prd/templates`,'GET',undefined,undefined,signal),identity);
  const [selected,setSelected]=useState(''),[fileName,setFileName]=useState('prd.md'),[values,setValues]=useState('{}');
@@ -53,33 +57,33 @@ export default function TaskPrdTemplates({task,locked,ready,save,onStateChange,o
  }
  const disabled=locked||busy;
  const textStyle:React.CSSProperties={whiteSpace:'pre-wrap',overflowWrap:'anywhere',wordBreak:'break-word',maxWidth:'100%'};
- return <details><summary>PRD 模板与提示词任务</summary>
-  <label>模板类别<select value={selected} disabled={disabled} onChange={e=>{invalidate();setSelected(e.target.value);if(e.target.value==='task-request')setFileName('task-request.md');}}>
-   <option value="">通用需求模板</option>{catalog.data?.templates.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
+ return <details lang={language}><summary>{message('PRD 模板与提示词任务')}</summary>
+  <label>{message('模板类别')}<select value={selected} disabled={disabled} onChange={e=>{invalidate();setSelected(e.target.value);if(e.target.value==='task-request')setFileName('task-request.md');}}>
+   <option value="">{message('通用需求模板')}</option>{catalog.data?.templates.map(item=><option key={item.id} value={item.id}>{message(item.name)}</option>)}
   </select></label>
-  {catalog.loading&&<p role="status">正在读取模板目录…</p>}
-  {catalog.error&&<p className="wb-error" role="alert">{prdMessage(catalog.error)}</p>}
-  <PrdTextPreview content={template?.content??PRD_TEMPLATE} label="PRD 模板原文" style={textStyle}/>
+  {catalog.loading&&<p role="status">{message('正在读取模板目录…')}</p>}
+  {catalog.error&&<p className="wb-error" role="alert">{message(prdMessage(catalog.error))}</p>}
+  <PrdTextPreview content={template?.content??PRD_TEMPLATE} label={message('PRD 模板原文')} style={textStyle}/>
   {template&&<>
-   <p className="wb-hint">{template.description}。{template.id==='task-request'?'填写下方提示词、优先级和原生依赖后预览。':<>可替换字段为 {template.placeholders.join('、')}。字段值填写为 JSON 字符串对象，未填写的字段保留占位符。</>}</p>
-   <label>文件名<input value={fileName} maxLength={200} disabled={disabled} onChange={e=>{invalidate();setFileName(e.target.value);}}/></label>
+   <p className="wb-hint">{message(template.description)}{t('。','.')}{template.id==='task-request'?message('填写下方提示词、优先级和原生依赖后预览。'):<>{t('可替换字段为 ','Replaceable Fields: ')}{template.placeholders.join(t('、',', '))}{t('。字段值填写为 JSON 字符串对象，未填写的字段保留占位符。','. Enter Field Values as a JSON Object of Strings; Omitted Fields Keep Their Placeholders.')}</>}</p>
+   <label>{message('文件名')}<input value={fileName} maxLength={200} disabled={disabled} onChange={e=>{invalidate();setFileName(e.target.value);}}/></label>
    {template.id==='task-request'?<>
-    <p className="wb-hint">保存请求来源后，可在来源列表选择此精确版本，预览并绑定原暂停任务。绑定选项会预设为追加一项并启用研究，可在确认前调整。由原任务的恢复入口交给原 DSH 生成原生子任务。</p>
-    <label>任务提示词<textarea value={prompt} maxLength={1048576} disabled={disabled} rows={6} onChange={event=>{invalidate();setPrompt(event.target.value);}}/></label>
-    <label>优先级<select value={priority} disabled={disabled} onChange={event=>{invalidate();setPriority(event.target.value);}}><option value="high">high / 90</option><option value="medium">medium / 50</option><option value="low">low / 10</option></select></label>
-    <label>依赖原生 ID JSON 数组<textarea value={dependencies} maxLength={10240} disabled={disabled} rows={2} onChange={event=>{invalidate();setDependencies(event.target.value);}}/></label>
-   </>:<><label>模板字段<textarea value={values} maxLength={524288} disabled={disabled} rows={6} spellCheck={false} onChange={e=>{invalidate();setValues(e.target.value);}}/></label></>}
+    <p className="wb-hint">{message('保存请求来源后，可在来源列表选择此精确版本，预览并绑定原暂停任务。绑定选项会预设为追加一项并启用研究，可在确认前调整。由原任务的恢复入口交给原 DSH 生成原生子任务。')}</p>
+    <label>{message('任务提示词')}<textarea value={prompt} maxLength={1048576} disabled={disabled} rows={6} onChange={event=>{invalidate();setPrompt(event.target.value);}}/></label>
+    <label>{message('优先级')}<select value={priority} disabled={disabled} onChange={event=>{invalidate();setPriority(event.target.value);}}><option value="high">high / 90</option><option value="medium">medium / 50</option><option value="low">low / 10</option></select></label>
+    <label>{message('依赖原生 ID JSON 数组')}<textarea value={dependencies} maxLength={10240} disabled={disabled} rows={2} onChange={event=>{invalidate();setDependencies(event.target.value);}}/></label>
+   </>:<><label>{message('模板字段')}<textarea value={values} maxLength={524288} disabled={disabled} rows={6} spellCheck={false} onChange={e=>{invalidate();setValues(e.target.value);}}/></label></>}
 
-   <button type="button" disabled={disabled||template.id==='task-request'&&!prompt.trim()} onClick={()=>void loadPreview()}>{busy?'正在生成预览…':'只读模板预览'}</button>
+   <button type="button" disabled={disabled||template.id==='task-request'&&!prompt.trim()} onClick={()=>void loadPreview()}>{message(busy?'正在生成预览…':'只读模板预览')}</button>
   </>}
   {preview&&<>
-   <PrdTextPreview content={preview.content} label="模板填充预览" style={textStyle}/>
-   <dl style={{overflowWrap:'anywhere'}}><dt>目标文件 / 当前版本</dt><dd>{preview.target.path} / v{preview.target.version}</dd><dt>正文 SHA-256</dt><dd>{preview.content_sha256}</dd><dt>预览 SHA-256</dt><dd>{preview.preview_sha256}</dd></dl>
-   <label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={disabled||!ready} onChange={e=>setConfirmed(e.target.checked)}/>我已核对正文和目标版本，确认保存到原项目文件版本库。</label>
+   <PrdTextPreview content={preview.content} label={message('模板填充预览')} style={textStyle}/>
+   <dl style={{overflowWrap:'anywhere'}}><dt>{message('目标文件 / 当前版本')}</dt><dd>{preview.target.path} / v{preview.target.version}</dd><dt>{message('正文 SHA-256')}</dt><dd>{preview.content_sha256}</dd><dt>{message('预览 SHA-256')}</dt><dd>{preview.preview_sha256}</dd></dl>
+   <label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={disabled||!ready} onChange={e=>setConfirmed(e.target.checked)}/>{message('我已核对正文和目标版本，确认保存到原项目文件版本库。')}</label>
   </>}
-  {(preview||save.pending)&&<button type="button" disabled={save.busy||(!save.pending&&(disabled||!ready||!confirmed))} onClick={()=>void apply()}>{save.busy?'正在保存模板…':save.pending?'重试原模板保存回执':'保存模板文件'}</button>}
-  {save.pending&&<p role="status">模板保存结果待确认，已保留原请求及 key。请重试原回执。</p>}
-  {receipt&&<p role="status" style={{overflowWrap:'anywhere'}}>已保存 {receipt.file.path} · v{receipt.file.version} · SHA-256 {receipt.file.sha256}。可从来源列表继续预览并绑定原任务。</p>}
-  {error&&<p className="wb-error" role="alert">{error}</p>}
+  {(preview||save.pending)&&<button type="button" disabled={save.busy||(!save.pending&&(disabled||!ready||!confirmed))} onClick={()=>void apply()}>{message(save.busy?'正在保存模板…':save.pending?'重试原模板保存回执':'保存模板文件')}</button>}
+  {save.pending&&<p role="status">{message('模板保存结果待确认，已保留原请求及 key。请重试原回执。')}</p>}
+  {receipt&&<p role="status" style={{overflowWrap:'anywhere'}}>{t('已保存 ','Saved ')}{receipt.file.path} · v{receipt.file.version} · SHA-256 {receipt.file.sha256}{t('。可从来源列表继续预览并绑定原任务。','. Continue Previewing and Binding the Original Task from Sources.')}</p>}
+  {error&&<p className="wb-error" role="alert">{message(error)}</p>}
  </details>;
 }

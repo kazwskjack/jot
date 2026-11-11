@@ -1,3 +1,5 @@
+import {useApplicationLanguage,useApplicationText} from '../jot/application-language';
+import {taskUiMessage} from './task-ui-messages';
 import React,{useEffect,useRef,useState} from 'react';
 import {request} from '../jot/client';
 import {useResource} from './useResource';
@@ -14,6 +16,8 @@ const textStyle:React.CSSProperties={whiteSpace:'pre-wrap',overflowWrap:'anywher
 export default function TaskPrdProjectFiles({task,locked,ready,save,onStateChange,onSaved}:{
  task:Task;locked:boolean;ready:boolean;save:TaskSaveReceipt;onStateChange:()=>void;onSaved:(receipt:TaskPrdProjectDocumentImport)=>void;
 }){
+ const language=useApplicationLanguage(),t=useApplicationText();
+ const message=(value:string)=>taskUiMessage(value,language);
  const context=`${task.task_id}:${task.version}:${task.status}`;
  const [open,setOpen]=useState(save.pending);
  const [after,setAfter]=useState(''),[previous,setPrevious]=useState<string[]>([]);
@@ -56,26 +60,26 @@ export default function TaskPrdProjectFiles({task,locked,ready,save,onStateChang
  }
  function page(cursor:string,history:string[]){if(locked||busy)return;invalidate();setAfter(cursor);setPrevious(history);}
  const disabled=locked||busy;
- return <details open={open} onToggle={e=>setOpen(e.currentTarget.open)}><summary>原项目 PRD 文件</summary>
-  <p className="wb-hint">读取此任务原项目 Git 目录中的 .taskmaster/docs 文件，每页最多 50 项。选择后核对原文与目标版本，确认导入原逻辑文件版本库，再沿下方来源预览并绑定原任务。</p>
-  <button type="button" disabled={disabled||files.loading} onClick={()=>{invalidate();files.reload();}}>刷新项目 PRD</button>
-  {files.loading&&<p role="status">正在读取项目 PRD 文件目录…</p>}
-  {files.error&&<p className="wb-error" role="alert">{prdMessage(files.error)}</p>}
+ return <details lang={language} open={open} onToggle={e=>setOpen(e.currentTarget.open)}><summary>{message('原项目 PRD 文件')}</summary>
+  <p className="wb-hint">{message('读取此任务原项目 Git 目录中的 .taskmaster/docs 文件，每页最多 50 项。选择后核对原文与目标版本，确认导入原逻辑文件版本库，再沿下方来源预览并绑定原任务。')}</p>
+  <button type="button" disabled={disabled||files.loading} onClick={()=>{invalidate();files.reload();}}>{message('刷新项目 PRD')}</button>
+  {files.loading&&<p role="status">{message('正在读取项目 PRD 文件目录…')}</p>}
+  {files.error&&<p className="wb-error" role="alert">{message(prdMessage(files.error))}</p>}
   {!files.loading&&listing&&<>
-   <p role="status">{listing.directory_state==='missing'?'未找到 .taskmaster/docs 目录':`共 ${listing.total} 个可列入的 PRD 文件`}。{listing.unsupported_count>0&&`另有 ${listing.unsupported_count} 个条目因文件类型或安全文件名限制无法列入。`}</p>
-   <ul>{listing.files.map(file=><li key={file.path} style={{overflowWrap:'anywhere'}}>{file.name} · {file.size} 字节 · {states[file.state]} <button type="button" disabled={disabled||file.state!=='available'} onClick={()=>void loadPreview(file.name)}>预览原文</button></li>)}</ul>
-   <div className="wb-actions"><button type="button" disabled={disabled||previous.length===0} onClick={()=>page(previous[previous.length-1]!,previous.slice(0,-1))}>上一页</button><button type="button" disabled={disabled||listing.next_after===null} onClick={()=>page(listing.next_after!,[...previous,after])}>下一页</button></div>
+   <p role="status">{listing.directory_state==='missing'?t('未找到 .taskmaster/docs 目录','The .taskmaster/docs Directory Was Not Found'):t(`共 ${listing.total} 个可列入的 PRD 文件`,`${listing.total} Listable PRD Files`)}{t('。','.')}{listing.unsupported_count>0&&t(`另有 ${listing.unsupported_count} 个条目因文件类型或安全文件名限制无法列入。`,`${listing.unsupported_count} Other Entries Cannot Be Listed Due to File Type or Safe File Name Restrictions.`)}</p>
+   <ul>{listing.files.map(file=><li key={file.path} style={{overflowWrap:'anywhere'}}>{file.name} · {file.size}{t(' 字节 · ',' Bytes · ')}{message(states[file.state])} <button type="button" disabled={disabled||file.state!=='available'} onClick={()=>void loadPreview(file.name)}>{message('预览原文')}</button></li>)}</ul>
+   <div className="wb-actions"><button type="button" disabled={disabled||previous.length===0} onClick={()=>page(previous[previous.length-1]!,previous.slice(0,-1))}>{message('上一页')}</button><button type="button" disabled={disabled||listing.next_after===null} onClick={()=>page(listing.next_after!,[...previous,after])}>{message('下一页')}</button></div>
   </>}
-  {busy&&<p role="status">正在读取原文快照…</p>}
+  {busy&&<p role="status">{message('正在读取原文快照…')}</p>}
   {preview&&<>
-   <p role="status">{preview.file.path} · {previewStates[preview.file.state]} · {preview.file.size} 字节</p>
-   {preview.file.content!==null&&<PrdTextPreview content={preview.file.content} label="原项目 PRD 原文" style={textStyle}/>}
-   <dl style={textStyle}><dt>来源 SHA-256</dt><dd>{preview.file.sha256??'不可读取'}</dd><dt>目标文件 / 当前版本</dt><dd>{preview.target.path} / v{preview.target.version}</dd><dt>预览 SHA-256</dt><dd>{preview.preview_sha256}</dd></dl>
-   <label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={disabled||!ready||preview.file.state!=='ready'} onChange={e=>setConfirmed(e.target.checked)}/>我已核对原文、来源和目标版本，确认保存此快照为项目文件的新版本。</label>
+   <p role="status">{preview.file.path} · {message(previewStates[preview.file.state])} · {preview.file.size}{t(' 字节',' Bytes')}</p>
+   {preview.file.content!==null&&<PrdTextPreview content={preview.file.content} label={message('原项目 PRD 原文')} style={textStyle}/>}
+   <dl style={textStyle}><dt>{message('来源 SHA-256')}</dt><dd>{preview.file.sha256??message('不可读取')}</dd><dt>{message('目标文件 / 当前版本')}</dt><dd>{preview.target.path} / v{preview.target.version}</dd><dt>{message('预览 SHA-256')}</dt><dd>{preview.preview_sha256}</dd></dl>
+   <label className="wb-checkbox"><input type="checkbox" checked={confirmed} disabled={disabled||!ready||preview.file.state!=='ready'} onChange={e=>setConfirmed(e.target.checked)}/>{message('我已核对原文、来源和目标版本，确认保存此快照为项目文件的新版本。')}</label>
   </>}
-  {(preview||save.pending)&&<button type="button" disabled={save.busy||(!save.pending&&(disabled||!ready||!confirmed||preview?.file.state!=='ready'))} onClick={()=>void importFile()}>{save.busy?'正在导入项目 PRD…':save.pending?'重试原 PRD 导入回执':'导入原项目 PRD'}</button>}
-  {save.pending&&<p role="status">PRD 导入结果待确认，已保留原请求及 key。请重试原回执。</p>}
-  {receipt&&<p role="status" style={textStyle}>已保存 {receipt.file.path} · v{receipt.file.version} · SHA-256 {receipt.file.sha256}。可从下方来源继续预览和绑定。</p>}
-  {error&&<p className="wb-error" role="alert">{error}</p>}
+  {(preview||save.pending)&&<button type="button" disabled={save.busy||(!save.pending&&(disabled||!ready||!confirmed||preview?.file.state!=='ready'))} onClick={()=>void importFile()}>{message(save.busy?'正在导入项目 PRD…':save.pending?'重试原 PRD 导入回执':'导入原项目 PRD')}</button>}
+  {save.pending&&<p role="status">{message('PRD 导入结果待确认，已保留原请求及 key。请重试原回执。')}</p>}
+  {receipt&&<p role="status" style={textStyle}>{t('已保存 ','Saved ')}{receipt.file.path} · v{receipt.file.version} · SHA-256 {receipt.file.sha256}{t('。可从下方来源继续预览和绑定。','. Continue Previewing and Binding from Sources Below.')}</p>}
+  {error&&<p className="wb-error" role="alert">{message(error)}</p>}
  </details>;
 }
