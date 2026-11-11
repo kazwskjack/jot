@@ -4,7 +4,7 @@ export type LightPalette={accent:string;background:string};
 export type LightPreset='default'|'blue'|'mint'|'apricot'|'lavender'|'rose'|'custom';
 export type LightAppearance={version:2;preset:LightPreset;custom:LightPalette;background:{type:'solid'|'image';imageId:string|null;fit:'cover'|'contain';blur:number;brightness:number;saturation:number;positionX:number;positionY:number};transparency:number};
 export const LIGHT_PRESETS:Record<Exclude<LightPreset,'custom'>,LightPalette>;
-export const LIGHT_APPEARANCE_KEY:string;
+export const LIGHT_APPEARANCE_KEY:string,LEGACY_LIGHT_APPEARANCE_KEY:string;
 export const MIN_TRANSPARENCY:number,MAX_TRANSPARENCY:number,DEFAULT_TRANSPARENCY:number,MAX_BACKGROUND_BYTES:number,LIGHT_SURFACE:string;
 export function isHexColor(value:unknown):value is string;
 export function isImageId(value:unknown):value is string;

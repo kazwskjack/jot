@@ -289,7 +289,7 @@ export async function startDesktop(electron,{startLocalBackendImpl=startLocalBac
    if(shuttingDown||mainWindow!==window||window.isDestroyed()||window.webContents.isDestroyed?.())return;
    const value=appearanceStore?.read();if(!value?.stored)return;
    try{if(nativeTheme&&nativeTheme.themeSource!==value.themeMode)nativeTheme.themeSource=value.themeMode;
-    windowChrome?.setAppearance({theme:resolvedTheme(value.themeMode),appearance:withoutMissingImage(value.lightAppearance,true)});
+    windowChrome?.syncPreferences({theme:resolvedTheme(value.themeMode),appearance:value.lightAppearance});
    }catch(error){report(error);}
   };
   nativeTheme?.on?.('updated',applySavedAppearance);

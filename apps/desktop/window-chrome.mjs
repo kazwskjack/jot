@@ -1,5 +1,5 @@
 // Adapts PilotDeck 783499ff windowChrome/preloadChrome; AGPL-3.0.
-import {deriveLightColors,isCustomizedLightAppearance,normalizeLightAppearance} from '../../packages/desktop/src/light-appearance.mjs';
+import {deriveLightColors,isCustomizedLightAppearance,normalizeLightAppearance,withoutMissingImage} from '../../packages/desktop/src/light-appearance.mjs';
 import {isDesktopAppUrl} from './desktop-security.mjs';
 export function windowChromePalette(theme,lightAppearance){
  const value=normalizeLightAppearance(lightAppearance);
@@ -39,7 +39,11 @@ export function createDesktopWindowChrome({owner,getWindow,appOrigin,getMenus,pl
   if(value?.theme!=='light'&&value?.theme!=='dark')throw Error('desktop_window_theme_invalid');
   theme=value.theme;lightAppearance=normalizeLightAppearance(value.appearance);publish();return read();
  };
+ const syncPreferences=value=>{
+  const appearance=normalizeLightAppearance(value.appearance);
+  return setAppearance({theme:value.theme,appearance:withoutMissingImage(appearance,appearance.background.imageId!==lightAppearance?.background?.imageId)});
+ };
  const dispose=()=>{if(disposed)return;disposed=true;owner.off('enter-full-screen',publish);owner.off('leave-full-screen',publish);owner.off('closed',dispose);};
  owner.on('enter-full-screen',publish);owner.on('leave-full-screen',publish);owner.on('closed',dispose);
- return Object.freeze({read,setTheme,setAppearance,publish,dispose});
+ return Object.freeze({read,setTheme,setAppearance,syncPreferences,publish,dispose});
 }

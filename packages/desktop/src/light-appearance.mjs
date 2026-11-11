@@ -1,13 +1,16 @@
 // Adapts OpenBMB PilotDeck 783499ff lightAppearance; AGPL-3.0.
 export const LIGHT_PRESETS = {
-  default: { accent: '#5b5ce2', background: '#eef0f8' },
+  // Default follows Jot's established light theme; all consumers share this palette.
+  default: { accent: '#b65d2b', background: '#faf9f6' },
   blue: { accent: '#386ab4', background: '#eaf1fb' },
   mint: { accent: '#187c65', background: '#eaf5ef' },
   apricot: { accent: '#a56028', background: '#fbf0e5' },
   lavender: { accent: '#7955b3', background: '#f1ecfa' },
   rose: { accent: '#b24d72', background: '#faedf2' },
 };
-export const LIGHT_APPEARANCE_KEY = 'jot-light-appearance-v1';
+// Older pages do not participate in the image transaction barrier.
+export const LEGACY_LIGHT_APPEARANCE_KEY = 'jot-light-appearance-v1';
+export const LIGHT_APPEARANCE_KEY = 'jot-light-appearance-v2';
 export const MIN_TRANSPARENCY = 5;
 export const MAX_TRANSPARENCY = 40;
 export const DEFAULT_TRANSPARENCY = 15;

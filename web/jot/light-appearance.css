@@ -18,3 +18,22 @@ html[data-theme=light][data-jot-light-appearance] :is(.app>aside,.workbench-appl
 .jot-appearance-color input{font:inherit;min-width:0;width:100%;height:34px;padding:4px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px}
 .jot-appearance-color input[aria-invalid=true]{border-color:#c0392b}
 .jot-appearance-note{font-size:12px;color:var(--muted)}
+
+html[data-theme=light][data-jot-light-image] body{isolation:isolate}
+html[data-theme=light][data-jot-light-image] body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background-image:var(--jot-light-wallpaper);background-size:var(--jot-light-image-fit);background-position:var(--jot-light-image-position);background-repeat:no-repeat;filter:blur(var(--jot-light-image-blur)) brightness(var(--jot-light-image-brightness)) saturate(var(--jot-light-image-saturation))}
+html[data-theme=light][data-jot-light-image] .workbench-application{background:transparent}
+html[data-theme=light][data-jot-light-image] :is(.app>main,.workbench-application .wb-content,.workbench-application>.workbench-conversation,.workbench-application>[data-desktop-target=chat],.workbench-application>p,#root>section){background:var(--jot-light-content-fill)}
+html[data-theme=light][data-jot-light-image] :is(.app>aside,.workbench-application [data-desktop-sidebar]){background:var(--jot-light-sidebar-fill)}
+.jot-appearance-image-upload{padding:10px;border:1px dashed var(--line);border-radius:8px}
+.jot-appearance-image-upload button{margin:4px}
+.jot-appearance-image-preview{height:150px;overflow:hidden;border:1px solid var(--line);border-radius:8px;background:var(--jot-light-canvas,var(--panel))}
+.jot-appearance-image-preview img{display:block;width:100%;height:100%;object-fit:var(--jot-light-image-fit,cover);object-position:var(--jot-light-image-position,50% 50%);filter:blur(var(--jot-light-image-blur,0px)) brightness(var(--jot-light-image-brightness,100%)) saturate(var(--jot-light-image-saturation,100%))}
+.jot-appearance-slider{display:grid;grid-template-columns:minmax(0,1fr) 64px 26px;align-items:center;gap:8px;margin:12px 0}
+.jot-appearance-slider>label{grid-column:1/-1}
+.jot-appearance-slider>span{display:block;font-size:12px;color:var(--muted)}
+.jot-appearance-slider input{min-width:0;width:100%;font:inherit;accent-color:var(--accent)}
+.jot-appearance-slider input[type=number],.jot-appearance-panel select{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:4px}
+.jot-appearance-panel select{margin:8px;max-width:100%}
+
+/* Large reading cards share their parent's single translucent fill; dialogs keep their own surface. */
+html[data-theme=light][data-jot-light-image] .workbench-application .wb-content :is(.wb-agent-card,.wb-task-card,.wb-form,.wb-message-list article):not([role=dialog],[aria-modal=true],[data-dialog-surface]):not([role=dialog] *,[aria-modal=true] *,[data-dialog-surface] *){background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none}
