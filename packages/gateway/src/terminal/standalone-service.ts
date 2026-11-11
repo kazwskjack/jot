@@ -1,6 +1,7 @@
 import type {DatabaseSync} from 'node:sqlite';
 import {validateTerminalInventory} from './inventory.js';
-import {validateTerminalOptions} from './control.js';
+import {validateTerminalOptions,validateTerminalCommand,validateTerminalReceipt,type TerminalCommand} from './control.js';
+import {reserveStandaloneTerminalCommand,readStandaloneTerminalCommandReceipt,settleStandaloneTerminalCommand} from './standalone-commands.ts';
 import {prepareStandaloneTerminalAdmission,readStandaloneTerminalAdmission,claimStandaloneTerminalAdmission,cancelStandaloneTerminalAdmission,
  markStandaloneTerminalUnknown,confirmStandaloneTerminalAdmission,type StandaloneTerminalAdmission} from './standalone-admissions.ts';
 
@@ -14,6 +15,8 @@ export interface StandaloneTerminalClient{
  readInventory?(admission:StandaloneTerminalAdmission,signal:AbortSignal):Promise<unknown>;
  standaloneTerminalOptions?(admission:StandaloneTerminalAdmission,signal:AbortSignal):Promise<unknown>;
  recoverStandaloneTerminal?(admission:StandaloneTerminalAdmission,signal:AbortSignal):Promise<unknown>;
+ standaloneTerminalCommand?(admission:StandaloneTerminalAdmission,command:TerminalCommand,signal:AbortSignal):Promise<unknown>;
+ standaloneTerminalReceipt?(admission:StandaloneTerminalAdmission,command:TerminalCommand,signal:AbortSignal):Promise<unknown>;
 }
 export type StandaloneTerminalExpected={request_id:string;expected_version:number;expected_state_sha256:string};
 const hash=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
@@ -100,6 +103,48 @@ export class StandaloneTerminalAdmissions{
    const value=await nativeCall(signal,bounded=>this.client!.createSession(claimed,bounded));signal.throwIfAborted();
    return this.confirm(owner,claimed,value);
   }catch{return this.unknown(owner,claimed.request_id);}
+ }
+ private commandAdmission(owner:string,request:string){
+  const row=this.read(owner,request);
+  if(!row)throw Error('standalone_terminal_admission_missing');
+  if(row.state!=='ready')throw Error('standalone_terminal_transition_invalid');
+  return row;
+ }
+ async terminalCommand(owner:string,request:string,input:TerminalCommand,signal:AbortSignal){
+  signal.throwIfAborted();const row=this.commandAdmission(owner,request),command=validateTerminalCommand(input);
+  if(typeof this.client?.standaloneTerminalCommand!=='function')throw Error('standalone_terminal_native_unavailable');
+  const claim=reserveStandaloneTerminalCommand(this.db,row,command);
+  if(!claim.fresh){
+   const saved=readStandaloneTerminalCommandReceipt(this.db,row,command);
+   if(saved.state==='completed')return saved.inventory!;
+   throw Error(saved.state==='wait_ended_unknown'?'terminal_wait_ended_unknown':'terminal_outcome_unknown');
+  }
+  try{
+   const inventory=validateTerminalInventory(await nativeCall(signal,bounded=>this.client!.standaloneTerminalCommand!(row,command,bounded)),row.session_id);
+   signal.throwIfAborted();this.scope(row.workspace_id);
+   const receipt=settleStandaloneTerminalCommand(this.db,row,command,validateTerminalReceipt({protocol:1,session_id:row.session_id,
+    host_instance:command.host_instance,request_id:command.request_id,state:'completed',inventory,rejection:null,execution_authorized:false},command,row.session_id));
+   if(receipt.state!=='completed')throw Error('terminal_wait_ended_unknown');
+   return receipt.inventory!;
+  }catch(error){
+   if((error as Error)?.message==='terminal_wait_ended_unknown')throw error;
+   throw Error('terminal_outcome_unknown');
+  }
+ }
+ async terminalReceipt(owner:string,request:string,input:TerminalCommand,signal:AbortSignal,endWait=false){
+  signal.throwIfAborted();const row=this.commandAdmission(owner,request),command=validateTerminalCommand(input);
+  if(endWait)reserveStandaloneTerminalCommand(this.db,row,command);
+  const saved=readStandaloneTerminalCommandReceipt(this.db,row,command);
+  if(saved.state!=='unknown')return saved;
+  if(endWait)return settleStandaloneTerminalCommand(this.db,row,command,{...saved,state:'wait_ended_unknown'});
+  if(typeof this.client?.standaloneTerminalReceipt!=='function')return saved;
+  let value;
+  try{value=validateTerminalReceipt(await nativeCall(signal,bounded=>this.client!.standaloneTerminalReceipt!(row,command,bounded)),command,row.session_id);}
+  catch{signal.throwIfAborted();return readStandaloneTerminalCommandReceipt(this.db,row,command);}
+  signal.throwIfAborted();this.scope(row.workspace_id);
+  if(value.state==='completed'||value.state==='rejected')return settleStandaloneTerminalCommand(this.db,row,command,value);
+  const current=readStandaloneTerminalCommandReceipt(this.db,row,command);
+  return current.state==='unknown'&&value.state==='pending'?value:current;
  }
  async terminalOptions(owner:string,request:string,signal:AbortSignal,recover=false){
   signal.throwIfAborted();const row=this.read(owner,request);

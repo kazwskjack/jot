@@ -242,6 +242,22 @@ export class WorkbenchBridge {
       ||['owner_id','request_id','session_id','authority_sha256'].some(key=>value[key]!==input[key]))throw Error('standalone_terminal_attempt_unconfirmed');
     combined.throwIfAborted();return Object.freeze(value);
   }
+  async claimStandaloneTerminalCommand(input,signal){
+    const keys=['admission_id','admission_state_sha256','command_sha256','owner_id','request_id'];
+    if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).sort().join(',')!==keys.join(',')
+      ||!['owner_id','admission_id','request_id'].every(key=>typeof input[key]==='string'&&ID.test(input[key]))
+      ||!['admission_state_sha256','command_sha256'].every(key=>typeof input[key]==='string'&&/^[a-f0-9]{64}$/.test(input[key])))throw Error('standalone_terminal_attempt_invalid');
+    const combined=AbortSignal.any([AbortSignal.timeout(15000),...(signal?[signal]:[])]);combined.throwIfAborted();
+    const response=await this.fetch(this.origin+'/internal/v1/workbench/standalone-terminal-command-attempt',{method:'POST',redirect:'error',headers:{authorization:'Bearer '+this.token,'content-type':'application/json'},body:JSON.stringify(input),signal:combined});
+    combined.throwIfAborted();if(!response.ok)throw Error('standalone_terminal_attempt_unconfirmed');
+    const reader=response.body?.getReader();if(!reader)throw Error('standalone_terminal_attempt_unconfirmed');const chunks=[];let size=0,done=false;
+    try{for(;;){const part=await reader.read();combined.throwIfAborted();if(part.done){done=true;break;}size+=part.value.byteLength;if(size>4096)throw Error('standalone_terminal_attempt_unconfirmed');chunks.push(Buffer.from(part.value));}}
+    finally{if(!done)await reader.cancel().catch(()=>{});reader.releaseLock();}
+    const value=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if(!value||Array.isArray(value)||Object.keys(value).sort().join(',')!=='admission_id,admission_state_sha256,attempt_allowed,command_sha256,execution_authorized,owner_id,protocol,request_id'
+      ||value.protocol!==1||value.execution_authorized!==false||typeof value.attempt_allowed!=='boolean'||keys.some(key=>value[key]!==input[key]))throw Error('standalone_terminal_attempt_unconfirmed');
+    combined.throwIfAborted();return Object.freeze(value);
+  }
   async nativeAdmission(sessionRef,signal){
     if(typeof sessionRef!=='string'||!ID.test(sessionRef))throw Error('native_workspace_admission_invalid');
     const combined=AbortSignal.any([AbortSignal.timeout(15000),...(signal?[signal]:[])]);combined.throwIfAborted();

@@ -277,6 +277,12 @@ export class SessionControllerClient {
   createSession(admission:StandaloneTerminalAdmission,signal:AbortSignal){
     return this.standaloneTerminalPost('/v1/standalone-terminals/create',admission,signal);
   }
+  standaloneTerminalCommand(admission:StandaloneTerminalAdmission,command:TerminalCommand,signal:AbortSignal){
+    return this.standaloneTerminalPost('/v1/standalone-terminals/commands',{admission,command},signal);
+  }
+  standaloneTerminalReceipt(admission:StandaloneTerminalAdmission,command:TerminalCommand,signal:AbortSignal){
+    return this.standaloneTerminalPost('/v1/standalone-terminals/receipts',{admission,command},signal);
+  }
   standaloneTerminalOptions(admission:StandaloneTerminalAdmission,signal:AbortSignal){
     return this.standaloneTerminalPost('/v1/standalone-terminals/options',admission,signal);
   }

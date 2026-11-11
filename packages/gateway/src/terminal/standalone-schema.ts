@@ -15,6 +15,17 @@ export function installStandaloneTerminalAdmissions(db:DatabaseSync){
    PRIMARY KEY(owner_id,request_id),FOREIGN KEY(owner_id,request_id) REFERENCES ga_standalone_terminal_admissions(owner_id,request_id));
   CREATE TRIGGER IF NOT EXISTS ga_standalone_terminal_attempt_immutable BEFORE UPDATE ON ga_standalone_terminal_native_attempts
    BEGIN SELECT RAISE(ABORT,'standalone_terminal_attempt_immutable'); END;
+  CREATE TABLE IF NOT EXISTS ga_standalone_terminal_commands(
+   owner_id TEXT NOT NULL,admission_id TEXT NOT NULL,request_id TEXT NOT NULL,command_sha256 TEXT NOT NULL,command_json TEXT NOT NULL,
+   admission_state_sha256 TEXT NOT NULL,native_attempted_at TEXT,receipt_json TEXT,created_at TEXT NOT NULL,
+   PRIMARY KEY(owner_id,admission_id,request_id),FOREIGN KEY(owner_id,admission_id) REFERENCES ga_standalone_terminal_admissions(owner_id,request_id));
+  CREATE TRIGGER IF NOT EXISTS ga_standalone_terminal_command_immutable BEFORE UPDATE ON ga_standalone_terminal_commands
+   WHEN NEW.owner_id IS NOT OLD.owner_id OR NEW.admission_id IS NOT OLD.admission_id OR NEW.request_id IS NOT OLD.request_id
+    OR NEW.command_sha256 IS NOT OLD.command_sha256 OR NEW.command_json IS NOT OLD.command_json
+    OR NEW.admission_state_sha256 IS NOT OLD.admission_state_sha256 OR NEW.created_at IS NOT OLD.created_at
+    OR (OLD.native_attempted_at IS NOT NULL AND NEW.native_attempted_at IS NOT OLD.native_attempted_at)
+    OR OLD.receipt_json IS NOT NULL
+   BEGIN SELECT RAISE(ABORT,'standalone_terminal_command_immutable'); END;
   CREATE INDEX IF NOT EXISTS idx_ga_standalone_terminal_owner ON ga_standalone_terminal_admissions(owner_id,workspace_id,request_id);
   CREATE TRIGGER IF NOT EXISTS ga_standalone_terminal_identity BEFORE UPDATE ON ga_standalone_terminal_admissions
   WHEN NEW.owner_id IS NOT OLD.owner_id OR NEW.request_id IS NOT OLD.request_id

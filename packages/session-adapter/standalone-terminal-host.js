@@ -3,8 +3,8 @@ import {lstatSync,realpathSync} from 'node:fs';
 import {isAbsolute} from 'node:path';
 import {createOrResumeSession} from './session-admission.js';
 import {sessionHeaderIdentity} from './session-header-identity.js';
-import {projectTerminalInventory} from '../gateway/src/terminal/inventory.js';
-import {validateTerminalOptions} from '../gateway/src/terminal/control.js';
+import {projectTerminalInventory,validateTerminalInventory} from '../gateway/src/terminal/inventory.js';
+import {validateTerminalOptions,validateTerminalCommand,validateTerminalReceipt} from '../gateway/src/terminal/control.js';
 const id=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$/.test(value);
 const uuid=value=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
 const hash=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
@@ -28,7 +28,7 @@ export function normalizeStandaloneTerminalBindings(bindings,allowedPresets){
  }));
 }
 /** Native owner profile and operator-provisioned paths supply all creation authority. */
-export function createStandaloneTerminalHost({bindings,allowedPresets,readIdentity,sessionController,agents,sessions,sessionNotFoundError,claimAttempt,terminalController,terminalControl}){
+export function createStandaloneTerminalHost({bindings,allowedPresets,readIdentity,sessionController,agents,sessions,sessionNotFoundError,claimAttempt,terminalController,terminalControl,claimCommand}){
  if(typeof readIdentity!=='function'||typeof sessionController!=='function'||typeof agents?.get!=='function'||typeof sessions?.get!=='function'||typeof claimAttempt!=='function')throw Error('standalone_terminal_host_unavailable');
  const origin=Object.freeze({...readIdentity()}),controller=sessionController(),lifetime=new AbortController();
  if(!id(origin?.ownerId)||!id(origin?.profileId)||typeof origin.profileDirectory!=='string'||!isAbsolute(origin.profileDirectory)
@@ -89,9 +89,8 @@ export function createStandaloneTerminalHost({bindings,allowedPresets,readIdenti
   if(!terminals)return fail();
   const inspect=async()=>{const header=await inspection(admission,active,true);
    if(!header||digest(sessionHeaderIdentity(header))!==admission.native_identity_sha256)return fail();};
-  await inspect();if(terminalController()!==terminals)return fail();
-  const value=await operation(active,scope);await inspect();
-  if(terminalController()!==terminals)return fail();check(admission,active,true);return value;
+  const assertCurrent=async()=>{await inspect();if(terminalController()!==terminals)return fail();check(admission,active,true);};
+  await assertCurrent();const value=await operation(active,scope,assertCurrent);await assertCurrent();return value;
  };
  const options=(admission,signal,recover)=>confirmed(admission,signal,async(active,scope)=>{
   const method=recover?'recover':'options';
@@ -118,6 +117,33 @@ export function createStandaloneTerminalHost({bindings,allowedPresets,readIdenti
    await createOrResumeSession({controller,request:{sessionId:admission.session_id,cwd:scope.row.cwd,agentPreset:scope.row.agent_preset},agents,sessions,sessionNotFoundError,signal:active,
     beforeAdmission:async()=>{check(admission,active);if(await inspection(admission,active))throw Error('standalone_terminal_session_already_present');check(admission,active);}});
    check(admission,active);return observe(admission,active);
+  },
+  terminalCommand(admission,input,signal){
+   const command=validateTerminalCommand(input);
+   if(command.action==='create'&&command.cols<2)throw Error('terminal_command_invalid');
+   return confirmed(admission,signal,async(active,_scope,assertCurrent)=>{
+    if(typeof claimCommand!=='function'||typeof terminalControl?.command!=='function'||typeof terminalControl.receipt!=='function')throw Error('terminal_control_unavailable');
+    const packet={owner_id:admission.owner_id,admission_id:admission.request_id,request_id:command.request_id,
+     admission_state_sha256:admission.state_sha256,command_sha256:digest(command)};
+    const claim=await claimCommand(packet,active);
+    if(!plain(claim)||Object.keys(claim).sort().join(',')!=='admission_id,admission_state_sha256,attempt_allowed,command_sha256,execution_authorized,owner_id,protocol,request_id'
+     ||claim.protocol!==1||claim.execution_authorized!==false||typeof claim.attempt_allowed!=='boolean'
+     ||Object.keys(packet).some(key=>claim[key]!==packet[key]))return fail();
+    await assertCurrent();
+    if(!claim.attempt_allowed){
+     const receipt=validateTerminalReceipt(terminalControl.receipt(admission.owner_id,admission.session_id,command,active),command,admission.session_id);
+     if(receipt.state==='completed')return receipt.inventory;
+     throw Error('terminal_outcome_unknown');
+    }
+    return validateTerminalInventory(await terminalControl.command(admission.owner_id,admission.session_id,command,active),admission.session_id);
+   });
+  },
+  terminalReceipt(admission,input,signal){
+   const command=validateTerminalCommand(input);
+   return confirmed(admission,signal,async(active)=>{
+    if(typeof terminalControl?.receipt!=='function')throw Error('terminal_control_unavailable');
+    return validateTerminalReceipt(terminalControl.receipt(admission.owner_id,admission.session_id,command,active),command,admission.session_id);
+   });
   },
   terminalOptions(admission,signal){return options(admission,signal,false);},
   recoverTerminal(admission,signal){return options(admission,signal,true);},
