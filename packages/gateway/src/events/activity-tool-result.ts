@@ -23,7 +23,7 @@ const MAX_RESULT_TEXT_CHARS=6*1048576;
 type IsolatedFileSource=Extract<TaskFileSource,{source:'isolated'}>;
 type IsolatedMutationSource=Omit<IsolatedFileSource,'source'|'native'|'sha256'>&{sha256:string|null};
 type WorkspaceFileReader=Pick<WorkbenchService,'readBinaryFile'>;
-type TextSource=Pick<ActivityToolResultPage,'source'|'text'|'result_sha256'|'has_other_content'|'operation'|'source_truncated'|'file_diff_state'|'file_links'>;
+type TextSource=Pick<ActivityToolResultPage,'source'|'representation'|'text'|'result_sha256'|'has_other_content'|'operation'|'source_truncated'|'file_diff_state'|'file_links'>;
 const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
 function object(value:unknown):Record<string,unknown>|undefined{
  return value!==null&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:undefined;
@@ -32,7 +32,7 @@ function parsedObject(text:string){
  try{return object(JSON.parse(text));}catch{throw Error('activity_tool_result_source_invalid');}
 }
 
-function readMcpText(db:DatabaseSync,owner:string,runId:string,name:string,callId:string):TextSource{
+function readMcpText(db:DatabaseSync,owner:string,runId:string,name:string,callId:string,representation?:'json'):TextSource{
  if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wb_mcp_operations'").get())throw Error('activity_tool_result_not_found');
  // Match the shared public ID normalization, and reject colliding original calls.
  const rows=db.prepare(`SELECT o.state,o.result_hash,
@@ -56,7 +56,7 @@ function readMcpText(db:DatabaseSync,owner:string,runId:string,name:string,callI
   if(value?.type==='text'&&typeof value.text==='string')parts.push(value.text);
   else otherContent=true;
  }
- return {source:'mcp',text:parts.join('\n'),result_sha256:source.result_hash,has_other_content:otherContent};
+ return {source:'mcp',...(representation?{representation}:{}),text:representation==='json'?source.response_json:parts.join('\n'),result_sha256:source.result_hash,has_other_content:otherContent};
 }
 
 /** The immutable journal supplies an actual preimage only for a prior retained write. */
@@ -273,10 +273,11 @@ function activityCall(activity:Record<string,unknown>){
   ||typeof name!=='string'||(!['jot_workspace','glob','grep'].includes(name)&&!/^jot_mcp_[a-z0-9_]{1,50}$/.test(name)))throw Error('activity_tool_result_not_found');
  return {name,runId,callId};
 }
-function activityText(db:DatabaseSync,owner:string,activity:Record<string,unknown>,reader?:WorkspaceFileReader){
+function activityText(db:DatabaseSync,owner:string,activity:Record<string,unknown>,reader?:WorkspaceFileReader,representation?:'json'){
  const {name,runId,callId}=activityCall(activity);
+ if(representation!==undefined&&!/^jot_mcp_[a-z0-9_]{1,50}$/.test(name))throw Error('invalid_activity_tool_result_query');
  if(name==='glob'||name==='grep')return {name,...nativeSearchText(activity,name,runId,callId)};
- return {name,...(name==='jot_workspace'?readWorkspaceText(db,owner,runId,callId,reader):readMcpText(db,owner,runId,name,callId))};
+ return {name,...(name==='jot_workspace'?readWorkspaceText(db,owner,runId,callId,reader):readMcpText(db,owner,runId,name,callId,representation))};
 }
 
 function nativeSearchText(activity:Record<string,unknown>,name:'glob'|'grep',runId:string,callId:string):TextSource {
@@ -327,14 +328,15 @@ export function readActivityToolResult(db:DatabaseSync,owner:string,conversation
  if(!db.isTransaction)throw Error('activity_tool_result_read_transaction_required');
  const runId=query.run_id,offsetValue=query.offset_chars??'0',expected=query.result_sha256,expectedText=query.text_sha256;
  if(!ID.test(activityId)||typeof runId!=='string'||!ID.test(runId)
-  ||Object.keys(query).some(key=>!['run_id','offset_chars','result_sha256','text_sha256'].includes(key))
+  ||Object.keys(query).some(key=>!['run_id','offset_chars','result_sha256','text_sha256','representation'].includes(key))
+  ||query.representation!==undefined&&query.representation!=='json'
   ||typeof offsetValue!=='string'||!/^(0|[1-9]\d{0,6})$/.test(offsetValue)
   ||expected!==undefined&&(typeof expected!=='string'||!SHA.test(expected))
   ||expectedText!==undefined&&(typeof expectedText!=='string'||!SHA.test(expectedText)))throw Error('invalid_activity_tool_result_query');
  const offset=Number(offsetValue);
  if(offset>MAX_RESULT_TEXT_CHARS||offset>0&&expected===undefined)throw Error('invalid_activity_tool_result_query');
  const activity=originalActivity(db,owner,conversationId,activityId,runId);
- const {name,...source}=activityText(db,owner,activity,reader);
+ const {name,...source}=activityText(db,owner,activity,reader,query.representation as 'json'|undefined);
  if(expected!==undefined&&expected!==source.result_sha256)throw Error('activity_tool_result_source_changed');
  const {text,file_links,...metadata}=source,textSha=hash(source.text);
  if(expectedText!==undefined&&expectedText!==textSha)throw Error('activity_tool_result_source_changed');

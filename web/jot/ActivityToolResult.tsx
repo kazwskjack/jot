@@ -9,23 +9,24 @@ type Target={nativeSource?:boolean;asOfSeq?:string;runId:string;activityId:strin
 const sha=/^[a-f0-9]{64}$/;
 
 export default function ActivityToolResult({conversationId,target}:{conversationId:string;target:Target}){
- const owner=taskDraftScope(),identity=JSON.stringify([owner,conversationId,target]);
+ const owner=taskDraftScope(),sourceIdentity=JSON.stringify([owner,conversationId,target]);
+ const [jsonSource,setJsonSource]=useState<string>(),json=jsonSource===sourceIdentity,identity=JSON.stringify([sourceIdentity,json?'json':'text']);
  const region=useRef<HTMLDivElement>(null);
  const [cursor,setCursor]=useState<{identity:string;offset:number;previous:number[];sha?:string;textSha?:string}>({identity,offset:target.offset??0,previous:[],sha:target.resultSha,textSha:target.textSha});
  const [state,setState]=useState<{identity:string;offset:number;page?:ActivityToolResultPage;error?:string}>();
  const [revision,setRevision]=useState(0);
  const [membersIdentity,setMembersIdentity]=useState<string>(),[openingsIdentity,setOpeningsIdentity]=useState<string>();
  const [selected,setSelected]=useState<{identity:string;resultSha:string;file:ActivityToolResultFile}>();
- const currentCursor:typeof cursor=cursor.identity===identity?cursor:{identity,offset:target.offset??0,previous:[],sha:target.resultSha,textSha:target.textSha};
+ const currentCursor:typeof cursor=cursor.identity===identity?cursor:{identity,offset:json?0:target.offset??0,previous:[],sha:target.resultSha,textSha:json?undefined:target.textSha};
  const {offset,sha:expected,textSha:expectedText}=currentCursor;
  useEffect(()=>{region.current?.focus();region.current?.scrollIntoView({block:'nearest'});},[identity]);
  useEffect(()=>{
   const controller=new AbortController();
   setState({identity,offset});
   const load=async()=>{
-   const query=new URLSearchParams({run_id:target.runId,offset_chars:String(offset),...(target.nativeSource&&target.asOfSeq?{as_of_seq:target.asOfSeq}:{}),...(expected?{result_sha256:expected}:{}),...(expectedText?{text_sha256:expectedText}:{})});
+   const query=new URLSearchParams({run_id:target.runId,offset_chars:String(offset),...(json?{representation:'json'}:{}),...(target.nativeSource&&target.asOfSeq?{as_of_seq:target.asOfSeq}:{}),...(expected?{result_sha256:expected}:{}),...(expectedText?{text_sha256:expectedText}:{})});
    const page=await request<ActivityToolResultPage>(`/conversations/${encodeURIComponent(conversationId)}/activities/${encodeURIComponent(target.activityId)}/tool-result${target.nativeSource?'/source':''}?${query}`,'GET',undefined,undefined,controller.signal);
-   if(taskDraftScope()!==owner||!page||page.conversation_id!==conversationId||page.run_id!==target.runId||page.activity_id!==target.activityId
+   if(taskDraftScope()!==owner||!page||page.representation!==(json?'json':undefined)||json&&(page.source!=='mcp'||page.text_sha256!==page.result_sha256)||page.conversation_id!==conversationId||page.run_id!==target.runId||page.activity_id!==target.activityId
     ||page.tool_name!==target.toolName||page.execution_authorized!==false||page.as_of_seq!==(target.nativeSource?target.asOfSeq:undefined)
     ||(target.toolName==='jot_workspace'
      ?page.source!=='workspace'||!['files.read','web.read','files.write','files.delete','files.list'].includes(page.operation??'')||typeof page.source_truncated!=='boolean'
@@ -50,13 +51,13 @@ export default function ActivityToolResult({conversationId,target}:{conversation
      ||!Number.isSafeInteger(file.offset_chars)||file.offset_chars<0||!Number.isSafeInteger(file.end_offset_chars)||file.end_offset_chars<=file.offset_chars||file.end_offset_chars>page.total_chars
      ||file.end_offset_chars<=offset||file.offset_chars>=offset+page.text.length||index>0&&file.offset_chars<files[index-1]!.end_offset_chars))throw Error('原文件列表来源尚未确认');
    }else if(page.file_links!==undefined)throw Error('原文件列表来源尚未确认');
-   if(target.match&&offset===(target.offset??0)
+   if(!json&&target.match&&offset===(target.offset??0)
     &&(target.match.offset<offset||page.text.slice(target.match.offset-offset,target.match.offset-offset+target.match.text.length)!==target.match.text))throw Error('原结果命中位置尚未确认');
    if(!controller.signal.aborted)setState({identity,offset,page});
   };
   void load().catch(error=>{
    if(controller.signal.aborted)return;
-   const message=error instanceof ApiError&&error.status===404?(target.nativeSource?'此步骤暂无可确认的大结果来源。':'此步骤暂无已保存且可确认的结果正文。')
+   const message=json&&error instanceof ApiError&&error.status===400?'当前服务尚未确认原始MCP结果JSON视图，可返回文本视图。':error instanceof ApiError&&error.status===404?(target.nativeSource?'此步骤暂无可确认的大结果来源。':'此步骤暂无已保存且可确认的结果正文。')
     :error instanceof ApiError&&error.status===409?'正文来源已变化，请关闭后重新打开。'
     :error instanceof Error?error.message:'工具结果读取失败';
    setState({identity,offset,error:message});
@@ -64,10 +65,15 @@ export default function ActivityToolResult({conversationId,target}:{conversation
   return()=>controller.abort();
  },[identity,offset,expected,expectedText,revision]);
  const current=state?.identity===identity&&state.offset===offset?state:undefined,page=current?.page;
- const match=page&&target.match&&target.match.offset>=offset&&target.match.offset+target.match.text.length<=offset+page.text.length
+ const match=!json&&page&&target.match&&target.match.offset>=offset&&target.match.offset+target.match.text.length<=offset+page.text.length
   &&page.text.slice(target.match.offset-offset,target.match.offset-offset+target.match.text.length)===target.match.text?target.match:undefined;
  return <div ref={region} tabIndex={-1} className="jot-activity-content" aria-label={target.nativeSource?"原生大结果来源":"工具结果正文"}>
   <h4>{target.nativeSource?"原生大结果来源":"工具结果正文"}</h4>
+  {!target.nativeSource&&(json||page?.source==='mcp')&&<button type="button" data-chat-search-ignore aria-pressed={json} onClick={()=>{
+   const nextJson=!json;setJsonSource(nextJson?sourceIdentity:undefined);
+   setCursor({identity:JSON.stringify([sourceIdentity,nextJson?'json':'text']),offset:nextJson?0:target.offset??0,previous:[],sha:page?.result_sha256??expected,...(!nextJson&&target.textSha?{textSha:target.textSha}:{})});
+  }}>{json?'返回工具文本视图':'查看原始结果JSON'}</button>}
+  {json&&<p>原始JSON可能包含非文本结果的编码数据，按同一原工具结果保存的内容分页显示。</p>}
   {(target.toolName==='glob'||target.toolName==='grep')&&<>
    <button type="button" data-chat-search-ignore aria-expanded={membersIdentity===identity} onClick={()=>{setOpeningsIdentity(undefined);setMembersIdentity(membersIdentity===identity?undefined:identity);}}>{membersIdentity===identity?'关闭文件成员':'查看文件成员'}</button>
    <button type="button" data-chat-search-ignore aria-expanded={openingsIdentity===identity} onClick={()=>{setMembersIdentity(undefined);setOpeningsIdentity(openingsIdentity===identity?undefined:identity);}}>{openingsIdentity===identity?'关闭留存版本':'查看留存打开版本'}</button>
