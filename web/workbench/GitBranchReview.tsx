@@ -3,11 +3,14 @@ import type {GitBranchReviewIntent,GitIndexStatus} from './types';
 import {pathId,workbenchApi} from './client';
 import {useGitMutationReceipt} from './useGitMutationReceipt';
 import GitIndexOperation from './GitIndexOperation';
+import {useApplicationLanguage} from '../jot/application-language';
+import {gitUiMessage} from './git-ui-messages';
 
 type Command={path:string;body:Record<string,unknown>};
 export default function GitBranchReview({project,snapshotId,onClose,onBusy,allowExecution=false,initialReview,onChanged}:{
  project:string;snapshotId:string;onClose:()=>void;onBusy:(busy:boolean)=>void;allowExecution?:boolean;initialReview?:GitBranchReviewIntent;onChanged?:(status:GitIndexStatus)=>void;
 }){
+ const language=useApplicationLanguage(),message=(value:string)=>gitUiMessage(value,language);
  const mutation=useGitMutationReceipt(project),[name,setName]=useState(initialReview?.branch??''),[review,setReview]=useState<GitBranchReviewIntent|null>(initialReview??null);
  const [busy,setBusy]=useState(false),[executionBusy,setExecutionBusy]=useState(false),[verified,setVerified]=useState(!!initialReview),[stale,setStale]=useState(false),[error,setError]=useState('');
  const alive=useRef(true),inflight=useRef(false),active=useRef<AbortController|null>(null),command=useRef<Command|null>(null),input=useRef<HTMLInputElement>(null),decision=useRef<HTMLButtonElement>(null);
@@ -53,27 +56,27 @@ export default function GitBranchReview({project,snapshotId,onClose,onBusy,allow
   }finally{end()}
  };
  const refresh=async()=>{if(!review)return;const control=begin();if(!control)return;try{await read(review.intent_id,control.signal)}catch{if(alive.current&&!control.signal.aborted){setVerified(false);setError('当前审核状态尚未确认，请重试读取。')}}finally{end()}};
- return <section className="wb-form wb-git-review" aria-label="创建 Git 分支审核">
-  <div className="wb-toolbar"><h3>创建并切换分支</h3><button type="button" disabled={locked} onClick={onClose}>关闭分支审核</button></div>
-  {!review?<><label>新分支名称<input ref={input} aria-label="新分支名称" maxLength={1013} value={name} disabled={locked} onChange={event=>setName(event.target.value)}/></label><button type="button" disabled={locked||!branch} onClick={()=>void send('prepare')}>生成分支审核</button></>:<>
-   <dl aria-label="固定分支元数据">
-    <dt>新分支引用</dt><dd><code>{review.target_ref}</code></dd>
-    <dt>创建起点</dt><dd><code>{review.target_oid??'尚无提交'}</code> · {review.object_format}</dd>
-    <dt>原 HEAD</dt><dd><code>{review.head.branch??'分离 HEAD'}</code></dd>
-    {review.branch_metadata&&<><dt>日志提交者</dt><dd>{review.branch_metadata.committer.name} &lt;{review.branch_metadata.committer.email}&gt; · {review.branch_metadata.committer.timestamp}</dd>
-     <dt>日志追加</dt><dd>HEAD {review.branch_metadata.logs.head?'追加':'跳过'}，分支 {review.branch_metadata.logs.branch?'追加':'跳过'}</dd>
-     <dt>自动 tracking 配置</dt><dd>{review.branch_metadata.configuration_changed?'写入已审核的新分支配置':'保留当前配置'}<code>{review.branch_metadata.configuration_sha256}</code></dd></>}
-    <dt>审核 SHA-256</dt><dd><code>{review.review_sha256}</code></dd>
+ return <section lang={language} className="wb-form wb-git-review" aria-label={message("创建 Git 分支审核")}>
+  <div className="wb-toolbar"><h3>{message("创建并切换分支")}</h3><button type="button" disabled={locked} onClick={onClose}>{message("关闭分支审核")}</button></div>
+  {!review?<><label>{message("新分支名称")}<input ref={input} aria-label={message("新分支名称")} maxLength={1013} value={name} disabled={locked} onChange={event=>setName(event.target.value)}/></label><button type="button" disabled={locked||!branch} onClick={()=>void send('prepare')}>{message("生成分支审核")}</button></>:<>
+   <dl aria-label={message("固定分支元数据")}>
+    <dt>{message("新分支引用")}</dt><dd><code>{review.target_ref}</code></dd>
+    <dt>{message("创建起点")}</dt><dd><code>{review.target_oid??message('尚无提交')}</code> · {review.object_format}</dd>
+    <dt>{message("原 HEAD")}</dt><dd><code>{review.head.branch??message('分离 HEAD')}</code></dd>
+    {review.branch_metadata&&<><dt>{message("日志提交者")}</dt><dd>{review.branch_metadata.committer.name} &lt;{review.branch_metadata.committer.email}&gt; · {review.branch_metadata.committer.timestamp}</dd>
+     <dt>{message("日志追加")}</dt><dd>HEAD {review.branch_metadata.logs.head?message('追加'):message('跳过')}{message("，分支 ")}{review.branch_metadata.logs.branch?message('追加'):message('跳过')}</dd>
+     <dt>{message("自动 tracking 配置")}</dt><dd>{review.branch_metadata.configuration_changed?message('写入已审核的新分支配置'):message('保留当前配置')}<code>{review.branch_metadata.configuration_sha256}</code></dd></>}
+    <dt>{message("审核 SHA-256")}</dt><dd><code>{review.review_sha256}</code></dd>
    </dl>
-   {!completeMetadata&&<p role="alert">此历史审核缺少完整日志或配置信息，请取消并重新生成审核。</p>}
-   <p role="status">{!verified?'当前审核状态尚未确认。':review.state==='prepared'?'等待批准。':review.state==='approved'?'审核已批准。':'审核已取消。'}</p>
-   <div className="wb-actions">{review.state==='prepared'&&<button ref={completeMetadata?decision:undefined} type="button" disabled={locked||!verified||stale||!completeMetadata} onClick={()=>void send('approve')}>批准分支审核</button>}
-    {review.state!=='cancelled'&&<button ref={review.state==='prepared'&&completeMetadata?undefined:decision} type="button" disabled={locked||!verified} onClick={()=>void send('cancel')}>取消分支审核</button>}
-    <button ref={review.state==='cancelled'?decision:undefined} type="button" disabled={locked} onClick={()=>void refresh()}>刷新分支审核状态</button></div>
+   {!completeMetadata&&<p role="alert">{message("此历史审核缺少完整日志或配置信息，请取消并重新生成审核。")}</p>}
+   <p role="status">{!verified?message('当前审核状态尚未确认。'):review.state==='prepared'?message('等待批准。'):review.state==='approved'?message('审核已批准。'):message('审核已取消。')}</p>
+   <div className="wb-actions">{review.state==='prepared'&&<button ref={completeMetadata?decision:undefined} type="button" disabled={locked||!verified||stale||!completeMetadata} onClick={()=>void send('approve')}>{message("批准分支审核")}</button>}
+    {review.state!=='cancelled'&&<button ref={review.state==='prepared'&&completeMetadata?undefined:decision} type="button" disabled={locked||!verified} onClick={()=>void send('cancel')}>{message("取消分支审核")}</button>}
+    <button ref={review.state==='cancelled'?decision:undefined} type="button" disabled={locked} onClick={()=>void refresh()}>{message("刷新分支审核状态")}</button></div>
   </>}
   {review&&verified&&completeMetadata&&<GitIndexOperation key={review.intent_id} project={project} review={review} allowDispatch={false} allowBranchDispatch={allowExecution&&!stale} onBranchReviewChange={setReview} onBusy={setExecutionBusy} onChanged={onChanged}/>}
-  {!allowExecution&&<p role="status">创建分支派发需要匹配的原生连接、操作者身份和分支存储版本。</p>}
-  {error&&<p role="alert" className="wb-error">{error}</p>}
-  {mutation.pending&&<button type="button" disabled={busy} onClick={()=>void send('retry')}>重试原分支审核请求</button>}
+  {!allowExecution&&<p role="status">{message("创建分支派发需要匹配的原生连接、操作者身份和分支存储版本。")}</p>}
+  {error&&<p role="alert" className="wb-error">{message(error)}</p>}
+  {mutation.pending&&<button type="button" disabled={busy} onClick={()=>void send('retry')}>{message("重试原分支审核请求")}</button>}
  </section>;
 }
